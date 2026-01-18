@@ -3,11 +3,13 @@ import * as fsTools from './fs.js';
 import * as gitTools from './git.js';
 import * as githubTools from './github.js';
 import * as logsTools from './logs.js';
+import { config } from '../config.js';
 
 export interface ToolExecutionResult {
   success: boolean;
   result?: unknown;
   error?: string;
+  durationMs?: number;
 }
 
 type ToolArgs = Record<string, unknown>;
@@ -24,72 +26,66 @@ export async function executeTool(
     };
   }
 
+  const start = Date.now();
+
   try {
-    let result: unknown;
+    const execution = (async () => {
+      switch (toolName) {
+        // File System Tools
+        case 'fs.listFiles':
+          return fsTools.listFiles(args.path as string);
 
-    switch (toolName) {
-      // File System Tools
-      case 'fs.listFiles':
-        result = await fsTools.listFiles(args.path as string);
-        break;
+        case 'fs.readFile':
+          return fsTools.readFile(args.path as string);
 
-      case 'fs.readFile':
-        result = await fsTools.readFile(args.path as string);
-        break;
+        case 'fs.writeFile':
+          return fsTools.writeFile(
+            args.path as string,
+            args.content as string
+          );
 
-      case 'fs.writeFile':
-        result = await fsTools.writeFile(
-          args.path as string,
-          args.content as string
-        );
-        break;
+        // Git Tools
+        case 'git.status':
+          return gitTools.gitStatus();
 
-      // Git Tools
-      case 'git.status':
-        result = await gitTools.gitStatus();
-        break;
+        case 'git.diff':
+          return gitTools.gitDiff(args.staged as boolean | undefined);
 
-      case 'git.diff':
-        result = await gitTools.gitDiff(args.staged as boolean | undefined);
-        break;
+        case 'git.commit':
+          return gitTools.gitCommit(args.message as string);
 
-      case 'git.commit':
-        result = await gitTools.gitCommit(args.message as string);
-        break;
+        // GitHub Tools
+        case 'github.triggerWorkflow':
+          return githubTools.triggerWorkflow(
+            args.workflow as string,
+            args.ref as string,
+            args.inputs as Record<string, string> | undefined
+          );
 
-      // GitHub Tools
-      case 'github.triggerWorkflow':
-        result = await githubTools.triggerWorkflow(
-          args.workflow as string,
-          args.ref as string,
-          args.inputs as Record<string, string> | undefined
-        );
-        break;
+        case 'github.getWorkflowRunStatus':
+          return githubTools.getWorkflowRunStatus(args.runId as number);
 
-      case 'github.getWorkflowRunStatus':
-        result = await githubTools.getWorkflowRunStatus(args.runId as number);
-        break;
+        // Logs Tools
+        case 'logs.getStagingLogs':
+          return logsTools.getStagingLogs(args.lines as number | undefined);
 
-      // Logs Tools
-      case 'logs.getStagingLogs':
-        result = await logsTools.getStagingLogs(args.lines as number | undefined);
-        break;
+        default:
+          throw new Error(`Unknown tool: ${toolName}`);
+      }
+    })();
 
-      default:
-        return {
-          success: false,
-          error: `Unknown tool: ${toolName}`,
-        };
-    }
+    const result = await withTimeout(execution, config.toolTimeoutMs, toolName);
 
     return {
       success: true,
       result,
+      durationMs: Date.now() - start,
     };
   } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
+      durationMs: Date.now() - start,
     };
   }
 }
@@ -117,4 +113,25 @@ export async function executeTools(
   }
 
   return results;
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  toolName: string
+): Promise<T> {
+  if (!timeoutMs || timeoutMs <= 0) {
+    return promise;
+  }
+
+  let timeoutId: NodeJS.Timeout;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`Tool "${toolName}" timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timeoutId);
+  });
 }

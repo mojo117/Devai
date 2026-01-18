@@ -53,3 +53,10 @@ Lieferumfang:
   6) UI zeigt Status und Ergebnis
  
 Starte jetzt: analysiere Repo-Struktur, schlage einen konkreten Implementierungsplan (kurz) vor, und beginne dann mit dem Coding. Erstelle/ändere Dateien direkt im Repo.
+Plan zur Erweiterung (Web-Assistant wie Claude Code/Codex CLI):
+1) Architekturaufnahme: aktuelle Chat/Tool-Registry/API-Routen erfassen; Erweiterungspunkte fuer Skills/Plugins und Auth/Session definieren.
+2) Skills-System definieren: Manifest/Schema, Discovery/Loading, Permissions-Modell, Versionierung; Storage- und Runtime-Execution-Modell festlegen.
+3) Tool-Execution ausbauen: Sandboxing-Strategie, FS/Git Policies, Streaming-Ausgabe, robuste Fehlerbehandlung.
+4) UX erweitern: Terminal-like Output, Tool-Call Preview + Approvals, Multi-Step-Plans, Kontextkontrollen, Project File Browser.
+5) Persistenz: Chat-History, Skill-Konfig, User-Settings, Audit-Logs; DB und Migrationen definieren.
+6) Hosting-Hardening: Auth, Rate-Limits, Secrets-Handling, Deployment-Pipeline, Observability, Basis-Tests.

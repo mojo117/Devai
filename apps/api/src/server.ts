@@ -5,6 +5,12 @@ import { healthRoutes } from './routes/health.js';
 import { chatRoutes } from './routes/chat.js';
 import { actionRoutes } from './routes/actions.js';
 import { projectRoutes } from './routes/project.js';
+import { skillsRoutes } from './routes/skills.js';
+import { sessionsRoutes } from './routes/sessions.js';
+import { settingsRoutes } from './routes/settings.js';
+import { initDb } from './db/index.js';
+
+await initDb();
 
 const app = Fastify({
   logger: {
@@ -23,6 +29,9 @@ await app.register(healthRoutes, { prefix: '/api' });
 await app.register(chatRoutes, { prefix: '/api' });
 await app.register(actionRoutes, { prefix: '/api' });
 await app.register(projectRoutes, { prefix: '/api' });
+await app.register(skillsRoutes, { prefix: '/api' });
+await app.register(sessionsRoutes, { prefix: '/api' });
+await app.register(settingsRoutes, { prefix: '/api' });
 
 // Start server
 const start = async () => {

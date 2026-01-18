@@ -4,6 +4,10 @@ import { config } from '../config.js';
 
 // Validate that the path is within the project root
 function validatePath(path: string): string {
+  const segments = path.split(/[\\/]/).filter(Boolean);
+  if (segments.includes('.git')) {
+    throw new Error('Access denied: .git paths are not allowed');
+  }
   const allowedRoots = [
     ...(config.projectRoot ? [config.projectRoot] : []),
     ...config.allowedRoots,
@@ -27,6 +31,13 @@ function validatePath(path: string): string {
   throw new Error('Access denied: Path is outside allowed roots');
 }
 
+function isAllowedExtension(path: string): boolean {
+  const fileName = path.split(/[\\/]/).pop() || '';
+  if (!fileName.includes('.')) return false;
+  const lowered = fileName.toLowerCase();
+  return config.toolAllowedExtensions.some((ext) => lowered.endsWith(ext));
+}
+
 export interface ListFilesResult {
   path: string;
   files: Array<{
@@ -34,6 +45,7 @@ export interface ListFilesResult {
     type: 'file' | 'directory';
     size?: number;
   }>;
+  truncated?: boolean;
 }
 
 export async function listFiles(path: string): Promise<ListFilesResult> {
@@ -41,8 +53,9 @@ export async function listFiles(path: string): Promise<ListFilesResult> {
 
   const entries = await readdir(absolutePath, { withFileTypes: true });
 
+  const entriesLimited = entries.slice(0, config.toolMaxListEntries);
   const files = await Promise.all(
-    entries.map(async (entry) => {
+    entriesLimited.map(async (entry) => {
       const entryPath = join(absolutePath, entry.name);
       let size: number | undefined;
 
@@ -72,6 +85,7 @@ export async function listFiles(path: string): Promise<ListFilesResult> {
       }
       return a.name.localeCompare(b.name);
     }),
+    truncated: entries.length > entriesLimited.length,
   };
 }
 
@@ -83,16 +97,17 @@ export interface ReadFileResult {
 
 export async function readFile(path: string): Promise<ReadFileResult> {
   const absolutePath = validatePath(path);
+  if (!isAllowedExtension(path)) {
+    throw new Error('Read denied: file extension is not allowed');
+  }
 
   const stats = await stat(absolutePath);
   if (!stats.isFile()) {
     throw new Error(`Path is not a file: ${path}`);
   }
 
-  // Limit file size to 1MB to prevent memory issues
-  const MAX_FILE_SIZE = 1024 * 1024;
-  if (stats.size > MAX_FILE_SIZE) {
-    throw new Error(`File too large: ${stats.size} bytes (max: ${MAX_FILE_SIZE} bytes)`);
+  if (stats.size > config.toolMaxReadBytes) {
+    throw new Error(`File too large: ${stats.size} bytes (max: ${config.toolMaxReadBytes} bytes)`);
   }
 
   const content = await fsReadFile(absolutePath, 'utf-8');
@@ -111,11 +126,21 @@ export interface WriteFileResult {
 
 export async function writeFile(path: string, content: string): Promise<WriteFileResult> {
   const absolutePath = validatePath(path);
+  if (!isAllowedExtension(path)) {
+    throw new Error('Write denied: file extension is not allowed');
+  }
+  const bytes = Buffer.byteLength(content, 'utf-8');
+  if (bytes > config.toolMaxWriteBytes) {
+    throw new Error(`Write too large: ${bytes} bytes (max: ${config.toolMaxWriteBytes} bytes)`);
+  }
+  if (content.includes('\u0000')) {
+    throw new Error('Write denied: content appears to be binary');
+  }
 
   await fsWriteFile(absolutePath, content, 'utf-8');
 
   return {
     path,
-    bytesWritten: Buffer.byteLength(content, 'utf-8'),
+    bytesWritten: bytes,
   };
 }

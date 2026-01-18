@@ -9,6 +9,25 @@ export interface ChatMessage {
   timestamp: string;
 }
 
+export interface SessionSummary {
+  id: string;
+  title: string | null;
+  createdAt: string;
+}
+
+export interface SessionsResponse {
+  sessions: SessionSummary[];
+}
+
+export interface SessionMessagesResponse {
+  messages: ChatMessage[];
+}
+
+export interface SettingResponse {
+  key: string;
+  value: unknown;
+}
+
 export type ActionStatus = 'pending' | 'approved' | 'executing' | 'done' | 'failed';
 
 export interface Action {
@@ -35,4 +54,44 @@ export interface HealthResponse {
   };
   projectRoot: string | null;
   allowedRoots: string[];
+}
+
+export interface SkillSummary {
+  id: string;
+  name: string;
+  description: string;
+  version?: string;
+  tags?: string[];
+}
+
+export interface SkillsResponse {
+  skills: SkillSummary[];
+  loadedAt: string | null;
+  errors: string[];
+}
+
+export interface ProjectContext {
+  framework: 'vite' | 'cra' | 'next' | 'node' | 'unknown';
+  language: 'typescript' | 'javascript';
+  hasTests: boolean;
+  testCommand?: string;
+  buildCommand?: string;
+  packageManager: 'npm' | 'yarn' | 'pnpm';
+  summary: string;
+}
+
+export interface ProjectResponse {
+  projectRoot: string;
+  context: ProjectContext;
+}
+
+export interface ProjectFileEntry {
+  name: string;
+  type: 'file' | 'directory';
+  size?: number;
+}
+
+export interface ProjectFilesResponse {
+  path: string;
+  files: ProjectFileEntry[];
 }

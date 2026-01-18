@@ -3,21 +3,103 @@ import { ChatUI } from './components/ChatUI';
 import { ProjectInfo } from './components/ProjectInfo';
 import { ActionCard } from './components/ActionCard';
 import { ToolsPanel } from './components/ToolsPanel';
-import { fetchHealth, fetchActions, approveAction } from './api';
-import type { LLMProvider, Action, HealthResponse } from './types';
+import { HistoryPanel } from './components/HistoryPanel';
+import {
+  fetchHealth,
+  fetchActions,
+  approveAction,
+  fetchSkills,
+  reloadSkills,
+  fetchProject,
+  refreshProject,
+  fetchSetting,
+  saveSetting,
+} from './api';
+import type {
+  LLMProvider,
+  Action,
+  HealthResponse,
+  SkillSummary,
+  ProjectContext,
+} from './types';
 
 function App() {
   // Default to OpenAI (GPT-4o)
   const provider: LLMProvider = 'openai';
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [actions, setActions] = useState<Action[]>([]);
+  const [skills, setSkills] = useState<SkillSummary[]>([]);
+  const [skillsLoadedAt, setSkillsLoadedAt] = useState<string | null>(null);
+  const [skillsErrors, setSkillsErrors] = useState<string[]>([]);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
+  const [projectContext, setProjectContext] = useState<ProjectContext | null>(null);
+  const [projectContextLoadedAt, setProjectContextLoadedAt] = useState<string | null>(null);
+  const [projectLoading, setProjectLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [skillsLoading, setSkillsLoading] = useState(false);
 
   useEffect(() => {
     fetchHealth()
       .then(setHealth)
       .catch((err) => setError(err.message));
   }, []);
+
+  useEffect(() => {
+    if (!health?.projectRoot) return;
+    setProjectLoading(true);
+    fetchProject()
+      .then((data) => {
+        setProjectContext(data.context);
+        setProjectContextLoadedAt(new Date().toISOString());
+      })
+      .catch((err) => setError(err.message))
+      .finally(() => setProjectLoading(false));
+  }, [health?.projectRoot]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const load = async () => {
+      setSkillsLoading(true);
+      try {
+        const [skillsData, storedSetting] = await Promise.all([
+          fetchSkills(),
+          fetchSetting('selectedSkills'),
+        ]);
+
+        if (!isMounted) return;
+        setSkills(skillsData.skills);
+        setSkillsLoadedAt(skillsData.loadedAt);
+        setSkillsErrors(skillsData.errors || []);
+
+        const storedIds = Array.isArray(storedSetting.value)
+          ? storedSetting.value.filter((id) => typeof id === 'string')
+          : [];
+        const validIds = new Set(skillsData.skills.map((skill) => skill.id));
+        const filtered = storedIds.filter((id) => validIds.has(id));
+        setSelectedSkillIds(filtered);
+      } catch (err) {
+        if (!isMounted) return;
+        setError(err instanceof Error ? err.message : 'Failed to load skills');
+      } finally {
+        if (isMounted) {
+          setSkillsLoading(false);
+        }
+      }
+    };
+
+    load();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    saveSetting('selectedSkills', selectedSkillIds).catch(() => {
+      // Non-blocking persistence; ignore errors here.
+    });
+  }, [selectedSkillIds]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -39,12 +121,68 @@ function App() {
     }
   };
 
+  const handleToggleSkill = (skillId: string) => {
+    setSelectedSkillIds((prev) => (
+      prev.includes(skillId)
+        ? prev.filter((id) => id !== skillId)
+        : [...prev, skillId]
+    ));
+  };
+
+  const handleReloadSkills = async () => {
+    setSkillsLoading(true);
+    try {
+      const data = await reloadSkills();
+      setSkills(data.skills);
+      setSkillsLoadedAt(data.loadedAt);
+      setSkillsErrors(data.errors || []);
+      const validIds = new Set(data.skills.map((skill) => skill.id));
+      const filteredIds = selectedSkillIds.filter((id) => validIds.has(id));
+      setSelectedSkillIds(filteredIds);
+      await saveSetting('selectedSkills', filteredIds);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reload skills');
+    } finally {
+      setSkillsLoading(false);
+    }
+  };
+
+  const handleRefreshProject = async () => {
+    setProjectLoading(true);
+    try {
+      const data = await refreshProject();
+      setProjectContext(data.context);
+      setProjectContextLoadedAt(new Date().toISOString());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to refresh project');
+    } finally {
+      setProjectLoading(false);
+    }
+  };
+
   const pendingActions = actions.filter((a) => a.status === 'pending');
 
   return (
     <div className="min-h-screen flex flex-col">
       {/* Tools Panel (collapsible) */}
-      <ToolsPanel allowedRoots={health?.allowedRoots} />
+      <ToolsPanel
+        allowedRoots={health?.allowedRoots}
+        skills={skills}
+        selectedSkillIds={selectedSkillIds}
+        skillsLoadedAt={skillsLoadedAt}
+        skillsErrors={skillsErrors}
+        onToggleSkill={handleToggleSkill}
+        onReloadSkills={handleReloadSkills}
+        skillsLoading={skillsLoading}
+        projectRoot={health?.projectRoot || null}
+        projectContext={projectContext}
+        projectContextLoadedAt={projectContextLoadedAt}
+        onRefreshProject={handleRefreshProject}
+        projectLoading={projectLoading}
+      />
+
+      {/* History Panel (collapsible) */}
+      <HistoryPanel />
 
       {/* Header */}
       <header className="bg-gray-800 border-b border-gray-700 px-6 py-4">
@@ -74,7 +212,11 @@ function App() {
       <div className="flex-1 flex max-w-6xl mx-auto w-full">
         {/* Chat Area */}
         <div className="flex-1 flex flex-col">
-          <ChatUI provider={provider} projectRoot={health?.projectRoot} />
+          <ChatUI
+            provider={provider}
+            projectRoot={health?.projectRoot}
+            skillIds={selectedSkillIds}
+          />
         </div>
 
         {/* Actions Sidebar */}

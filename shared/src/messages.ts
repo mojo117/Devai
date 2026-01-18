@@ -22,9 +22,12 @@ export interface ChatRequest {
   messages: ChatMessage[];
   provider: LLMProvider;
   projectRoot: string;
+  skillIds?: string[];
+  sessionId?: string;
 }
 
 export interface ChatResponse {
   message: ChatMessage;
   pendingActions: Action[];
+  sessionId?: string;
 }

@@ -1,0 +1,15 @@
+{
+  "id": "example",
+  "name": "Example Skill",
+  "description": "Demonstrates the skill manifest format.",
+  "version": "0.1.0",
+  "systemPrompt": "You are an expert reviewer. Provide concise, structured feedback.",
+  "toolAllowList": [
+    "fs.readFile",
+    "git.status"
+  ],
+  "tags": [
+    "review",
+    "demo"
+  ]
+}
