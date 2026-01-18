@@ -29,11 +29,11 @@ export function clearAuthToken(): void {
 function withAuthHeaders(headers: Record<string, string> = {}): Record<string, string> {
   const token = getAuthToken();
   if (!token) return headers;
-  return { ...headers, Authorization: Bearer  };
+  return { ...headers, Authorization: `Bearer ${token}` };
 }
 
 export async function login(username: string, password: string): Promise<{ token: string }> {
-  const res = await fetch(${API_BASE}/auth/login, {
+  const res = await fetch(`${API_BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
@@ -52,7 +52,7 @@ export async function verifyAuth(): Promise<boolean> {
   const token = getAuthToken();
   if (!token) return false;
 
-  const res = await fetch(${API_BASE}/auth/verify, {
+  const res = await fetch(`${API_BASE}/auth/verify`, {
     headers: withAuthHeaders(),
   });
 
@@ -60,7 +60,7 @@ export async function verifyAuth(): Promise<boolean> {
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {
-  const res = await fetch(${API_BASE}/health);
+  const res = await fetch(`${API_BASE}/health`);
   if (!res.ok) throw new Error('Failed to fetch health');
   return res.json();
 }
@@ -78,7 +78,7 @@ export async function sendMessage(
   sessionId?: string,
   onEvent?: (event: ChatStreamEvent) => void
 ): Promise<{ message: ChatMessage; pendingActions: Action[]; sessionId?: string }> {
-  const res = await fetch(${API_BASE}/chat, {
+  const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ messages, provider, projectRoot, skillIds, sessionId }),
@@ -135,7 +135,7 @@ export async function sendMessage(
 }
 
 export async function fetchSkills(): Promise<SkillsResponse> {
-  const res = await fetch(${API_BASE}/skills, {
+  const res = await fetch(`${API_BASE}/skills`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch skills');
@@ -143,7 +143,7 @@ export async function fetchSkills(): Promise<SkillsResponse> {
 }
 
 export async function reloadSkills(): Promise<SkillsResponse> {
-  const res = await fetch(${API_BASE}/skills/reload, {
+  const res = await fetch(`${API_BASE}/skills/reload`, {
     method: 'POST',
     headers: withAuthHeaders(),
   });
@@ -152,7 +152,7 @@ export async function reloadSkills(): Promise<SkillsResponse> {
 }
 
 export async function fetchProject(): Promise<ProjectResponse> {
-  const res = await fetch(${API_BASE}/project, {
+  const res = await fetch(`${API_BASE}/project`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) {
@@ -163,7 +163,7 @@ export async function fetchProject(): Promise<ProjectResponse> {
 }
 
 export async function refreshProject(): Promise<ProjectResponse> {
-  const res = await fetch(${API_BASE}/project/refresh, {
+  const res = await fetch(`${API_BASE}/project/refresh`, {
     method: 'POST',
     headers: withAuthHeaders(),
   });
@@ -176,7 +176,7 @@ export async function refreshProject(): Promise<ProjectResponse> {
 
 export async function listProjectFiles(path: string): Promise<ProjectFilesResponse> {
   const params = new URLSearchParams({ path });
-  const res = await fetch(${API_BASE}/project/files?, {
+  const res = await fetch(`${API_BASE}/project/files?${params.toString()}`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) {
@@ -187,7 +187,7 @@ export async function listProjectFiles(path: string): Promise<ProjectFilesRespon
 }
 
 export async function fetchSessions(): Promise<SessionsResponse> {
-  const res = await fetch(${API_BASE}/sessions, {
+  const res = await fetch(`${API_BASE}/sessions`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch sessions');
@@ -195,7 +195,7 @@ export async function fetchSessions(): Promise<SessionsResponse> {
 }
 
 export async function createSession(title?: string): Promise<{ session: { id: string } }> {
-  const res = await fetch(${API_BASE}/sessions, {
+  const res = await fetch(`${API_BASE}/sessions`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ title }),
@@ -205,7 +205,7 @@ export async function createSession(title?: string): Promise<{ session: { id: st
 }
 
 export async function fetchSessionMessages(sessionId: string): Promise<SessionMessagesResponse> {
-  const res = await fetch(${API_BASE}/sessions//messages, {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}/messages`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch session messages');
@@ -213,7 +213,7 @@ export async function fetchSessionMessages(sessionId: string): Promise<SessionMe
 }
 
 export async function fetchSetting(key: string): Promise<SettingResponse> {
-  const res = await fetch(${API_BASE}/settings/, {
+  const res = await fetch(`${API_BASE}/settings/${encodeURIComponent(key)}`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch setting');
@@ -221,7 +221,7 @@ export async function fetchSetting(key: string): Promise<SettingResponse> {
 }
 
 export async function saveSetting(key: string, value: unknown): Promise<SettingResponse> {
-  const res = await fetch(${API_BASE}/settings, {
+  const res = await fetch(`${API_BASE}/settings`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ key, value }),
@@ -231,7 +231,7 @@ export async function saveSetting(key: string, value: unknown): Promise<SettingR
 }
 
 export async function fetchActions(): Promise<{ actions: Action[] }> {
-  const res = await fetch(${API_BASE}/actions, {
+  const res = await fetch(`${API_BASE}/actions`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch actions');
@@ -239,7 +239,7 @@ export async function fetchActions(): Promise<{ actions: Action[] }> {
 }
 
 export async function approveAction(actionId: string): Promise<{ action: Action; result?: unknown }> {
-  const res = await fetch(${API_BASE}/actions/approve, {
+  const res = await fetch(`${API_BASE}/actions/approve`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ actionId }),
