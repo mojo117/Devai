@@ -58,15 +58,15 @@ await app.register(settingsRoutes, { prefix: '/api' });
 const start = async () => {
   try {
     await app.listen({ port: config.port, host: '0.0.0.0' });
-    console.log(DevAI API running on http://localhost:);
-    console.log(Environment: );
+    console.log(`DevAI API running on http://localhost:${config.port}`);
+    console.log(`Environment: ${config.nodeEnv}`);
 
     // Log configured providers
     const providers = [];
     if (config.anthropicApiKey) providers.push('Anthropic');
     if (config.openaiApiKey) providers.push('OpenAI');
     if (config.geminiApiKey) providers.push('Gemini');
-    console.log(Configured LLM providers: );
+    console.log(`Configured LLM providers: ${providers.length > 0 ? providers.join(', ') : 'None'}`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);
