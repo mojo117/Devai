@@ -234,7 +234,7 @@ export function ChatUI({ provider, projectRoot, skillIds }: ChatUIProps) {
                   {event.type === 'status' && (
                     <p className="text-[11px] text-gray-300 mt-1">{String(event.result)}</p>
                   )}
-                  {event.type === 'tool_call' && event.arguments && (
+                  {event.type === 'tool_call' && event.arguments !== undefined && (
                     <pre className="text-[11px] text-gray-300 mt-2 bg-gray-950 rounded p-2 overflow-x-auto">
                       {formatToolPayload(event.arguments)}
                     </pre>
