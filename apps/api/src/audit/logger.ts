@@ -1,5 +1,6 @@
 import { appendFile, mkdir } from 'fs/promises';
 import { resolve, dirname } from 'path';
+import { saveAuditLog } from '../db/queries.js';
 
 const AUDIT_LOG_PATH = resolve(process.cwd(), '../../var/audit.log');
 
@@ -95,6 +96,7 @@ export async function auditLog(data: Record<string, unknown>): Promise<void> {
 
   try {
     await appendFile(AUDIT_LOG_PATH, line, 'utf-8');
+    saveAuditLog(entry.action, entry);
   } catch (error) {
     // Log to console as fallback
     console.error('[Audit Log Error]', error);

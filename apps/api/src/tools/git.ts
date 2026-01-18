@@ -1,7 +1,7 @@
 import simpleGit, { SimpleGit, StatusResult } from 'simple-git';
 import { config } from '../config.js';
 import { access } from 'fs/promises';
-import { join, resolve, dirname } from 'path';
+import { join, resolve, dirname, relative } from 'path';
 
 async function pathExists(path: string): Promise<boolean> {
   try {
@@ -36,6 +36,24 @@ async function getGit(): Promise<SimpleGit> {
     throw new Error(
       `No git repository found from ${baseDir}. Set PROJECT_ROOT to a git repo.`
     );
+  }
+
+  const allowedRoots = [
+    ...(config.projectRoot ? [config.projectRoot] : []),
+    ...config.allowedRoots,
+  ];
+
+  if (allowedRoots.length > 0) {
+    const gitRootResolved = resolve(gitRoot);
+    const allowed = allowedRoots.some((root) => {
+      const absoluteRoot = resolve(root);
+      const relativePath = relative(absoluteRoot, gitRootResolved);
+      return !relativePath.startsWith('..');
+    });
+
+    if (!allowed) {
+      throw new Error('Access denied: Git repository is outside allowed roots');
+    }
   }
 
   return simpleGit(gitRoot);
@@ -79,10 +97,13 @@ export async function gitDiff(staged: boolean = false): Promise<GitDiffResult> {
   const git = await getGit();
 
   const diffOptions = staged ? ['--staged'] : [];
-  const diff = await git.diff(diffOptions);
+  let diff = await git.diff(diffOptions);
 
   // Parse diff stats
   const diffStat = await git.diffSummary(diffOptions);
+  if (diff.length > config.toolMaxDiffChars) {
+    diff = `${diff.slice(0, config.toolMaxDiffChars)}\n... (diff truncated)`;
+  }
 
   return {
     diff: diff || '(no changes)',

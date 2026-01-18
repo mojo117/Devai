@@ -3,13 +3,16 @@ import { z } from 'zod';
 import { nanoid } from 'nanoid';
 import type { ChatMessage, ChatResponse } from '@devai/shared';
 import { llmRouter } from '../llm/router.js';
-import type { LLMMessage, ToolCall } from '../llm/types.js';
+import type { LLMMessage, ToolCall, ToolDefinition as LLMToolDefinition } from '../llm/types.js';
 import { getToolsForLLM, toolRequiresConfirmation, getToolDefinition } from '../tools/registry.js';
 import { executeTool } from '../tools/executor.js';
 import { createAction, getPendingActions } from '../actions/manager.js';
 import { logToolExecution } from '../audit/logger.js';
 import { config } from '../config.js';
 import { getProjectContext } from '../scanner/projectScanner.js';
+import { getSkillById, getSkillLoadState, refreshSkills } from '../skills/registry.js';
+import type { SkillManifest } from '@devai/shared';
+import { createSession, saveMessage, updateSessionTitleIfEmpty } from '../db/queries.js';
 
 const ChatRequestSchema = z.object({
   messages: z.array(z.object({
@@ -20,6 +23,8 @@ const ChatRequestSchema = z.object({
   })),
   provider: z.enum(['anthropic', 'openai', 'gemini']),
   projectRoot: z.string().optional(),
+  skillIds: z.array(z.string()).optional(),
+  sessionId: z.string().optional(),
 });
 
 // System prompt for the AI assistant
@@ -43,6 +48,7 @@ Focus on solving the user's problem efficiently while being transparent about an
 
 export const chatRoutes: FastifyPluginAsync = async (app) => {
   app.post('/chat', async (request, reply) => {
+    reply.raw.setHeader('Content-Type', 'application/x-ndjson');
     const parseResult = ChatRequestSchema.safeParse(request.body);
 
     if (!parseResult.success) {
@@ -52,7 +58,13 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const { messages, provider, projectRoot: requestedProjectRoot } = parseResult.data;
+    const {
+      messages,
+      provider,
+      projectRoot: requestedProjectRoot,
+      skillIds,
+      sessionId: requestedSessionId,
+    } = parseResult.data;
 
     // Check if provider is configured
     if (!llmRouter.isProviderConfigured(provider)) {
@@ -74,25 +86,46 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         ? `\n\nProject Context:\n${projectContext.summary}`
         : '';
 
-      // Get available tools
-      const tools = getToolsForLLM();
+      const selectedSkills = await resolveSkills(skillIds);
+      const { allowedToolNames, skillsPrompt } = summarizeSkills(selectedSkills);
+
+      // Get available tools, filtered by skills if needed
+      const tools = filterToolsForSkills(getToolsForLLM(), allowedToolNames);
+
+      const activeSessionId = requestedSessionId || createSession().id;
+
+      const sendEvent = (event: Record<string, unknown>) => {
+        reply.raw.write(`${JSON.stringify(event)}\n`);
+      };
+
+      sendEvent({ type: 'status', status: 'started', timestamp: new Date().toISOString() });
 
       // Generate response from LLM
       const llmResponse = await llmRouter.generate(provider, {
         messages: llmMessages,
-        systemPrompt: SYSTEM_PROMPT + projectContextBlock,
+        systemPrompt: SYSTEM_PROMPT + projectContextBlock + skillsPrompt,
         toolsEnabled: true,
         tools,
       });
+      sendEvent({ type: 'status', status: 'llm_completed' });
 
       // Process tool calls if any
       let responseContent = llmResponse.content;
       const toolResults: string[] = [];
 
       if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
+        let toolCallIndex = 0;
         for (const toolCall of llmResponse.toolCalls) {
-          const result = await handleToolCall(toolCall);
+          const callId = `tool-${toolCallIndex++}`;
+          sendEvent({
+            type: 'tool_call',
+            id: callId,
+            name: toolCall.name,
+            arguments: toolCall.arguments,
+          });
+          const result = await handleToolCall(toolCall, allowedToolNames);
           toolResults.push(result);
+          streamToolResult(sendEvent, callId, toolCall.name, result);
         }
 
         // Append tool results to response
@@ -108,32 +141,58 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         timestamp: new Date().toISOString(),
       };
 
+      const latestUserMessage = [...messages].reverse().find((m) => m.role === 'user');
+      if (latestUserMessage) {
+        saveMessage(activeSessionId, latestUserMessage);
+        const title = buildSessionTitle(latestUserMessage.content);
+        if (title) {
+          updateSessionTitleIfEmpty(activeSessionId, title);
+        }
+      }
+      saveMessage(activeSessionId, responseMessage);
+
       // Get current pending actions
       const pendingActions = getPendingActions();
 
       const response: ChatResponse = {
         message: responseMessage,
         pendingActions,
+        sessionId: activeSessionId,
       };
 
-      return response;
+      sendEvent({ type: 'response', response });
+      reply.raw.end();
+      return reply;
     } catch (error) {
       app.log.error(error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      if (message.startsWith('Unknown skill:')) {
+        return reply.status(400).send({
+          error: message,
+        });
+      }
       return reply.status(500).send({
         error: 'Failed to generate response',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        details: message,
       });
     }
   });
 };
 
-async function handleToolCall(toolCall: ToolCall): Promise<string> {
+async function handleToolCall(
+  toolCall: ToolCall,
+  allowedToolNames: Set<string> | null
+): Promise<string> {
   const toolName = toolCall.name;
   const toolArgs = toolCall.arguments;
   const toolDef = getToolDefinition(toolName);
 
   if (!toolDef) {
     return `Error: Unknown tool "${toolName}"`;
+  }
+
+  if (!isToolAllowed(toolName, allowedToolNames)) {
+    return `Error: Tool "${toolName}" is not allowed by the active skills.`;
   }
 
   if (toolName === 'askForConfirmation') {
@@ -148,6 +207,10 @@ async function handleToolCall(toolCall: ToolCall): Promise<string> {
 
     if (!getToolDefinition(requestedToolName)) {
       return `Error: Unknown tool "${requestedToolName}"`;
+    }
+
+    if (!isToolAllowed(requestedToolName, allowedToolNames)) {
+      return `Error: Tool "${requestedToolName}" is not allowed by the active skills.`;
     }
 
     if (!toolRequiresConfirmation(requestedToolName)) {
@@ -195,6 +258,111 @@ function generateActionDescription(toolName: string, args: Record<string, unknow
   }
 }
 
+function isToolAllowed(toolName: string, allowedToolNames: Set<string> | null): boolean {
+  if (!allowedToolNames) return true;
+  if (toolName === 'askForConfirmation') return true;
+  return allowedToolNames.has(toolName);
+}
+
+function filterToolsForSkills(
+  tools: LLMToolDefinition[],
+  allowedToolNames: Set<string> | null
+): LLMToolDefinition[] {
+  if (!allowedToolNames) return tools;
+  return tools.filter((tool) => tool.name === 'askForConfirmation' || allowedToolNames.has(tool.name));
+}
+
+async function resolveSkills(skillIds: string[] | undefined): Promise<SkillManifest[]> {
+  if (!skillIds || skillIds.length === 0) {
+    return [];
+  }
+
+  const state = getSkillLoadState();
+  if (!state.loadedAt) {
+    await refreshSkills();
+  }
+
+  const selectedSkills: SkillManifest[] = [];
+
+  for (const id of skillIds) {
+    const skill = getSkillById(id);
+    if (!skill) {
+      throw new Error(`Unknown skill: ${id}`);
+    }
+    selectedSkills.push(skill);
+  }
+
+  return selectedSkills;
+}
+
+function summarizeSkills(skills: SkillManifest[]): {
+  allowedToolNames: Set<string> | null;
+  skillsPrompt: string;
+} {
+  if (skills.length === 0) {
+    return { allowedToolNames: null, skillsPrompt: '' };
+  }
+
+  const allowList = new Set<string>();
+  let hasExplicitAllowList = false;
+  const promptParts: string[] = [];
+
+  for (const skill of skills) {
+    if (skill.systemPrompt) {
+      promptParts.push(skill.systemPrompt);
+    }
+
+    if (skill.toolAllowList && skill.toolAllowList.length > 0) {
+      hasExplicitAllowList = true;
+      for (const toolName of skill.toolAllowList) {
+        allowList.add(toolName);
+      }
+    }
+  }
+
+  const skillsPrompt = promptParts.length > 0 ? `\n\nActive Skills:\n${promptParts.join('\n\n')}` : '';
+
+  return {
+    allowedToolNames: hasExplicitAllowList ? allowList : null,
+    skillsPrompt,
+  };
+}
+
+function buildSessionTitle(content: string): string | null {
+  const trimmed = content.replace(/\s+/g, ' ').trim();
+  if (!trimmed) return null;
+  if (trimmed.length <= 60) return trimmed;
+  return `${trimmed.slice(0, 57)}...`;
+}
+
+function streamToolResult(
+  sendEvent: (event: Record<string, unknown>) => void,
+  id: string,
+  name: string,
+  result: string
+) {
+  const chunkSize = 400;
+  if (result.length <= chunkSize) {
+    sendEvent({ type: 'tool_result', id, name, result });
+    return;
+  }
+
+  const total = Math.ceil(result.length / chunkSize);
+  for (let i = 0; i < total; i += 1) {
+    const chunk = result.slice(i * chunkSize, (i + 1) * chunkSize);
+    sendEvent({
+      type: 'tool_result_chunk',
+      id,
+      name,
+      chunk,
+      index: i + 1,
+      total,
+    });
+  }
+
+  sendEvent({ type: 'tool_result', id, name, completed: true });
+}
+
 function formatToolResult(toolName: string, result: unknown): string {
   if (result === null || result === undefined) {
     return `${toolName} completed successfully.`;
@@ -208,7 +376,7 @@ function formatToolResult(toolName: string, result: unknown): string {
   switch (toolName) {
     case 'fs.listFiles': {
       const r = result as { path: string; files: Array<{ name: string; type: string }> };
-      const files = r.files.map((f) => `${f.type === 'directory' ? '📁' : '📄'} ${f.name}`);
+      const files = r.files.map((f) => `${f.type === 'directory' ? '??' : '??'} ${f.name}`);
       return `**Files in ${r.path}:**\n${files.join('\n')}`;
     }
 
