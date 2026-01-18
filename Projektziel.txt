@@ -1,0 +1,55 @@
+Tech (Node.js + Vite/React) Ziel: ein cloudbasierter AI-Developer. Erstelle hierfür eine neue Unterseite im Klyde Projekt mit dem Namen Adam
+ 
+Der Assistent läuft als Web-App: React-Frontend mit Chat-UI und Node.js-Backend. Er unterstützt Code-Änderungen im Repo und kontrollierte DevOps-Aktionen wie PM2 oder über GitHub Actions (deploy staging, tests). Wir nutzen mehrere LLM APIs: Anthropic Claude, OpenAI, Google Gemini. Die neue ADAM AI wird erstmal nur auf Dev deployed
+ 
+Wichtige Regeln:
+- Keine autonomen riskanten Aktionen. Für Deploy, Commit, PR ist immer eine explizite Bestätigung erforderlich.
+- Der Assistent sollte beim Laden den Kontext des DevAI Projektordners erfassen
+- API Keys nur serverseitig über ENV (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, GITHUB_TOKEN). Niemals im Frontend ausgeben oder loggen.
+- Änderungen sollen als kleine, nachvollziehbare Commits erfolgen.
+- Implementiere serverseitiges Logging (audit log) aller Tool-Aktionen.
+ 
+Aufgabe:
+1) Scanne das Repo und erkenne die aktuelle Struktur. Wenn es bereits frontend/ backend gibt, nutze es. Wenn nicht, lege an:
+   - apps/web (Vite + React)
+   - apps/api (Node.js, TypeScript, Fastify oder Express)
+   - shared (gemeinsame Types)
+2) Implementiere das MVP in lauffähigem Zustand:
+   - Frontend: Chat UI (simple), Anzeige von Aktionen (Pending/Approved/Done), Button zur Bestätigung, Auswahl des aktiven Providers (Claude/OpenAI/Gemini) in einem Dropdown, Anzeige des aktiven Projekts (Repo root).
+   - Backend: /api/chat Endpoint, der Messages annimmt und eine Antwort liefert. Zusätzlich /api/actions/approve für Bestätigung.
+   - Backend: LLM-Router mit 3 Providern (Anthropic/OpenAI/Gemini). Interne einheitliche Schnittstelle: generate({messages, systemPrompt, model, toolsEnabled}).
+   - Backend: Tool-System mit strikt erlaubten Tools:
+     a) fs.listFiles(path)
+     b) fs.readFile(path)
+     c) fs.writeFile(path, content)
+     d) git.status()
+     e) git.diff()
+     f) git.commit(message)
+     g) github.triggerWorkflow(workflowIdOrName, ref, inputs)
+     h) github.getWorkflowRunStatus(runId) oder listLatestRuns(workflow)
+     i) logs.getStagingLogs(lines=200) (einfach: read aus definierter Logdatei oder placeholder endpoint)
+   - Confirmation-Flow: Wenn das LLM eine Aktion vorschlägt, muss es ein tool_call "askForConfirmation" erzeugen, das eine actionId zurückgibt. Das Frontend zeigt die Aktion und einen Approve-Button. Erst nach Approve wird die Aktion ausgeführt.
+   - Audit Log: Speichere jede Tool-Aktion (timestamp, user, action, args summary, result summary) in einer JSONL-Datei unter ./var/audit.log (Repo-root). Stelle sicher, dass keine Secrets geschrieben werden.
+3) Füge klare Konfiguration hinzu:
+   - .env.example mit allen erforderlichen Variablen
+   - README: wie starten (dev), wie env setzen, wie staging deploy workflow getriggert wird
+4) Baue eine erste “Project Scan” Funktion:
+   - Beim Start oder beim ersten Chat: analysiere package.json (scripts), erkenne Vite/React/Node, finde Test-Command, und gib dem LLM einen kurzen Kontextblock (max 20 Zeilen) über das Projekt.
+5) Minimaler GitHub Actions Trigger:
+   - Implementiere github.triggerWorkflow so, dass es workflow_dispatch auslöst. Falls workflow name/ID unbekannt, implementiere eine Konfiguration in apps/api/config/workflows.json (stagingDeployWorkflow, testWorkflow) und dokumentiere, wie ich sie setze.
+ 
+Arbeitsweise:
+- Arbeite iterativ: Erst Skeleton + Healthcheck, dann Chat, dann Router, dann Tools, dann Confirmation, dann GitHub Actions.
+- Nach jeder größeren Änderung: führe Tests/Typecheck aus (wenn vorhanden) oder zumindest build und starte dev server.
+- Wenn etwas im Repo fehlt, erstelle es minimal, ohne Overengineering.
+ 
+Lieferumfang:
+- Lauffähige App im Dev-Modus mit einem End-to-End Flow:
+  1) User fragt im Chat nach einer Änderung
+  2) Assistent liest eine Datei, schlägt Patch vor, schreibt Datei
+  3) Assistent fordert Bestätigung für Commit oder Deploy
+  4) User bestätigt im UI
+  5) Backend führt commit oder GitHub Actions Trigger aus
+  6) UI zeigt Status und Ergebnis
+ 
+Starte jetzt: analysiere Repo-Struktur, schlage einen konkreten Implementierungsplan (kurz) vor, und beginne dann mit dem Coding. Erstelle/ändere Dateien direkt im Repo.

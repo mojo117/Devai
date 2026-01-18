@@ -1,0 +1,4 @@
+{
+  "stagingDeployWorkflow": "deploy-staging.yml",
+  "testWorkflow": "ci.yml"
+}
