@@ -264,7 +264,10 @@ function isToolAllowed(toolName: string, allowedToolNames: Set<string> | null): 
   return allowedToolNames.has(toolName);
 }
 
-function filterToolsForSkills(\n  tools: LLMToolDefinition[],\n  allowedToolNames: Set<string> | null\n): LLMToolDefinition[] {
+function filterToolsForSkills(
+  tools: LLMToolDefinition[],
+  allowedToolNames: Set<string> | null
+): LLMToolDefinition[] {
   if (!allowedToolNames) return tools;
   return tools.filter((tool) => tool.name === 'askForConfirmation' || allowedToolNames.has(tool.name));
 }
