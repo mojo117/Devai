@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { nanoid } from 'nanoid';
 import type { ChatMessage, ChatResponse } from '@devai/shared';
 import { llmRouter } from '../llm/router.js';
-import type { LLMMessage, ToolCall } from '../llm/types.js';
+import type { LLMMessage, ToolCall, ToolDefinition as LLMToolDefinition } from '../llm/types.js';
 import { getToolsForLLM, toolRequiresConfirmation, getToolDefinition } from '../tools/registry.js';
 import { executeTool } from '../tools/executor.js';
 import { createAction, getPendingActions } from '../actions/manager.js';
@@ -264,10 +264,7 @@ function isToolAllowed(toolName: string, allowedToolNames: Set<string> | null): 
   return allowedToolNames.has(toolName);
 }
 
-function filterToolsForSkills(
-  tools: Array<{ name: string }>,
-  allowedToolNames: Set<string> | null
-) {
+function filterToolsForSkills(\n  tools: LLMToolDefinition[],\n  allowedToolNames: Set<string> | null\n): LLMToolDefinition[] {
   if (!allowedToolNames) return tools;
   return tools.filter((tool) => tool.name === 'askForConfirmation' || allowedToolNames.has(tool.name));
 }
@@ -376,7 +373,7 @@ function formatToolResult(toolName: string, result: unknown): string {
   switch (toolName) {
     case 'fs.listFiles': {
       const r = result as { path: string; files: Array<{ name: string; type: string }> };
-      const files = r.files.map((f) => `${f.type === 'directory' ? '📁' : '📄'} ${f.name}`);
+      const files = r.files.map((f) => `${f.type === 'directory' ? '??' : '??'} ${f.name}`);
       return `**Files in ${r.path}:**\n${files.join('\n')}`;
     }
 
