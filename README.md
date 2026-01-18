@@ -1,13 +1,15 @@
 # DevAI - Cloud-based AI Developer Assistant
 
-Ein MVP für einen cloud-basierten AI Developer Assistant mit React Frontend und Node.js Backend.
+Ein MVP fuer einen cloud-basierten AI Developer Assistant mit React Frontend und Node.js Backend.
 
 ## Features
 
 - Chat UI mit LLM-Integration (Claude, OpenAI, Gemini)
 - Kontrollierte DevOps-Aktionen (nur Staging, kein Prod)
-- Confirmation Flow für riskante Aktionen
+- Confirmation Flow fuer riskante Aktionen
 - Audit Logging aller Tool-Aktionen
+- Admin-Login via Supabase (Single-User)
+- API-Routen geschuetzt per JWT (alle /api ausser /api/health und /api/auth/*)
 
 ## Voraussetzungen
 
@@ -45,6 +47,10 @@ npm run dev:web
 
 | Variable | Beschreibung |
 |----------|-------------|
+| `SUPABASE_URL` | Supabase Projekt-URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase Service Role Key (nur Backend) |
+| `DEVAI_JWT_SECRET` | JWT Secret fuer Login-Tokens |
+| `JWT_EXPIRES_IN` | JWT Ablaufzeit (z. B. 24h) |
 | `ANTHROPIC_API_KEY` | Anthropic Claude API Key |
 | `OPENAI_API_KEY` | OpenAI API Key |
 | `GEMINI_API_KEY` | Google Gemini API Key |
@@ -52,6 +58,14 @@ npm run dev:web
 | `GITHUB_OWNER` | GitHub Repository Owner |
 | `GITHUB_REPO` | GitHub Repository Name |
 | `PROJECT_ROOT` | Pfad zum verwalteten Projekt |
+
+## Authentifizierung (Supabase)
+
+- Login laeuft ueber `POST /api/auth/login` und Token-Check ueber `GET /api/auth/verify`.
+- UI speichert das JWT lokal und sendet es als `Authorization: Bearer <token>`.
+- Alle `/api/*` Routen sind geschuetzt, ausser `/api/health` und `/api/auth/*`.
+- Datenbasis: Tabelle `admin_users` mit `email`, `password_hash` (bcrypt), optional `is_active`.
+- Single-Admin-Setup, keine Rollenlogik.
 
 ## GitHub Actions Konfiguration
 
@@ -80,8 +94,9 @@ curl -X POST http://localhost:3001/api/actions/approve \
 
 ## Sicherheit
 
-- API Keys sind nur serverseitig verfügbar
-- Riskante Aktionen (writeFile, commit, deploy) erfordern explizite Bestätigung
+- API Keys sind nur serverseitig verfuegbar
+- API-Zugriff erfordert JWT (ausser /api/health und /api/auth/*)
+- Riskante Aktionen (writeFile, commit, deploy) erfordern explizite Bestaetigung
 - Alle Aktionen werden in `var/audit.log` protokolliert
 
 ## Current State (Implementation Notes)
@@ -92,6 +107,8 @@ This repository contains a working MVP with a React/Vite frontend and Fastify AP
 
 - Monorepo layout: `apps/web`, `apps/api`, `shared`
 - Chat API: `POST /api/chat` with LLM routing (Anthropic/OpenAI/Gemini)
+- Auth API: `POST /api/auth/login`, `GET /api/auth/verify` (Supabase, JWT)
+- API Guard: JWT-Pflicht fuer alle `/api/*` ausser /api/health und /api/auth/*
 - Confirmation flow: tools that require approval must use `askForConfirmation`, creating pending actions
 - Actions API: list actions and approve execution via `POST /api/actions/approve`
 - Tool system (whitelisted): `fs.*`, `git.*`, `github.*`, `logs.*`
@@ -115,7 +132,7 @@ This repository contains a working MVP with a React/Vite frontend and Fastify AP
 
 - Provider dropdown exists but is not yet wired in the UI (provider is currently fixed to OpenAI)
 - Actions UI only shows pending actions in the sidebar (approved/done are not listed)
-- “Adam” subpage in Klyde project is not implemented
+- Adam subpage in Klyde project is not implemented
 
 ### Quick Verify
 
