@@ -1,35 +1,39 @@
-# Secrets Management (SOPS + age)
+# Secrets Management
 
-Devai secrets are managed with SOPS + age and stored encrypted in the Infrastructure repo.
+See [secrets/README.md](./secrets/README.md) for complete documentation on SOPS + age encryption.
 
-## Encrypted File Location
+## Quick Reference
 
-- `C:\Users\joern\Repo\Infrastructure\secrets/devai.env.enc`
-
-## Decrypt on Baso
-
-Requirements on Baso:
-- `sops` installed
-- age key at `/root/.config/sops/age/keys.txt`
-
+### Encrypt (Local)
 ```bash
-# Copy encrypted file to Baso
-scp C:\Users\joern\Repo\Infrastructure\secrets\devai.env.enc root@77.42.90.193:/root/secrets/devai.env.enc
-
-# Decrypt for dev and staging worktrees
-sops --decrypt /root/secrets/devai.env.enc > /opt/shared-repos/Devai/worktree-preview/.env
-chmod 600 /opt/shared-repos/Devai/worktree-preview/.env
-
-sops --decrypt /root/secrets/devai.env.enc > /opt/shared-repos/Devai/worktree-staging/.env
-chmod 600 /opt/shared-repos/Devai/worktree-staging/.env
-
-# Reload env in PM2
-pm2 restart devai-dev --update-env
-pm2 restart devai-staging --update-env
+./secrets/encrypt.sh
 ```
 
-## Updating Secrets
+### Deploy to Baso
+```bash
+scp secrets/devai.env.enc root@77.42.90.193:/root/secrets/
+```
 
-1. Edit template: `C:\Users\joern\Repo\Infrastructure\secrets\templates/devai.env`
-2. Re-encrypt: `scripts/secrets/encrypt-env.sh devai`
-3. Deploy encrypted file and decrypt on the server as shown above.
+### Decrypt on Baso
+```bash
+ssh root@77.42.90.193 '/opt/Klyde/projects/Devai/secrets/decrypt.sh dev'
+```
+
+### One-liner: Encrypt + Deploy + Decrypt + Restart
+```bash
+./secrets/encrypt.sh && \
+scp secrets/devai.env.enc root@77.42.90.193:/root/secrets/ && \
+ssh root@77.42.90.193 'sops -d /root/secrets/devai.env.enc > /opt/Klyde/projects/Devai/.env && pm2 restart devai-api-dev --update-env'
+```
+
+## Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `ANTHROPIC_API_KEY` | Anthropic API key for Claude models | For Anthropic provider |
+| `OPENAI_API_KEY` | OpenAI API key for GPT models | For OpenAI provider |
+| `GEMINI_API_KEY` | Google API key for Gemini models | For Gemini provider |
+| `GITHUB_TOKEN` | GitHub PAT for repo operations | For GitHub tools |
+| `SUPABASE_URL` | Supabase project URL | For auth |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key | For auth |
+| `DEVAI_JWT_SECRET` | Secret for signing JWTs | For auth |
