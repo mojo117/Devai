@@ -4,6 +4,9 @@ export type ToolName =
   | 'fs.listFiles'
   | 'fs.readFile'
   | 'fs.writeFile'
+  | 'fs.glob'
+  | 'fs.grep'
+  | 'fs.edit'
   | 'git.status'
   | 'git.diff'
   | 'git.commit'
@@ -75,6 +78,71 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
         },
       },
       required: ['path', 'content'],
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'fs.glob',
+    description: 'Find files matching a glob pattern (e.g., **/*.ts, src/**/*.tsx)',
+    parameters: {
+      type: 'object',
+      properties: {
+        pattern: {
+          type: 'string',
+          description: 'Glob pattern to match files (e.g., **/*.ts)',
+        },
+        path: {
+          type: 'string',
+          description: 'Base directory to search in (optional, defaults to project root)',
+        },
+      },
+      required: ['pattern'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'fs.grep',
+    description: 'Search for text/regex pattern in files',
+    parameters: {
+      type: 'object',
+      properties: {
+        pattern: {
+          type: 'string',
+          description: 'Regex pattern to search for in file contents',
+        },
+        path: {
+          type: 'string',
+          description: 'Directory to search in',
+        },
+        glob: {
+          type: 'string',
+          description: 'File pattern filter (e.g., *.ts, **/*.tsx)',
+        },
+      },
+      required: ['pattern', 'path'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'fs.edit',
+    description: 'Make targeted edits to a file (find and replace a unique string). This action requires user confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'The file path to edit',
+        },
+        old_string: {
+          type: 'string',
+          description: 'Exact text to find (must be unique in the file)',
+        },
+        new_string: {
+          type: 'string',
+          description: 'Replacement text',
+        },
+      },
+      required: ['path', 'old_string', 'new_string'],
     },
     requiresConfirmation: true,
   },

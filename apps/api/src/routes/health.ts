@@ -14,11 +14,7 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
       timestamp: new Date().toISOString(),
       environment: config.nodeEnv,
       providers,
-      projectRoot: config.projectRoot || null,
-      allowedRoots: [
-        ...(config.projectRoot ? [config.projectRoot] : []),
-        ...config.allowedRoots,
-      ],
+      allowedRoots: [...config.allowedRoots],
     };
   });
 };

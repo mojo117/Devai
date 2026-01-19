@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
+import type { MessageParam, ContentBlockParam } from '@anthropic-ai/sdk/resources/messages';
 import { config } from '../../config.js';
-import type { LLMProviderAdapter, GenerateRequest, GenerateResponse, ToolDefinition } from '../types.js';
+import type { LLMProviderAdapter, GenerateRequest, GenerateResponse, ToolDefinition, LLMMessage } from '../types.js';
 
 export class AnthropicProvider implements LLMProviderAdapter {
   readonly name = 'anthropic' as const;
@@ -23,12 +24,9 @@ export class AnthropicProvider implements LLMProviderAdapter {
   async generate(request: GenerateRequest): Promise<GenerateResponse> {
     const client = this.getClient();
 
-    const messages = request.messages
+    const messages: MessageParam[] = request.messages
       .filter((m) => m.role !== 'system')
-      .map((m) => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.content,
-      }));
+      .map((m) => this.convertMessage(m));
 
     const tools = request.toolsEnabled && request.tools
       ? request.tools.map(this.convertTool)
@@ -80,6 +78,41 @@ export class AnthropicProvider implements LLMProviderAdapter {
         required: tool.parameters.required,
       },
     };
+  }
+
+  private convertMessage(message: LLMMessage): MessageParam {
+    const role = message.role as 'user' | 'assistant';
+
+    // Assistant message with tool calls
+    if (role === 'assistant' && message.toolCalls?.length) {
+      const content: ContentBlockParam[] = [];
+      if (message.content) {
+        content.push({ type: 'text', text: message.content });
+      }
+      for (const tc of message.toolCalls) {
+        content.push({
+          type: 'tool_use',
+          id: tc.id,
+          name: tc.name,
+          input: tc.arguments,
+        });
+      }
+      return { role, content };
+    }
+
+    // User message with tool results
+    if (role === 'user' && message.toolResults?.length) {
+      const content: ContentBlockParam[] = message.toolResults.map((tr) => ({
+        type: 'tool_result' as const,
+        tool_use_id: tr.toolUseId,
+        content: tr.result,
+        is_error: tr.isError,
+      }));
+      return { role, content };
+    }
+
+    // Simple text message
+    return { role, content: message.content };
   }
 
   listModels(): string[] {

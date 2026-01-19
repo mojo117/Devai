@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import { sendMessage, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting } from '../api';
+import { sendMessage, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle } from '../api';
 import type { ChatMessage, LLMProvider, SessionSummary } from '../types';
 
 interface ToolEvent {
@@ -185,6 +185,35 @@ export function ChatUI({ provider, projectRoot, skillIds }: ChatUIProps) {
     }
   };
 
+  const handleRestartChat = async () => {
+    if (messages.length === 0) {
+      // No messages to save, just create new session
+      await handleNewChat();
+      return;
+    }
+
+    setSessionsLoading(true);
+    try {
+      // Mark the current session as restarted if it has messages
+      if (sessionId) {
+        const currentSession = sessions.find((s) => s.id === sessionId);
+        const currentTitle = currentSession?.title || 'Untitled';
+        const timestamp = new Date().toLocaleString();
+        await updateSessionTitle(sessionId, `[Restarted ${timestamp}] ${currentTitle}`);
+      }
+
+      // Create a new session
+      const response = await createSession();
+      await saveSetting('lastSessionId', response.session.id);
+      await refreshSessions(response.session.id);
+      setToolEvents([]);
+    } catch {
+      // Ignore restart errors for now.
+    } finally {
+      setSessionsLoading(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Messages */}
@@ -208,13 +237,23 @@ export function ChatUI({ provider, projectRoot, skillIds }: ChatUIProps) {
               ))}
             </select>
           </div>
-          <button
-            onClick={handleNewChat}
-            disabled={sessionsLoading}
-            className="text-[11px] text-gray-300 hover:text-white disabled:opacity-50"
-          >
-            {sessionsLoading ? 'Loading...' : 'New Chat'}
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleRestartChat}
+              disabled={sessionsLoading || messages.length === 0}
+              className="text-[11px] text-orange-400 hover:text-orange-300 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Save current conversation to history and start fresh"
+            >
+              {sessionsLoading ? 'Loading...' : 'Restart Chat'}
+            </button>
+            <button
+              onClick={handleNewChat}
+              disabled={sessionsLoading}
+              className="text-[11px] text-gray-300 hover:text-white disabled:opacity-50"
+            >
+              {sessionsLoading ? 'Loading...' : 'New Chat'}
+            </button>
+          </div>
         </div>
 
         {toolEvents.length > 0 && (

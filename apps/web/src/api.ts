@@ -212,6 +212,16 @@ export async function fetchSessionMessages(sessionId: string): Promise<SessionMe
   return res.json();
 }
 
+export async function updateSessionTitle(sessionId: string, title: string): Promise<{ success: boolean }> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+    method: 'PATCH',
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) throw new Error('Failed to update session title');
+  return res.json();
+}
+
 export async function fetchSetting(key: string): Promise<SettingResponse> {
   const res = await fetch(`${API_BASE}/settings/${encodeURIComponent(key)}`, {
     headers: withAuthHeaders(),

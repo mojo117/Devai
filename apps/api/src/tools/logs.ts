@@ -11,13 +11,23 @@ export interface StagingLogsResult {
   logPath: string;
 }
 
-export async function getStagingLogs(lines: number = DEFAULT_LINES): Promise<StagingLogsResult> {
-  const projectRoot = config.projectRoot;
-  if (!projectRoot) {
-    throw new Error('PROJECT_ROOT is not configured');
+export async function getStagingLogs(lines: number = DEFAULT_LINES, projectPath?: string): Promise<StagingLogsResult> {
+  if (!projectPath) {
+    throw new Error('Project path is required for log access');
   }
 
-  const logPath = resolve(projectRoot, DEFAULT_LOG_PATH);
+  // Validate project path is within allowed roots
+  const normalizedPath = resolve(projectPath);
+  const isAllowed = config.allowedRoots.some((root) => {
+    const absoluteRoot = resolve(root);
+    return normalizedPath.startsWith(absoluteRoot + '/') || normalizedPath === absoluteRoot;
+  });
+
+  if (!isAllowed) {
+    throw new Error(`Access denied: Path must be within ${config.allowedRoots.join(' or ')}`);
+  }
+
+  const logPath = resolve(normalizedPath, DEFAULT_LOG_PATH);
 
   try {
     await stat(logPath);
