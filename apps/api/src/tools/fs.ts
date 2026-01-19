@@ -54,6 +54,11 @@ async function resolvePathCaseInsensitive(basePath: string, relativePath: string
 // Validate that the path is within allowed roots
 // File access is restricted to /opt/Klyde/projects and /workingtrees
 async function validatePath(path: string): Promise<string> {
+  // Handle empty or root path requests - default to first allowed root
+  if (!path || path === '/' || path === '.' || path === './') {
+    return config.allowedRoots[0];
+  }
+
   const segments = path.split(/[\\/]/).filter(Boolean);
   if (segments.includes('.git')) {
     throw new Error('Access denied: .git paths are not allowed');
@@ -86,6 +91,11 @@ async function validatePath(path: string): Promise<string> {
     const rootBasename = absoluteRoot.split('/').pop() || '';
     let cleanPath = path;
 
+    // If the path IS the root's basename (e.g., "projects"), return the root
+    if (segments.length === 1 && segments[0].toLowerCase() === rootBasename.toLowerCase()) {
+      return absoluteRoot;
+    }
+
     // If the path starts with the root's basename, strip it to avoid duplication
     // e.g., "projects/Test" -> "Test" when root is "/opt/Klyde/projects"
     if (segments[0]?.toLowerCase() === rootBasename.toLowerCase()) {
@@ -98,11 +108,14 @@ async function validatePath(path: string): Promise<string> {
 
     // Check for path traversal attacks
     if (!relativePath.startsWith('..') && !relativePath.startsWith('/')) {
-      return resolvedPath;
+      // Verify the path exists before returning
+      if (await pathExists(resolvedPath)) {
+        return resolvedPath;
+      }
     }
   }
 
-  throw new Error(`Access denied: Path must be within ${allowedRoots.join(' or ')}`);
+  throw new Error(`Path not found. Available roots: ${allowedRoots.join(', ')}. Try listing "projects" or a specific project like "projects/Devai".`);
 }
 
 function isAllowedExtension(path: string): boolean {
