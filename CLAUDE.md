@@ -69,3 +69,45 @@ ssh root@77.42.90.193 "pm2 logs devai-api-dev --lines 50"
 | Baso | Hosts dev/staging servers | 77.42.90.193 |
 | Klyde | Routes preview domains | 46.224.197.7 |
 | Infrit | Routes staging domains | 46.224.89.119 |
+
+## Local Development with Mutagen Sync
+
+Mutagen provides **real-time file synchronization** from Klyde to Baso, enabling instant hot-reload without commits.
+
+### How It Works
+
+```
+Klyde Server                    Mutagen (~200-500ms)           Baso Server
+/opt/Klyde/projects/Devai/  ───────────────────────►  /opt/shared-repos/Devai/worktree-preview/
+                                                               ↓
+                                                      Vite dev server (hot-reload)
+                                                               ↓
+                                                      devai.klyde.tech
+```
+
+1. Edit code in `/opt/Klyde/projects/Devai/` on Klyde
+2. Mutagen automatically syncs changes to Baso (~200-500ms)
+3. Vite dev server detects changes and hot-reloads
+4. View live at `https://devai.klyde.tech`
+5. **Commit and push to `dev` branch to persist changes**
+
+### Mutagen Commands (run on Klyde)
+
+```bash
+# Check sync status
+mutagen sync list
+
+# Monitor this project's sync
+mutagen sync monitor devai-dev
+
+# Pause/resume sync
+mutagen sync pause devai-dev
+mutagen sync resume devai-dev
+```
+
+### Important Notes
+
+- **One-way sync only**: Klyde → Baso (never syncs back)
+- **`.env` files ignored**: Copy manually from `worktree-staging/` if needed
+- **Changes not persisted**: Must commit & push to `dev` to save work
+- **Ignored patterns**: `.git`, `node_modules`, `dist`, `.vite`, `.cache`, `*.log`
