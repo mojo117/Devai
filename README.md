@@ -27,6 +27,10 @@ cp .env.example .env
 # Dann .env bearbeiten und API Keys eintragen
 ```
 
+## Secrets Management
+
+See `SECRETS.md` for the SOPS + age workflow used to store and deploy encrypted `.env` files.
+
 ## Entwicklung
 
 ```bash
