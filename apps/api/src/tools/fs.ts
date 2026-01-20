@@ -414,6 +414,10 @@ async function validateTargetPath(path: string): Promise<string> {
     }
   }
 
+  // For paths that look absolute but aren't under allowed roots (e.g., "/test/...")
+  // treat them as relative paths by stripping the leading slash
+  let cleanSegments = [...segments];
+
   // For relative paths, try each allowed root (only if root exists)
   for (const root of allowedRoots) {
     const absoluteRoot = resolve(root);
@@ -424,13 +428,23 @@ async function validateTargetPath(path: string): Promise<string> {
     }
 
     const rootBasename = absoluteRoot.split('/').pop() || '';
-    let cleanPath = path;
 
     // If the path starts with the root's basename, strip it
-    if (segments[0]?.toLowerCase() === rootBasename.toLowerCase()) {
-      cleanPath = segments.slice(1).join('/');
+    if (cleanSegments[0]?.toLowerCase() === rootBasename.toLowerCase()) {
+      cleanSegments = cleanSegments.slice(1);
     }
 
+    // Try to match the first segment case-insensitively against existing directories
+    const firstSegment = cleanSegments[0];
+    if (firstSegment) {
+      const match = await findCaseInsensitiveMatch(absoluteRoot, firstSegment);
+      if (match) {
+        // Replace first segment with correctly-cased version
+        cleanSegments[0] = match;
+      }
+    }
+
+    const cleanPath = cleanSegments.join('/');
     const fullPath = join(absoluteRoot, cleanPath);
     const relativePath = relative(absoluteRoot, fullPath);
 

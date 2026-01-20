@@ -38,6 +38,8 @@ FILE SYSTEM:
 - fs.readFile(path): Read file contents
 - fs.writeFile(path, content): Write content to a file (REQUIRES USER CONFIRMATION)
 - fs.mkdir(path): Create a new directory (REQUIRES USER CONFIRMATION)
+- fs.move(source, destination): Move or rename a file/directory (REQUIRES USER CONFIRMATION)
+- fs.delete(path): Delete a file or empty directory (REQUIRES USER CONFIRMATION)
 - fs.glob(pattern, path?): Find files matching a glob pattern (e.g., **/*.ts, src/**/*.tsx)
 - fs.grep(pattern, path, glob?): Search for text/regex pattern in files
 - fs.edit(path, old_string, new_string): Make targeted edits to a file (REQUIRES USER CONFIRMATION)
