@@ -61,6 +61,23 @@ IMPORTANT: For tools that require confirmation, first call askForConfirmation wi
 
 When exploring a codebase, use fs.glob to find files and fs.grep to search for specific code. This is more efficient than listing directories manually.
 
+PATH HANDLING (CRITICAL - FOLLOW THESE STEPS):
+- Your working directory is provided in "Project Context" above - use it as the base for all paths
+- Linux is CASE SENSITIVE: /Test and /test are DIFFERENT directories
+
+BEFORE any file/directory operation, you MUST:
+1. Use fs.listFiles on the working directory or parent to verify the path exists
+2. Check the EXACT case of directory/file names - use what fs.listFiles returns
+3. If the path doesn't exist, use fs.glob to search for alternatives
+4. If still uncertain, ASK the user to clarify before proceeding
+
+Examples:
+- User says "create folder in /test" but fs.listFiles shows "Test" exists → use "Test" not "test"
+- User says "here" or "this folder" → use the working directory from Project Context
+- Path not found → search with fs.glob("**/similar*") and ask user which they meant
+
+NEVER guess or assume paths exist. ALWAYS verify first with fs.listFiles or fs.glob.
+
 Focus on solving the user's problem efficiently while being transparent about any changes you want to make.`;
 
 export const chatRoutes: FastifyPluginAsync = async (app) => {
@@ -99,6 +116,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
       // Validate project root against allowed paths
       let projectContext = null;
+      let validatedProjectRoot: string | null = null;
       if (requestedProjectRoot) {
         const normalizedPath = resolve(requestedProjectRoot);
         const isAllowed = config.allowedRoots.some((root) => {
@@ -106,11 +124,12 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
           return normalizedPath.startsWith(absoluteRoot + '/') || normalizedPath === absoluteRoot;
         });
         if (isAllowed) {
+          validatedProjectRoot = normalizedPath;
           projectContext = await getProjectContext(normalizedPath);
         }
       }
-      const projectContextBlock = projectContext
-        ? `\n\nProject Context:\n${projectContext.summary}`
+      const projectContextBlock = validatedProjectRoot
+        ? `\n\nProject Context:\nWorking Directory: ${validatedProjectRoot}\n${projectContext?.summary || ''}`
         : '';
 
       const selectedSkills = await resolveSkills(skillIds);
@@ -241,6 +260,11 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         details: message,
       });
     }
+  });
+
+  // Endpoint to expose the system prompt for the UI
+  app.get('/system-prompt', async (_request, reply) => {
+    return reply.send({ prompt: SYSTEM_PROMPT });
   });
 };
 

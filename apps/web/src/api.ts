@@ -277,3 +277,11 @@ export async function rejectAction(actionId: string): Promise<{ action: Action }
 
   return res.json();
 }
+
+export async function fetchSystemPrompt(): Promise<{ prompt: string }> {
+  const res = await fetch(`${API_BASE}/system-prompt`, {
+    headers: withAuthHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to fetch system prompt');
+  return res.json();
+}
