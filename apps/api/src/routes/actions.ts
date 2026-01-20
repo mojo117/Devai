@@ -5,8 +5,9 @@ import {
   getPendingActions,
   getAction,
   approveAndExecuteAction,
+  rejectAction,
 } from '../actions/manager.js';
-import type { ApproveResponse } from '@devai/shared';
+import type { ApproveResponse, RejectResponse } from '@devai/shared';
 
 const ApproveRequestSchema = z.object({
   actionId: z.string(),
@@ -59,6 +60,38 @@ export const actionRoutes: FastifyPluginAsync = async (app) => {
         action,
         result: action.result,
         error: action.error,
+      };
+
+      return response;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+
+      if (message === 'Action not found') {
+        return reply.status(404).send({ error: message });
+      }
+
+      return reply.status(400).send({ error: message });
+    }
+  });
+
+  // Reject an action
+  app.post('/actions/reject', async (request, reply) => {
+    const parseResult = ApproveRequestSchema.safeParse(request.body);
+
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: 'Invalid request',
+        details: parseResult.error.issues,
+      });
+    }
+
+    const { actionId } = parseResult.data;
+
+    try {
+      const action = await rejectAction(actionId);
+
+      const response: RejectResponse = {
+        action,
       };
 
       return response;

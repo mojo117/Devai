@@ -262,3 +262,18 @@ export async function approveAction(actionId: string): Promise<{ action: Action;
 
   return res.json();
 }
+
+export async function rejectAction(actionId: string): Promise<{ action: Action }> {
+  const res = await fetch(`${API_BASE}/actions/reject`, {
+    method: 'POST',
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ actionId }),
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || 'Failed to reject action');
+  }
+
+  return res.json();
+}

@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import { sendMessage, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle } from '../api';
+import { sendMessage, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction } from '../api';
 import type { ChatMessage, LLMProvider, SessionSummary } from '../types';
+import { InlineAction, type PendingAction } from './InlineAction';
 
 interface ToolEvent {
   id: string;
@@ -35,6 +36,7 @@ export function ChatUI({ provider, projectRoot, skillIds }: ChatUIProps) {
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
+  const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const planItems = extractPlanItems(messages);
 
@@ -139,6 +141,15 @@ export function ChatUI({ provider, projectRoot, skillIds }: ChatUIProps) {
               completed: Boolean(event.completed),
             });
           }
+          if (event.type === 'action_pending') {
+            const pendingAction: PendingAction = {
+              actionId: event.actionId as string,
+              toolName: event.toolName as string,
+              toolArgs: event.toolArgs as Record<string, unknown>,
+              description: event.description as string,
+            };
+            setPendingActions((prev) => [...prev, pendingAction]);
+          }
         }
       );
       if (response.sessionId) {
@@ -183,6 +194,46 @@ export function ChatUI({ provider, projectRoot, skillIds }: ChatUIProps) {
     } finally {
       setSessionsLoading(false);
     }
+  };
+
+  const handleApproveAction = async (actionId: string) => {
+    const pendingAction = pendingActions.find((a) => a.actionId === actionId);
+    const response = await approveAction(actionId);
+
+    // Add result to chat as a message
+    const resultMessage: ChatMessage = {
+      id: `action-result-${actionId}`,
+      role: 'assistant',
+      content: response.action.error
+        ? `**Action failed:** ${pendingAction?.description || response.action.toolName}\n\nError: ${response.action.error}`
+        : `**Action completed:** ${pendingAction?.description || response.action.toolName}\n\n${response.result ? '```json\n' + JSON.stringify(response.result, null, 2) + '\n```' : 'Success'}`,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, resultMessage]);
+
+    // Remove from pending list after a short delay to show the approved state
+    setTimeout(() => {
+      setPendingActions((prev) => prev.filter((a) => a.actionId !== actionId));
+    }, 1000);
+  };
+
+  const handleRejectAction = async (actionId: string) => {
+    const pendingAction = pendingActions.find((a) => a.actionId === actionId);
+    await rejectAction(actionId);
+
+    // Add rejection to chat
+    const rejectMessage: ChatMessage = {
+      id: `action-rejected-${actionId}`,
+      role: 'assistant',
+      content: `**Action rejected:** ${pendingAction?.description || 'Unknown action'}`,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, rejectMessage]);
+
+    // Remove from pending list after a short delay to show the rejected state
+    setTimeout(() => {
+      setPendingActions((prev) => prev.filter((a) => a.actionId !== actionId));
+    }, 1000);
   };
 
   const handleRestartChat = async () => {
@@ -347,6 +398,20 @@ export function ChatUI({ provider, projectRoot, skillIds }: ChatUIProps) {
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Pending Actions - Fixed above input, always visible */}
+      {pendingActions.length > 0 && (
+        <div className="border-t border-gray-700 px-4 py-2 space-y-2">
+          {pendingActions.map((action) => (
+            <InlineAction
+              key={action.actionId}
+              action={action}
+              onApprove={handleApproveAction}
+              onReject={handleRejectAction}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Input */}
       <form onSubmit={handleSubmit} className="border-t border-gray-700 p-4">

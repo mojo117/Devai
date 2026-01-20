@@ -37,6 +37,7 @@ FILE SYSTEM:
 - fs.listFiles(path): List files in a directory
 - fs.readFile(path): Read file contents
 - fs.writeFile(path, content): Write content to a file (REQUIRES USER CONFIRMATION)
+- fs.mkdir(path): Create a new directory (REQUIRES USER CONFIRMATION)
 - fs.glob(pattern, path?): Find files matching a glob pattern (e.g., **/*.ts, src/**/*.tsx)
 - fs.grep(pattern, path, glob?): Search for text/regex pattern in files
 - fs.edit(path, old_string, new_string): Make targeted edits to a file (REQUIRES USER CONFIRMATION)
@@ -118,7 +119,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       // Get available tools, filtered by skills if needed
       const tools = filterToolsForSkills(getToolsForLLM(), allowedToolNames);
 
-      const activeSessionId = requestedSessionId || createSession().id;
+      const activeSessionId = requestedSessionId || (await createSession()).id;
 
       const sendEvent = (event: Record<string, unknown>) => {
         reply.raw.write(`${JSON.stringify(event)}\n`);
@@ -165,7 +166,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
             arguments: toolCall.arguments,
           });
 
-          const result = await handleToolCall(toolCall, allowedToolNames);
+          const result = await handleToolCall(toolCall, allowedToolNames, sendEvent);
           const isError = result.startsWith('Error');
 
           toolResultsForLLM.push({
@@ -207,13 +208,13 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
       const latestUserMessage = [...messages].reverse().find((m) => m.role === 'user');
       if (latestUserMessage) {
-        saveMessage(activeSessionId, latestUserMessage);
+        await saveMessage(activeSessionId, latestUserMessage);
         const title = buildSessionTitle(latestUserMessage.content);
         if (title) {
-          updateSessionTitleIfEmpty(activeSessionId, title);
+          await updateSessionTitleIfEmpty(activeSessionId, title);
         }
       }
-      saveMessage(activeSessionId, responseMessage);
+      await saveMessage(activeSessionId, responseMessage);
 
       // Get current pending actions
       const pendingActions = getPendingActions();
@@ -245,7 +246,8 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
 async function handleToolCall(
   toolCall: ToolCall,
-  allowedToolNames: Set<string> | null
+  allowedToolNames: Set<string> | null,
+  sendEvent?: (event: Record<string, unknown>) => void
 ): Promise<string> {
   const toolName = toolCall.name;
   const toolArgs = toolCall.arguments;
@@ -288,7 +290,18 @@ async function handleToolCall(
       description,
     });
 
-    return `Action created: **${description}**\n\nThis action requires your approval before it can be executed. Please review and approve it in the Actions panel.\n\nAction ID: \`${action.id}\``;
+    // Send action_pending event to client for inline approval UI
+    if (sendEvent) {
+      sendEvent({
+        type: 'action_pending',
+        actionId: action.id,
+        toolName: action.toolName,
+        toolArgs: action.toolArgs,
+        description: action.description,
+      });
+    }
+
+    return `Action created: **${description}**\n\nThis action requires your approval before it can be executed.\n\nAction ID: \`${action.id}\``;
   }
 
   // Enforce confirmation flow for restricted tools

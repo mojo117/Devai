@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import { getDb } from './index.js';
+import { getSupabase } from './index.js';
 import type { ChatMessage } from '@devai/shared';
 
 const DEFAULT_USER_ID = 'local';
@@ -18,103 +18,166 @@ export function getDefaultUserId(): string {
   return DEFAULT_USER_ID;
 }
 
-export function listSessions(userId: string = DEFAULT_USER_ID): SessionSummary[] {
-  const rows = getDb()
-    .prepare('SELECT id, title, created_at FROM sessions WHERE user_id = ? ORDER BY created_at DESC')
-    .all(userId) as Array<{ id: string; title: string | null; created_at: string }>;
+export async function listSessions(userId: string = DEFAULT_USER_ID): Promise<SessionSummary[]> {
+  const { data, error } = await getSupabase()
+    .from('sessions')
+    .select('id, title, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
 
-  return rows.map((row) => ({
+  if (error) {
+    console.error('Failed to list sessions:', error);
+    return [];
+  }
+
+  return (data || []).map((row) => ({
     id: row.id,
     title: row.title,
     createdAt: row.created_at,
   }));
 }
 
-export function createSession(title?: string, userId: string = DEFAULT_USER_ID): SessionSummary {
+export async function createSession(title?: string, userId: string = DEFAULT_USER_ID): Promise<SessionSummary> {
   const id = nanoid();
   const now = new Date().toISOString();
-  getDb()
-    .prepare('INSERT INTO sessions (id, user_id, title, created_at) VALUES (?, ?, ?, ?)')
-    .run(id, userId, title || null, now);
+
+  const { error } = await getSupabase()
+    .from('sessions')
+    .insert({
+      id,
+      user_id: userId,
+      title: title || null,
+      created_at: now,
+    });
+
+  if (error) {
+    console.error('Failed to create session:', error);
+  }
 
   return { id, title: title || null, createdAt: now };
 }
 
-export function getSessionTitle(sessionId: string): string | null {
-  const row = getDb()
-    .prepare('SELECT title FROM sessions WHERE id = ?')
-    .get(sessionId) as { title: string | null } | undefined;
+export async function getSessionTitle(sessionId: string): Promise<string | null> {
+  const { data, error } = await getSupabase()
+    .from('sessions')
+    .select('title')
+    .eq('id', sessionId)
+    .single();
 
-  return row?.title ?? null;
+  if (error) {
+    return null;
+  }
+
+  return data?.title ?? null;
 }
 
-export function updateSessionTitle(sessionId: string, title: string): void {
-  getDb()
-    .prepare('UPDATE sessions SET title = ? WHERE id = ?')
-    .run(title, sessionId);
+export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {
+  const { error } = await getSupabase()
+    .from('sessions')
+    .update({ title })
+    .eq('id', sessionId);
+
+  if (error) {
+    console.error('Failed to update session title:', error);
+  }
 }
 
-export function updateSessionTitleIfEmpty(sessionId: string, title: string): void {
-  const existing = getSessionTitle(sessionId);
+export async function updateSessionTitleIfEmpty(sessionId: string, title: string): Promise<void> {
+  const existing = await getSessionTitle(sessionId);
   if (existing) return;
-  updateSessionTitle(sessionId, title);
+  await updateSessionTitle(sessionId, title);
 }
 
-export function getMessages(sessionId: string): StoredMessage[] {
-  const rows = getDb()
-    .prepare('SELECT id, session_id, role, content, timestamp FROM messages WHERE session_id = ? ORDER BY timestamp ASC')
-    .all(sessionId) as Array<{
-      id: string;
-      session_id: string;
-      role: ChatMessage['role'];
-      content: string;
-      timestamp: string;
-    }>;
+export async function getMessages(sessionId: string): Promise<StoredMessage[]> {
+  const { data, error } = await getSupabase()
+    .from('messages')
+    .select('id, session_id, role, content, timestamp')
+    .eq('session_id', sessionId)
+    .order('timestamp', { ascending: true });
 
-  return rows.map((row) => ({
+  if (error) {
+    console.error('Failed to get messages:', error);
+    return [];
+  }
+
+  return (data || []).map((row) => ({
     id: row.id,
     sessionId: row.session_id,
-    role: row.role,
+    role: row.role as ChatMessage['role'],
     content: row.content,
     timestamp: row.timestamp,
   }));
 }
 
-export function saveMessage(sessionId: string, message: ChatMessage): void {
-  getDb()
-    .prepare('INSERT INTO messages (id, session_id, role, content, timestamp) VALUES (?, ?, ?, ?, ?)')
-    .run(message.id, sessionId, message.role, message.content, message.timestamp);
+export async function saveMessage(sessionId: string, message: ChatMessage): Promise<void> {
+  const { error } = await getSupabase()
+    .from('messages')
+    .insert({
+      id: message.id,
+      session_id: sessionId,
+      role: message.role,
+      content: message.content,
+      timestamp: message.timestamp,
+    });
+
+  if (error) {
+    console.error('Failed to save message:', error);
+  }
 }
 
-export function getSetting(key: string, userId: string = DEFAULT_USER_ID): string | null {
-  const row = getDb()
-    .prepare('SELECT value FROM settings WHERE user_id = ? AND key = ?')
-    .get(userId, key) as { value: string } | undefined;
+export async function getSetting(key: string, userId: string = DEFAULT_USER_ID): Promise<string | null> {
+  const { data, error } = await getSupabase()
+    .from('settings')
+    .select('value')
+    .eq('user_id', userId)
+    .eq('key', key)
+    .single();
 
-  return row?.value ?? null;
+  if (error) {
+    return null;
+  }
+
+  return data?.value ?? null;
 }
 
-export function setSetting(key: string, value: string, userId: string = DEFAULT_USER_ID): void {
+export async function setSetting(key: string, value: string, userId: string = DEFAULT_USER_ID): Promise<void> {
   const now = new Date().toISOString();
-  getDb()
-    .prepare(`
-      INSERT INTO settings (user_id, key, value, updated_at)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(user_id, key) DO UPDATE SET
-        value = excluded.value,
-        updated_at = excluded.updated_at
-    `)
-    .run(userId, key, value, now);
+
+  const { error } = await getSupabase()
+    .from('settings')
+    .upsert({
+      user_id: userId,
+      key,
+      value,
+      updated_at: now,
+    }, {
+      onConflict: 'user_id,key',
+    });
+
+  if (error) {
+    console.error('Failed to save setting:', error);
+  }
 }
 
-export function saveAuditLog(
+export async function saveAuditLog(
   action: string,
   data: Record<string, unknown>,
   userId: string = DEFAULT_USER_ID
-): void {
+): Promise<void> {
   const id = nanoid();
   const timestamp = new Date().toISOString();
-  getDb()
-    .prepare('INSERT INTO audit_logs (id, timestamp, user_id, action, data) VALUES (?, ?, ?, ?, ?)')
-    .run(id, timestamp, userId, action, JSON.stringify(data));
+
+  const { error } = await getSupabase()
+    .from('audit_logs')
+    .insert({
+      id,
+      timestamp,
+      user_id: userId,
+      action,
+      data,
+    });
+
+  if (error) {
+    console.error('[Audit Log Error]', error);
+  }
 }

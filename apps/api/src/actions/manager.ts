@@ -56,6 +56,31 @@ export function updateActionStatus(id: string, status: ActionStatus): Action | u
   return action;
 }
 
+export async function rejectAction(id: string): Promise<Action> {
+  const action = actions.get(id);
+
+  if (!action) {
+    throw new Error('Action not found');
+  }
+
+  if (action.status !== 'pending') {
+    throw new Error(`Action cannot be rejected (current status: ${action.status})`);
+  }
+
+  // Mark as rejected
+  action.status = 'rejected';
+  action.rejectedAt = new Date().toISOString();
+  actions.set(id, action);
+
+  auditLog({
+    action: 'action.rejected',
+    toolName: action.toolName,
+    actionId: action.id,
+  });
+
+  return action;
+}
+
 export async function approveAndExecuteAction(id: string): Promise<Action> {
   const action = actions.get(id);
 

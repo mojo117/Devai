@@ -27,9 +27,29 @@ cp .env.example .env
 # Dann .env bearbeiten und API Keys eintragen
 ```
 
+## Deployment Architecture
+
+DevAI runs on a two-server setup:
+- **Klyde** (46.224.197.7): Source code, edited by Claude Code
+- **Baso** (77.42.90.193): Runs the services via PM2
+
+```
+Klyde (source) --[Mutagen sync]--> Baso (runtime) --[Infrit proxy]--> https://devai.klyde.tech
+```
+
+**Port Configuration (NEVER CHANGE):**
+| Environment | Frontend | API |
+|-------------|----------|-----|
+| Dev | 3008 | 3009 |
+| Staging | 8090 | 8091 |
+
+See `docs/DEPLOYMENT.md` for full architecture documentation.
+
 ## Secrets Management
 
 See `SECRETS.md` for the SOPS + age workflow used to store and deploy encrypted `.env` files.
+
+**Note:** `.env` files are NOT synced by Mutagen. Production secrets must be manually configured on Baso at `/opt/shared-repos/Devai/worktree-preview/.env`.
 
 ## Entwicklung
 

@@ -7,8 +7,8 @@ loadEnv({ path: resolve(process.cwd(), '../../.env') });
 // Hardcoded allowed roots for file access security
 // These paths are enforced regardless of environment variables
 const HARDCODED_ALLOWED_ROOTS: readonly string[] = [
-  '/opt/Klyde/projects',
-  '/workingtrees',
+  '/opt/Klyde/projects',      // Klyde server (lokal, wenn DevAI dort läuft)
+  '/mnt/klyde-projects',      // Baso: SSHFS mount zu Klyde (read-write)
 ] as const;
 
 export interface Config {
@@ -40,8 +40,9 @@ export interface Config {
   toolMaxDiffChars: number;
   toolAllowedExtensions: string[];
 
-  // Persistence
-  dbPath: string;
+  // Supabase
+  supabaseUrl: string;
+  supabaseServiceKey: string;
 }
 
 export function loadConfig(): Config {
@@ -73,7 +74,8 @@ export function loadConfig(): Config {
     toolMaxDiffChars: parseInt(process.env.TOOL_MAX_DIFF_CHARS || '12000', 10),
     toolAllowedExtensions: parseExtensions(process.env.TOOL_ALLOWED_EXTENSIONS),
 
-    dbPath: process.env.DB_PATH || resolve(process.cwd(), '../../var/devai.db'),
+    supabaseUrl: process.env.DEVAI_SUPABASE_URL || process.env.SUPABASE_URL || '',
+    supabaseServiceKey: process.env.DEVAI_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || '',
   };
 }
 

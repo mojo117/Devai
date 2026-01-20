@@ -1,4 +1,4 @@
-export type ActionStatus = 'pending' | 'approved' | 'executing' | 'done' | 'failed';
+export type ActionStatus = 'pending' | 'approved' | 'executing' | 'done' | 'failed' | 'rejected';
 
 export interface Action {
   id: string;
@@ -8,6 +8,7 @@ export interface Action {
   status: ActionStatus;
   createdAt: string;
   approvedAt?: string;
+  rejectedAt?: string;
   executedAt?: string;
   result?: unknown;
   error?: string;
@@ -21,4 +22,12 @@ export interface ApproveResponse {
   action: Action;
   result?: unknown;
   error?: string;
+}
+
+export interface RejectRequest {
+  actionId: string;
+}
+
+export interface RejectResponse {
+  action: Action;
 }

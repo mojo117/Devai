@@ -7,6 +7,9 @@ export type ToolName =
   | 'fs.glob'
   | 'fs.grep'
   | 'fs.edit'
+  | 'fs.mkdir'
+  | 'fs.move'
+  | 'fs.delete'
   | 'git.status'
   | 'git.diff'
   | 'git.commit'
@@ -143,6 +146,55 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
         },
       },
       required: ['path', 'old_string', 'new_string'],
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'fs.mkdir',
+    description: 'Create a new directory. This action requires user confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'The directory path to create',
+        },
+      },
+      required: ['path'],
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'fs.move',
+    description: 'Move or rename a file or directory. This action requires user confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        source: {
+          type: 'string',
+          description: 'The source path (file or directory to move)',
+        },
+        destination: {
+          type: 'string',
+          description: 'The destination path',
+        },
+      },
+      required: ['source', 'destination'],
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'fs.delete',
+    description: 'Delete a file or empty directory. This action requires user confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'The path to delete (file or empty directory)',
+        },
+      },
+      required: ['path'],
     },
     requiresConfirmation: true,
   },

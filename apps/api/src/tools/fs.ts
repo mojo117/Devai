@@ -1,4 +1,4 @@
-import { readdir, readFile as fsReadFile, writeFile as fsWriteFile, stat, access } from 'fs/promises';
+import { readdir, readFile as fsReadFile, writeFile as fsWriteFile, stat, access, mkdir as fsMkdir, rename, unlink, rmdir } from 'fs/promises';
 import { join, resolve, relative, dirname, basename } from 'path';
 import fg from 'fast-glob';
 import { config } from '../config.js';
@@ -385,4 +385,158 @@ export async function editFile(
     path,
     replacements: 1,
   };
+}
+
+// ============ Helper for validating target paths (may not exist yet) ============
+
+async function validateTargetPath(path: string): Promise<string> {
+  // Handle empty path
+  if (!path || path === '/' || path === '.' || path === './') {
+    throw new Error('Invalid path: cannot use root directory');
+  }
+
+  const segments = path.split(/[\\/]/).filter(Boolean);
+  if (segments.includes('.git')) {
+    throw new Error('Access denied: .git paths are not allowed');
+  }
+
+  const allowedRoots = [...config.allowedRoots];
+
+  // Check if it's already an absolute path within allowed roots
+  const normalizedPath = resolve(path);
+  for (const root of allowedRoots) {
+    const absoluteRoot = resolve(root);
+    if (normalizedPath.startsWith(absoluteRoot + '/') || normalizedPath === absoluteRoot) {
+      // Verify the root actually exists on this system
+      if (await pathExists(absoluteRoot)) {
+        return normalizedPath;
+      }
+    }
+  }
+
+  // For relative paths, try each allowed root (only if root exists)
+  for (const root of allowedRoots) {
+    const absoluteRoot = resolve(root);
+
+    // Skip roots that don't exist on this system
+    if (!await pathExists(absoluteRoot)) {
+      continue;
+    }
+
+    const rootBasename = absoluteRoot.split('/').pop() || '';
+    let cleanPath = path;
+
+    // If the path starts with the root's basename, strip it
+    if (segments[0]?.toLowerCase() === rootBasename.toLowerCase()) {
+      cleanPath = segments.slice(1).join('/');
+    }
+
+    const fullPath = join(absoluteRoot, cleanPath);
+    const relativePath = relative(absoluteRoot, fullPath);
+
+    // Check for path traversal attacks
+    if (!relativePath.startsWith('..') && !relativePath.startsWith('/')) {
+      return fullPath;
+    }
+  }
+
+  throw new Error(`Path must be within allowed roots: ${allowedRoots.join(', ')}`);
+}
+
+// ============ MKDIR - Create directory ============
+
+export interface MkdirResult {
+  path: string;
+  created: boolean;
+}
+
+export async function makeDirectory(path: string): Promise<MkdirResult> {
+  const absolutePath = await validateTargetPath(path);
+
+  // Check if directory already exists
+  if (await pathExists(absolutePath)) {
+    const stats = await stat(absolutePath);
+    if (stats.isDirectory()) {
+      return { path: absolutePath, created: false }; // Already exists
+    }
+    throw new Error('Path already exists as a file');
+  }
+
+  // Create the directory (recursive to create parent dirs if needed)
+  await fsMkdir(absolutePath, { recursive: true });
+
+  return {
+    path: absolutePath,
+    created: true,
+  };
+}
+
+// ============ MOVE - Move/rename files and directories ============
+
+export interface MoveResult {
+  source: string;
+  destination: string;
+  moved: boolean;
+}
+
+export async function moveFile(source: string, destination: string): Promise<MoveResult> {
+  const absoluteSource = await validatePath(source);
+  const absoluteDest = await validateTargetPath(destination);
+
+  // Check source exists
+  if (!await pathExists(absoluteSource)) {
+    throw new Error(`Source does not exist: ${source}`);
+  }
+
+  // Check destination doesn't already exist
+  if (await pathExists(absoluteDest)) {
+    throw new Error(`Destination already exists: ${destination}`);
+  }
+
+  // Ensure parent directory of destination exists
+  const destParent = dirname(absoluteDest);
+  if (!await pathExists(destParent)) {
+    await fsMkdir(destParent, { recursive: true });
+  }
+
+  // Perform the move/rename
+  await rename(absoluteSource, absoluteDest);
+
+  return {
+    source: absoluteSource,
+    destination: absoluteDest,
+    moved: true,
+  };
+}
+
+// ============ DELETE - Delete files and empty directories ============
+
+export interface DeleteResult {
+  path: string;
+  deleted: boolean;
+  type: 'file' | 'directory';
+}
+
+export async function deleteFile(path: string): Promise<DeleteResult> {
+  const absolutePath = await validatePath(path);
+
+  // Check if path exists
+  if (!await pathExists(absolutePath)) {
+    throw new Error(`Path does not exist: ${path}`);
+  }
+
+  const stats = await stat(absolutePath);
+
+  if (stats.isDirectory()) {
+    // Only delete empty directories
+    const entries = await readdir(absolutePath);
+    if (entries.length > 0) {
+      throw new Error(`Cannot delete non-empty directory: ${path} (contains ${entries.length} items)`);
+    }
+    await rmdir(absolutePath);
+    return { path, deleted: true, type: 'directory' };
+  } else {
+    await unlink(absolutePath);
+    return { path, deleted: true, type: 'file' };
+  }
 }

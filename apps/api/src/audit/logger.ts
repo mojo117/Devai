@@ -96,7 +96,7 @@ export async function auditLog(data: Record<string, unknown>): Promise<void> {
 
   try {
     await appendFile(AUDIT_LOG_PATH, line, 'utf-8');
-    saveAuditLog(entry.action, entry);
+    await saveAuditLog(entry.action, entry);
   } catch (error) {
     // Log to console as fallback
     console.error('[Audit Log Error]', error);
