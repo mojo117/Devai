@@ -239,3 +239,31 @@ This means:
 ### Environment Variable Fix
 - Added non-prefixed SUPABASE_URL for auth.ts compatibility
 - Added all LLM API keys to Baso .env
+
+## Recent Changes (2026-01-20 - Session 2)
+
+### UI Layout Overhaul
+All panels now on the right side for cleaner layout:
+- **AI Prompts** (blue): Shows system prompt, top position
+- **Tools** (gray): Center position, includes skills/files/tools
+- **Access** (gray): Below Tools, shows allowed paths
+- **History** (purple): Bottom position, session history
+
+### Enhanced Path Handling
+- AI now receives working directory in Project Context
+- Added explicit 4-step path verification process
+- Case-insensitive path resolution for target paths (e.g., `/test` → `/Test`)
+- Fixed `validateTargetPath` to handle paths like `/test/adam` correctly
+
+### New Features
+- `GET /api/system-prompt` - Exposes AI system prompt for UI
+- `PromptsPanel` component - Shows AI system prompt in collapsible panel
+- Added `fs.move` and `fs.delete` to system prompt documentation
+
+### Files Changed
+- `apps/api/src/routes/chat.ts` - System prompt endpoint, enhanced PATH HANDLING
+- `apps/api/src/tools/fs.ts` - Fixed validateTargetPath case-insensitive matching
+- `apps/web/src/components/PromptsPanel.tsx` - New component
+- `apps/web/src/components/HistoryPanel.tsx` - Moved to right side
+- `apps/web/src/App.tsx` - Added PromptsPanel
+- `apps/web/src/api.ts` - Added fetchSystemPrompt
