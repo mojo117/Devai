@@ -4,6 +4,7 @@ import { ProjectInfo } from './components/ProjectInfo';
 import { ActionCard } from './components/ActionCard';
 import { ToolsPanel } from './components/ToolsPanel';
 import { HistoryPanel } from './components/HistoryPanel';
+import { PromptsPanel } from './components/PromptsPanel';
 import {
   fetchHealth,
   fetchActions,
@@ -284,8 +285,11 @@ function App() {
         projectLoading={projectLoading}
       />
 
-      {/* History Panel (collapsible) */}
+      {/* History Panel (collapsible, right side) */}
       <HistoryPanel />
+
+      {/* Prompts Panel (collapsible, left side) */}
+      <PromptsPanel />
 
       {/* Header */}
       <header className="bg-gray-800 border-b border-gray-700 px-6 py-4">

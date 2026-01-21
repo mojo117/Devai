@@ -1,9 +1,10 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { nanoid } from 'nanoid';
+import { resolve } from 'path';
 import type { ChatMessage, ChatResponse } from '@devai/shared';
 import { llmRouter } from '../llm/router.js';
-import type { LLMMessage, ToolCall, ToolDefinition as LLMToolDefinition } from '../llm/types.js';
+import type { LLMMessage, ToolCall, ToolDefinition as LLMToolDefinition, ToolResult } from '../llm/types.js';
 import { getToolsForLLM, toolRequiresConfirmation, getToolDefinition } from '../tools/registry.js';
 import { executeTool } from '../tools/executor.js';
 import { createAction, getPendingActions } from '../actions/manager.js';
@@ -31,18 +32,53 @@ const ChatRequestSchema = z.object({
 const SYSTEM_PROMPT = `You are DevAI, an AI developer assistant. You help users with code-related tasks.
 
 You have access to the following tools:
+
+FILE SYSTEM:
 - fs.listFiles(path): List files in a directory
 - fs.readFile(path): Read file contents
 - fs.writeFile(path, content): Write content to a file (REQUIRES USER CONFIRMATION)
+- fs.mkdir(path): Create a new directory (REQUIRES USER CONFIRMATION)
+- fs.move(source, destination): Move or rename a file/directory (REQUIRES USER CONFIRMATION)
+- fs.delete(path): Delete a file or empty directory (REQUIRES USER CONFIRMATION)
+- fs.glob(pattern, path?): Find files matching a glob pattern (e.g., **/*.ts, src/**/*.tsx)
+- fs.grep(pattern, path, glob?): Search for text/regex pattern in files
+- fs.edit(path, old_string, new_string): Make targeted edits to a file (REQUIRES USER CONFIRMATION)
+
+GIT:
 - git.status(): Show git status
 - git.diff(): Show git diff
 - git.commit(message): Create a git commit (REQUIRES USER CONFIRMATION)
+
+GITHUB:
 - github.triggerWorkflow(workflow, ref, inputs): Trigger a GitHub Actions workflow (REQUIRES USER CONFIRMATION)
 - github.getWorkflowRunStatus(runId): Get workflow run status
+
+LOGS:
 - logs.getStagingLogs(lines): Get staging environment logs
+
+CONFIRMATION:
 - askForConfirmation(toolName, toolArgs, description): Request approval for a tool that requires confirmation (returns actionId)
 
 IMPORTANT: For tools that require confirmation, first call askForConfirmation with the tool name and args. Only proceed after user approval.
+
+When exploring a codebase, use fs.glob to find files and fs.grep to search for specific code. This is more efficient than listing directories manually.
+
+PATH HANDLING (CRITICAL - FOLLOW THESE STEPS):
+- Your working directory is provided in "Project Context" above - use it as the base for all paths
+- Linux is CASE SENSITIVE: /Test and /test are DIFFERENT directories
+
+BEFORE any file/directory operation, you MUST:
+1. Use fs.listFiles on the working directory or parent to verify the path exists
+2. Check the EXACT case of directory/file names - use what fs.listFiles returns
+3. If the path doesn't exist, use fs.glob to search for alternatives
+4. If still uncertain, ASK the user to clarify before proceeding
+
+Examples:
+- User says "create folder in /test" but fs.listFiles shows "Test" exists → use "Test" not "test"
+- User says "here" or "this folder" → use the working directory from Project Context
+- Path not found → search with fs.glob("**/similar*") and ask user which they meant
+
+NEVER guess or assume paths exist. ALWAYS verify first with fs.listFiles or fs.glob.
 
 Focus on solving the user's problem efficiently while being transparent about any changes you want to make.`;
 
@@ -80,10 +116,22 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         content: m.content,
       }));
 
-      const projectRoot = config.projectRoot || requestedProjectRoot;
-      const projectContext = projectRoot ? await getProjectContext(projectRoot) : null;
-      const projectContextBlock = projectContext
-        ? `\n\nProject Context:\n${projectContext.summary}`
+      // Validate project root against allowed paths
+      let projectContext = null;
+      let validatedProjectRoot: string | null = null;
+      if (requestedProjectRoot) {
+        const normalizedPath = resolve(requestedProjectRoot);
+        const isAllowed = config.allowedRoots.some((root) => {
+          const absoluteRoot = resolve(root);
+          return normalizedPath.startsWith(absoluteRoot + '/') || normalizedPath === absoluteRoot;
+        });
+        if (isAllowed) {
+          validatedProjectRoot = normalizedPath;
+          projectContext = await getProjectContext(normalizedPath);
+        }
+      }
+      const projectContextBlock = validatedProjectRoot
+        ? `\n\nProject Context:\nWorking Directory: ${validatedProjectRoot}\n${projectContext?.summary || ''}`
         : '';
 
       const selectedSkills = await resolveSkills(skillIds);
@@ -92,7 +140,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       // Get available tools, filtered by skills if needed
       const tools = filterToolsForSkills(getToolsForLLM(), allowedToolNames);
 
-      const activeSessionId = requestedSessionId || createSession().id;
+      const activeSessionId = requestedSessionId || (await createSession()).id;
 
       const sendEvent = (event: Record<string, unknown>) => {
         reply.raw.write(`${JSON.stringify(event)}\n`);
@@ -100,56 +148,94 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
       sendEvent({ type: 'status', status: 'started', timestamp: new Date().toISOString() });
 
-      // Generate response from LLM
-      const llmResponse = await llmRouter.generate(provider, {
-        messages: llmMessages,
-        systemPrompt: SYSTEM_PROMPT + projectContextBlock + skillsPrompt,
-        toolsEnabled: true,
-        tools,
-      });
-      sendEvent({ type: 'status', status: 'llm_completed' });
+      // Agentic loop - continue until no tool calls or max turns
+      const MAX_TURNS = 10;
+      let turn = 0;
+      let finalContent = '';
+      const conversationMessages: LLMMessage[] = [...llmMessages];
 
-      // Process tool calls if any
-      let responseContent = llmResponse.content;
-      const toolResults: string[] = [];
+      while (turn < MAX_TURNS) {
+        turn++;
+        sendEvent({ type: 'status', status: 'thinking', turn });
 
-      if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
-        let toolCallIndex = 0;
+        const llmResponse = await llmRouter.generate(provider, {
+          messages: conversationMessages,
+          systemPrompt: SYSTEM_PROMPT + projectContextBlock + skillsPrompt,
+          toolsEnabled: true,
+          tools,
+        });
+
+        // Accumulate content from each turn
+        if (llmResponse.content) {
+          finalContent += (finalContent && llmResponse.content ? '\n\n' : '') + llmResponse.content;
+        }
+
+        // If no tool calls, we're done
+        if (!llmResponse.toolCalls || llmResponse.toolCalls.length === 0) {
+          sendEvent({ type: 'status', status: 'completed', turn });
+          break;
+        }
+
+        // Process tool calls
+        const toolResultsForLLM: ToolResult[] = [];
+
         for (const toolCall of llmResponse.toolCalls) {
-          const callId = `tool-${toolCallIndex++}`;
           sendEvent({
             type: 'tool_call',
-            id: callId,
+            id: toolCall.id,
             name: toolCall.name,
             arguments: toolCall.arguments,
           });
-          const result = await handleToolCall(toolCall, allowedToolNames);
-          toolResults.push(result);
-          streamToolResult(sendEvent, callId, toolCall.name, result);
+
+          const result = await handleToolCall(toolCall, allowedToolNames, sendEvent);
+          const isError = result.startsWith('Error');
+
+          toolResultsForLLM.push({
+            toolUseId: toolCall.id,
+            result,
+            isError,
+          });
+
+          streamToolResult(sendEvent, toolCall.id, toolCall.name, result);
         }
 
-        // Append tool results to response
-        if (toolResults.length > 0) {
-          responseContent += '\n\n' + toolResults.join('\n\n');
-        }
+        // Add assistant message with tool calls to conversation
+        conversationMessages.push({
+          role: 'assistant',
+          content: llmResponse.content || '',
+          toolCalls: llmResponse.toolCalls,
+        });
+
+        // Add tool results as user message
+        conversationMessages.push({
+          role: 'user',
+          content: '',
+          toolResults: toolResultsForLLM,
+        });
+
+        sendEvent({ type: 'status', status: 'tool_results_sent', turn });
+      }
+
+      if (turn >= MAX_TURNS) {
+        finalContent += '\n\n[Reached maximum reasoning turns]';
       }
 
       const responseMessage: ChatMessage = {
         id: nanoid(),
         role: 'assistant',
-        content: responseContent,
+        content: finalContent,
         timestamp: new Date().toISOString(),
       };
 
       const latestUserMessage = [...messages].reverse().find((m) => m.role === 'user');
       if (latestUserMessage) {
-        saveMessage(activeSessionId, latestUserMessage);
+        await saveMessage(activeSessionId, latestUserMessage);
         const title = buildSessionTitle(latestUserMessage.content);
         if (title) {
-          updateSessionTitleIfEmpty(activeSessionId, title);
+          await updateSessionTitleIfEmpty(activeSessionId, title);
         }
       }
-      saveMessage(activeSessionId, responseMessage);
+      await saveMessage(activeSessionId, responseMessage);
 
       // Get current pending actions
       const pendingActions = getPendingActions();
@@ -177,11 +263,17 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       });
     }
   });
+
+  // Endpoint to expose the system prompt for the UI
+  app.get('/system-prompt', async (_request, reply) => {
+    return reply.send({ prompt: SYSTEM_PROMPT });
+  });
 };
 
 async function handleToolCall(
   toolCall: ToolCall,
-  allowedToolNames: Set<string> | null
+  allowedToolNames: Set<string> | null,
+  sendEvent?: (event: Record<string, unknown>) => void
 ): Promise<string> {
   const toolName = toolCall.name;
   const toolArgs = toolCall.arguments;
@@ -224,7 +316,18 @@ async function handleToolCall(
       description,
     });
 
-    return `Action created: **${description}**\n\nThis action requires your approval before it can be executed. Please review and approve it in the Actions panel.\n\nAction ID: \`${action.id}\``;
+    // Send action_pending event to client for inline approval UI
+    if (sendEvent) {
+      sendEvent({
+        type: 'action_pending',
+        actionId: action.id,
+        toolName: action.toolName,
+        toolArgs: action.toolArgs,
+        description: action.description,
+      });
+    }
+
+    return `Action created: **${description}**\n\nThis action requires your approval before it can be executed.\n\nAction ID: \`${action.id}\``;
   }
 
   // Enforce confirmation flow for restricted tools

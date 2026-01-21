@@ -44,6 +44,38 @@ export async function executeTool(
             args.content as string
           );
 
+        case 'fs.glob':
+          return fsTools.globFiles(
+            args.pattern as string,
+            args.path as string | undefined
+          );
+
+        case 'fs.grep':
+          return fsTools.grepFiles(
+            args.pattern as string,
+            args.path as string,
+            args.glob as string | undefined
+          );
+
+        case 'fs.edit':
+          return fsTools.editFile(
+            args.path as string,
+            args.old_string as string,
+            args.new_string as string
+          );
+
+        case 'fs.mkdir':
+          return fsTools.makeDirectory(args.path as string);
+
+        case 'fs.move':
+          return fsTools.moveFile(
+            args.source as string,
+            args.destination as string
+          );
+
+        case 'fs.delete':
+          return fsTools.deleteFile(args.path as string);
+
         // Git Tools
         case 'git.status':
           return gitTools.gitStatus();

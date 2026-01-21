@@ -4,6 +4,13 @@ import { resolve } from 'path';
 // Load .env from project root
 loadEnv({ path: resolve(process.cwd(), '../../.env') });
 
+// Hardcoded allowed roots for file access security
+// These paths are enforced regardless of environment variables
+const HARDCODED_ALLOWED_ROOTS: readonly string[] = [
+  '/opt/Klyde/projects',      // Klyde server (lokal, wenn DevAI dort läuft)
+  '/mnt/klyde-projects',      // Baso: SSHFS mount zu Klyde (read-write)
+] as const;
+
 export interface Config {
   nodeEnv: string;
   port: number;
@@ -20,7 +27,7 @@ export interface Config {
 
   // Project
   projectRoot?: string;
-  allowedRoots: string[];
+  allowedRoots: readonly string[];
 
   // Skills
   skillsDir: string;
@@ -33,14 +40,15 @@ export interface Config {
   toolMaxDiffChars: number;
   toolAllowedExtensions: string[];
 
-  // Persistence
-  dbPath: string;
+  // Supabase
+  supabaseUrl: string;
+  supabaseServiceKey: string;
 }
 
 export function loadConfig(): Config {
-  const allowedRoots = process.env.ALLOWED_ROOTS
-    ? process.env.ALLOWED_ROOTS.split(/[;,]/).map((p) => p.trim()).filter(Boolean)
-    : [];
+  // Use only hardcoded allowed roots for security
+  // Environment variables cannot override these restrictions
+  const allowedRoots = HARDCODED_ALLOWED_ROOTS;
 
   return {
     nodeEnv: process.env.NODE_ENV || 'development',
@@ -54,7 +62,7 @@ export function loadConfig(): Config {
     githubOwner: process.env.GITHUB_OWNER,
     githubRepo: process.env.GITHUB_REPO,
 
-    projectRoot: process.env.PROJECT_ROOT,
+    projectRoot: undefined, // Disabled - use allowedRoots only
     allowedRoots,
 
     skillsDir: process.env.SKILLS_DIR || resolve(process.cwd(), '../../skills'),
@@ -66,7 +74,8 @@ export function loadConfig(): Config {
     toolMaxDiffChars: parseInt(process.env.TOOL_MAX_DIFF_CHARS || '12000', 10),
     toolAllowedExtensions: parseExtensions(process.env.TOOL_ALLOWED_EXTENSIONS),
 
-    dbPath: process.env.DB_PATH || resolve(process.cwd(), '../../var/devai.db'),
+    supabaseUrl: process.env.DEVAI_SUPABASE_URL || process.env.SUPABASE_URL || '',
+    supabaseServiceKey: process.env.DEVAI_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || '',
   };
 }
 

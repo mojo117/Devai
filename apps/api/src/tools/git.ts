@@ -28,32 +28,32 @@ async function findGitRoot(startDir: string): Promise<string | null> {
 }
 
 async function getGit(): Promise<SimpleGit> {
-  const projectRoot = config.projectRoot;
-  const baseDir = projectRoot || process.cwd();
+  // Use only the hardcoded allowed roots
+  const allowedRoots = [...config.allowedRoots];
+
+  if (allowedRoots.length === 0) {
+    throw new Error('No allowed roots configured for git operations');
+  }
+
+  // Try to find a git repo starting from the first allowed root
+  const baseDir = allowedRoots[0];
   const gitRoot = await findGitRoot(baseDir);
 
   if (!gitRoot) {
     throw new Error(
-      `No git repository found from ${baseDir}. Set PROJECT_ROOT to a git repo.`
+      `No git repository found from ${baseDir}. Ensure a git repo exists within allowed paths.`
     );
   }
 
-  const allowedRoots = [
-    ...(config.projectRoot ? [config.projectRoot] : []),
-    ...config.allowedRoots,
-  ];
+  // Verify git root is within allowed paths
+  const gitRootResolved = resolve(gitRoot);
+  const allowed = allowedRoots.some((root) => {
+    const absoluteRoot = resolve(root);
+    return gitRootResolved.startsWith(absoluteRoot + '/') || gitRootResolved === absoluteRoot;
+  });
 
-  if (allowedRoots.length > 0) {
-    const gitRootResolved = resolve(gitRoot);
-    const allowed = allowedRoots.some((root) => {
-      const absoluteRoot = resolve(root);
-      const relativePath = relative(absoluteRoot, gitRootResolved);
-      return !relativePath.startsWith('..');
-    });
-
-    if (!allowed) {
-      throw new Error('Access denied: Git repository is outside allowed roots');
-    }
+  if (!allowed) {
+    throw new Error(`Access denied: Git repository must be within ${allowedRoots.join(' or ')}`);
   }
 
   return simpleGit(gitRoot);

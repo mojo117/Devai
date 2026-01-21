@@ -27,9 +27,29 @@ cp .env.example .env
 # Dann .env bearbeiten und API Keys eintragen
 ```
 
+## Deployment Architecture
+
+DevAI runs on a two-server setup:
+- **Klyde** (46.224.197.7): Source code, edited by Claude Code
+- **Baso** (77.42.90.193): Runs the services via PM2
+
+```
+Klyde (source) --[Mutagen sync]--> Baso (runtime) --[Infrit proxy]--> https://devai.klyde.tech
+```
+
+**Port Configuration (NEVER CHANGE):**
+| Environment | Frontend | API |
+|-------------|----------|-----|
+| Dev | 3008 | 3009 |
+| Staging | 8090 | 8091 |
+
+See `docs/DEPLOYMENT.md` for full architecture documentation.
+
 ## Secrets Management
 
 See `SECRETS.md` for the SOPS + age workflow used to store and deploy encrypted `.env` files.
+
+**Note:** `.env` files are NOT synced by Mutagen. Production secrets must be manually configured on Baso at `/opt/shared-repos/Devai/worktree-preview/.env`.
 
 ## Entwicklung
 
@@ -115,7 +135,7 @@ This repository contains a working MVP with a React/Vite frontend and Fastify AP
 - API Guard: JWT-Pflicht fuer alle `/api/*` ausser /api/health und /api/auth/*
 - Confirmation flow: tools that require approval must use `askForConfirmation`, creating pending actions
 - Actions API: list actions and approve execution via `POST /api/actions/approve`
-- Tool system (whitelisted): `fs.*`, `git.*`, `github.*`, `logs.*`
+- Tool system (whitelisted): `fs.*` (listFiles, readFile, writeFile, mkdir, move, delete, glob, grep, edit), `git.*`, `github.*`, `logs.*`
 - Audit logging for tool/actions in `var/audit.log`
 - Project scan: analyzes `package.json` and injects a short context block into the LLM system prompt
 - GitHub Actions trigger: workflow_dispatch via `github.triggerWorkflow` with `apps/api/config/workflows.json`
@@ -128,9 +148,13 @@ This repository contains a working MVP with a React/Vite frontend and Fastify AP
 
 ### Frontend
 
-- Simple chat UI, actions sidebar with approval buttons
-- Tools slider shows available tools
-- Access slider lists allowed filesystem roots (from `/api/health`)
+- Chat UI with inline action approval (approve/reject buttons in chat flow)
+- Right-side collapsible panels:
+  - **AI Prompts** (blue): Shows the AI's system prompt
+  - **Tools**: Context, skills selection, project files, available tools
+  - **Access**: Allowed filesystem roots
+  - **History** (purple): Session history browser
+- All panels collapsible with toggle buttons
 
 ### Known Gaps vs. Projektziel.txt
 

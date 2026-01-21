@@ -10,7 +10,7 @@ const UpdateSettingSchema = z.object({
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
   app.get('/settings/:key', async (request) => {
     const { key } = request.params as { key: string };
-    const value = getSetting(key);
+    const value = await getSetting(key);
 
     if (value === null) {
       return { key, value: null };
@@ -29,7 +29,7 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { key, value } = parseResult.data;
-    setSetting(key, JSON.stringify(value));
+    await setSetting(key, JSON.stringify(value));
     return { key, value };
   });
 };

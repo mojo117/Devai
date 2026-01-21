@@ -1,80 +1,54 @@
-import Database from 'better-sqlite3';
-import { mkdir } from 'fs/promises';
-import { dirname } from 'path';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { config } from '../config.js';
 
-let db: Database.Database | null = null;
+let supabase: SupabaseClient | null = null;
 
 export async function initDb(): Promise<void> {
-  if (db) {
+  if (supabase) {
     return;
   }
 
-  await mkdir(dirname(config.dbPath), { recursive: true });
-  db = new Database(config.dbPath);
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      title TEXT,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES users (id)
-    );
-
-    CREATE TABLE IF NOT EXISTS messages (
-      id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      timestamp TEXT NOT NULL,
-      FOREIGN KEY (session_id) REFERENCES sessions (id)
-    );
-
-    CREATE TABLE IF NOT EXISTS settings (
-      user_id TEXT NOT NULL,
-      key TEXT NOT NULL,
-      value TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      PRIMARY KEY (user_id, key),
-      FOREIGN KEY (user_id) REFERENCES users (id)
-    );
-
-    CREATE TABLE IF NOT EXISTS audit_logs (
-      id TEXT PRIMARY KEY,
-      timestamp TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      action TEXT NOT NULL,
-      data TEXT NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES users (id)
-    );
-  `);
-
-  ensureDefaultUser();
-}
-
-export function getDb(): Database.Database {
-  if (!db) {
-    throw new Error('Database not initialized');
+  if (!config.supabaseUrl || !config.supabaseServiceKey) {
+    throw new Error('Supabase URL and Service Key are required. Set SUPABASE_URL and SUPABASE_SERVICE_KEY in .env');
   }
-  return db;
+
+  supabase = createClient(config.supabaseUrl, config.supabaseServiceKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+
+  // Ensure default user exists
+  await ensureDefaultUser();
 }
 
-function ensureDefaultUser(): void {
-  if (!db) return;
-  const existing = db.prepare('SELECT id FROM users WHERE id = ?').get('local');
+export function getSupabase(): SupabaseClient {
+  if (!supabase) {
+    throw new Error('Database not initialized. Call initDb() first.');
+  }
+  return supabase;
+}
+
+async function ensureDefaultUser(): Promise<void> {
+  if (!supabase) return;
+
+  const { data: existing } = await supabase
+    .from('users')
+    .select('id')
+    .eq('id', 'local')
+    .single();
+
   if (existing) return;
 
-  const now = new Date().toISOString();
-  db.prepare('INSERT INTO users (id, name, created_at) VALUES (?, ?, ?)').run(
-    'local',
-    'Local User',
-    now
-  );
+  const { error } = await supabase
+    .from('users')
+    .insert({
+      id: 'local',
+      name: 'Local User',
+    });
+
+  if (error && !error.message.includes('duplicate')) {
+    console.error('Failed to create default user:', error);
+  }
 }

@@ -1,34 +1,121 @@
-import { readdir, readFile as fsReadFile, writeFile as fsWriteFile, stat } from 'fs/promises';
-import { join, resolve, relative } from 'path';
+import { readdir, readFile as fsReadFile, writeFile as fsWriteFile, stat, access, mkdir as fsMkdir, rename, unlink, rmdir } from 'fs/promises';
+import { join, resolve, relative, dirname, basename } from 'path';
+import fg from 'fast-glob';
 import { config } from '../config.js';
 
-// Validate that the path is within the project root
-function validatePath(path: string): string {
+// Check if a path exists
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Find case-insensitive match for a path segment in a directory
+async function findCaseInsensitiveMatch(parentDir: string, targetName: string): Promise<string | null> {
+  try {
+    const entries = await readdir(parentDir);
+    const match = entries.find(entry => entry.toLowerCase() === targetName.toLowerCase());
+    return match || null;
+  } catch {
+    return null;
+  }
+}
+
+// Resolve a path with case-insensitive matching
+async function resolvePathCaseInsensitive(basePath: string, relativePath: string): Promise<string> {
+  const segments = relativePath.split(/[\\/]/).filter(Boolean);
+  let currentPath = basePath;
+
+  for (const segment of segments) {
+    const exactPath = join(currentPath, segment);
+
+    // Try exact match first
+    if (await pathExists(exactPath)) {
+      currentPath = exactPath;
+      continue;
+    }
+
+    // Try case-insensitive match
+    const match = await findCaseInsensitiveMatch(currentPath, segment);
+    if (match) {
+      currentPath = join(currentPath, match);
+    } else {
+      // No match found - return the path as-is (will fail later with proper error)
+      currentPath = exactPath;
+    }
+  }
+
+  return currentPath;
+}
+
+// Validate that the path is within allowed roots
+// File access is restricted to /opt/Klyde/projects and /workingtrees
+async function validatePath(path: string): Promise<string> {
+  // Handle empty or root path requests - default to first allowed root
+  if (!path || path === '/' || path === '.' || path === './') {
+    return config.allowedRoots[0];
+  }
+
   const segments = path.split(/[\\/]/).filter(Boolean);
   if (segments.includes('.git')) {
     throw new Error('Access denied: .git paths are not allowed');
   }
-  const allowedRoots = [
-    ...(config.projectRoot ? [config.projectRoot] : []),
-    ...config.allowedRoots,
-  ];
+
+  // Use only the hardcoded allowed roots from config
+  const allowedRoots = [...config.allowedRoots];
 
   if (allowedRoots.length === 0) {
-    throw new Error('No allowed roots configured (set PROJECT_ROOT or ALLOWED_ROOTS)');
+    throw new Error('No allowed roots configured');
   }
 
+  // Check if it's already an absolute path within allowed roots
+  const normalizedPath = resolve(path);
   for (const root of allowedRoots) {
     const absoluteRoot = resolve(root);
-    const absolutePath = resolve(absoluteRoot, path);
-    const relativePath = relative(absoluteRoot, absolutePath);
-
-    // Check for path traversal attacks
-    if (!relativePath.startsWith('..') && !relativePath.startsWith('/')) {
-      return absolutePath;
+    if (normalizedPath.startsWith(absoluteRoot + '/') || normalizedPath === absoluteRoot) {
+      // Try case-insensitive resolution for the part after the root
+      const relativePart = relative(absoluteRoot, normalizedPath);
+      if (relativePart) {
+        return await resolvePathCaseInsensitive(absoluteRoot, relativePart);
+      }
+      return normalizedPath;
     }
   }
 
-  throw new Error('Access denied: Path is outside allowed roots');
+  // For relative paths, try each allowed root
+  for (const root of allowedRoots) {
+    const absoluteRoot = resolve(root);
+    const rootBasename = absoluteRoot.split('/').pop() || '';
+    let cleanPath = path;
+
+    // If the path IS the root's basename (e.g., "projects"), return the root
+    if (segments.length === 1 && segments[0].toLowerCase() === rootBasename.toLowerCase()) {
+      return absoluteRoot;
+    }
+
+    // If the path starts with the root's basename, strip it to avoid duplication
+    // e.g., "projects/Test" -> "Test" when root is "/opt/Klyde/projects"
+    if (segments[0]?.toLowerCase() === rootBasename.toLowerCase()) {
+      cleanPath = segments.slice(1).join('/');
+    }
+
+    // Use case-insensitive resolution
+    const resolvedPath = await resolvePathCaseInsensitive(absoluteRoot, cleanPath);
+    const relativePath = relative(absoluteRoot, resolvedPath);
+
+    // Check for path traversal attacks
+    if (!relativePath.startsWith('..') && !relativePath.startsWith('/')) {
+      // Verify the path exists before returning
+      if (await pathExists(resolvedPath)) {
+        return resolvedPath;
+      }
+    }
+  }
+
+  throw new Error(`Path not found. Available roots: ${allowedRoots.join(', ')}. Try listing "projects" or a specific project like "projects/Devai".`);
 }
 
 function isAllowedExtension(path: string): boolean {
@@ -49,7 +136,7 @@ export interface ListFilesResult {
 }
 
 export async function listFiles(path: string): Promise<ListFilesResult> {
-  const absolutePath = validatePath(path);
+  const absolutePath = await validatePath(path);
 
   const entries = await readdir(absolutePath, { withFileTypes: true });
 
@@ -96,7 +183,7 @@ export interface ReadFileResult {
 }
 
 export async function readFile(path: string): Promise<ReadFileResult> {
-  const absolutePath = validatePath(path);
+  const absolutePath = await validatePath(path);
   if (!isAllowedExtension(path)) {
     throw new Error('Read denied: file extension is not allowed');
   }
@@ -125,7 +212,7 @@ export interface WriteFileResult {
 }
 
 export async function writeFile(path: string, content: string): Promise<WriteFileResult> {
-  const absolutePath = validatePath(path);
+  const absolutePath = await validatePath(path);
   if (!isAllowedExtension(path)) {
     throw new Error('Write denied: file extension is not allowed');
   }
@@ -143,4 +230,327 @@ export async function writeFile(path: string, content: string): Promise<WriteFil
     path,
     bytesWritten: bytes,
   };
+}
+
+// ============ GLOB - Pattern-based file search ============
+
+export interface GlobResult {
+  pattern: string;
+  basePath: string;
+  files: string[];
+  count: number;
+  truncated: boolean;
+}
+
+export async function globFiles(pattern: string, basePath?: string): Promise<GlobResult> {
+  // Validate basePath is within allowed roots, or use first allowed root
+  const searchPath = basePath ? await validatePath(basePath) : config.allowedRoots[0];
+
+  const files = await fg(pattern, {
+    cwd: searchPath,
+    onlyFiles: true,
+    ignore: ['**/node_modules/**', '**/.git/**'],
+    absolute: false,
+  });
+
+  const truncated = files.length > config.toolMaxListEntries;
+
+  return {
+    pattern,
+    basePath: searchPath,
+    files: files.slice(0, config.toolMaxListEntries),
+    count: files.length,
+    truncated,
+  };
+}
+
+// ============ GREP - Content search ============
+
+export interface GrepMatch {
+  file: string;
+  line: number;
+  content: string;
+}
+
+export interface GrepResult {
+  pattern: string;
+  basePath: string;
+  matches: GrepMatch[];
+  filesSearched: number;
+  truncated: boolean;
+}
+
+export async function grepFiles(
+  pattern: string,
+  searchPath: string,
+  fileGlob?: string
+): Promise<GrepResult> {
+  const validatedPath = await validatePath(searchPath);
+  const regex = new RegExp(pattern, 'gi');
+
+  // Get files to search
+  const globPattern = fileGlob || '**/*';
+  const files = await fg(globPattern, {
+    cwd: validatedPath,
+    onlyFiles: true,
+    ignore: ['**/node_modules/**', '**/.git/**'],
+  });
+
+  const matches: GrepMatch[] = [];
+  let filesSearched = 0;
+  const maxFiles = 100;
+  const maxMatches = 50;
+
+  for (const file of files) {
+    if (filesSearched >= maxFiles) break;
+    if (!isAllowedExtension(file)) continue;
+
+    filesSearched++;
+    const fullPath = join(validatedPath, file);
+
+    try {
+      const content = await fsReadFile(fullPath, 'utf-8');
+      const lines = content.split('\n');
+
+      for (let i = 0; i < lines.length; i++) {
+        if (regex.test(lines[i])) {
+          matches.push({
+            file,
+            line: i + 1,
+            content: lines[i].trim().slice(0, 200), // Limit line length
+          });
+          regex.lastIndex = 0; // Reset regex state
+
+          if (matches.length >= maxMatches) break;
+        }
+      }
+    } catch {
+      // Skip files that can't be read
+    }
+
+    if (matches.length >= maxMatches) break;
+  }
+
+  return {
+    pattern,
+    basePath: validatedPath,
+    matches,
+    filesSearched,
+    truncated: matches.length >= maxMatches,
+  };
+}
+
+// ============ EDIT - Targeted file edits ============
+
+export interface EditResult {
+  path: string;
+  replacements: number;
+}
+
+export async function editFile(
+  path: string,
+  oldString: string,
+  newString: string
+): Promise<EditResult> {
+  const absolutePath = await validatePath(path);
+  if (!isAllowedExtension(path)) {
+    throw new Error('Edit denied: file extension is not allowed');
+  }
+
+  const content = await fsReadFile(absolutePath, 'utf-8');
+
+  if (!content.includes(oldString)) {
+    throw new Error('Edit failed: old_string not found in file');
+  }
+
+  // Count occurrences to ensure uniqueness
+  const occurrences = content.split(oldString).length - 1;
+  if (occurrences > 1) {
+    throw new Error(
+      `Edit failed: old_string found ${occurrences} times. Provide more context to make it unique.`
+    );
+  }
+
+  const newContent = content.replace(oldString, newString);
+
+  // Size check for the new content
+  const bytes = Buffer.byteLength(newContent, 'utf-8');
+  if (bytes > config.toolMaxWriteBytes) {
+    throw new Error(`Edit would exceed max file size: ${bytes} bytes (max: ${config.toolMaxWriteBytes} bytes)`);
+  }
+
+  await fsWriteFile(absolutePath, newContent, 'utf-8');
+
+  return {
+    path,
+    replacements: 1,
+  };
+}
+
+// ============ Helper for validating target paths (may not exist yet) ============
+
+async function validateTargetPath(path: string): Promise<string> {
+  // Handle empty path
+  if (!path || path === '/' || path === '.' || path === './') {
+    throw new Error('Invalid path: cannot use root directory');
+  }
+
+  const segments = path.split(/[\\/]/).filter(Boolean);
+  if (segments.includes('.git')) {
+    throw new Error('Access denied: .git paths are not allowed');
+  }
+
+  const allowedRoots = [...config.allowedRoots];
+
+  // Check if it's already an absolute path within allowed roots
+  const normalizedPath = resolve(path);
+  for (const root of allowedRoots) {
+    const absoluteRoot = resolve(root);
+    if (normalizedPath.startsWith(absoluteRoot + '/') || normalizedPath === absoluteRoot) {
+      // Verify the root actually exists on this system
+      if (await pathExists(absoluteRoot)) {
+        return normalizedPath;
+      }
+    }
+  }
+
+  // For paths that look absolute but aren't under allowed roots (e.g., "/test/...")
+  // treat them as relative paths by stripping the leading slash
+  let cleanSegments = [...segments];
+
+  // For relative paths, try each allowed root (only if root exists)
+  for (const root of allowedRoots) {
+    const absoluteRoot = resolve(root);
+
+    // Skip roots that don't exist on this system
+    if (!await pathExists(absoluteRoot)) {
+      continue;
+    }
+
+    const rootBasename = absoluteRoot.split('/').pop() || '';
+
+    // If the path starts with the root's basename, strip it
+    if (cleanSegments[0]?.toLowerCase() === rootBasename.toLowerCase()) {
+      cleanSegments = cleanSegments.slice(1);
+    }
+
+    // Try to match the first segment case-insensitively against existing directories
+    const firstSegment = cleanSegments[0];
+    if (firstSegment) {
+      const match = await findCaseInsensitiveMatch(absoluteRoot, firstSegment);
+      if (match) {
+        // Replace first segment with correctly-cased version
+        cleanSegments[0] = match;
+      }
+    }
+
+    const cleanPath = cleanSegments.join('/');
+    const fullPath = join(absoluteRoot, cleanPath);
+    const relativePath = relative(absoluteRoot, fullPath);
+
+    // Check for path traversal attacks
+    if (!relativePath.startsWith('..') && !relativePath.startsWith('/')) {
+      return fullPath;
+    }
+  }
+
+  throw new Error(`Path must be within allowed roots: ${allowedRoots.join(', ')}`);
+}
+
+// ============ MKDIR - Create directory ============
+
+export interface MkdirResult {
+  path: string;
+  created: boolean;
+}
+
+export async function makeDirectory(path: string): Promise<MkdirResult> {
+  const absolutePath = await validateTargetPath(path);
+
+  // Check if directory already exists
+  if (await pathExists(absolutePath)) {
+    const stats = await stat(absolutePath);
+    if (stats.isDirectory()) {
+      return { path: absolutePath, created: false }; // Already exists
+    }
+    throw new Error('Path already exists as a file');
+  }
+
+  // Create the directory (recursive to create parent dirs if needed)
+  await fsMkdir(absolutePath, { recursive: true });
+
+  return {
+    path: absolutePath,
+    created: true,
+  };
+}
+
+// ============ MOVE - Move/rename files and directories ============
+
+export interface MoveResult {
+  source: string;
+  destination: string;
+  moved: boolean;
+}
+
+export async function moveFile(source: string, destination: string): Promise<MoveResult> {
+  const absoluteSource = await validatePath(source);
+  const absoluteDest = await validateTargetPath(destination);
+
+  // Check source exists
+  if (!await pathExists(absoluteSource)) {
+    throw new Error(`Source does not exist: ${source}`);
+  }
+
+  // Check destination doesn't already exist
+  if (await pathExists(absoluteDest)) {
+    throw new Error(`Destination already exists: ${destination}`);
+  }
+
+  // Ensure parent directory of destination exists
+  const destParent = dirname(absoluteDest);
+  if (!await pathExists(destParent)) {
+    await fsMkdir(destParent, { recursive: true });
+  }
+
+  // Perform the move/rename
+  await rename(absoluteSource, absoluteDest);
+
+  return {
+    source: absoluteSource,
+    destination: absoluteDest,
+    moved: true,
+  };
+}
+
+// ============ DELETE - Delete files and empty directories ============
+
+export interface DeleteResult {
+  path: string;
+  deleted: boolean;
+  type: 'file' | 'directory';
+}
+
+export async function deleteFile(path: string): Promise<DeleteResult> {
+  const absolutePath = await validatePath(path);
+
+  // Check if path exists
+  if (!await pathExists(absolutePath)) {
+    throw new Error(`Path does not exist: ${path}`);
+  }
+
+  const stats = await stat(absolutePath);
+
+  if (stats.isDirectory()) {
+    // Only delete empty directories
+    const entries = await readdir(absolutePath);
+    if (entries.length > 0) {
+      throw new Error(`Cannot delete non-empty directory: ${path} (contains ${entries.length} items)`);
+    }
+    await rmdir(absolutePath);
+    return { path, deleted: true, type: 'directory' };
+  } else {
+    await unlink(absolutePath);
+    return { path, deleted: true, type: 'file' };
+  }
 }

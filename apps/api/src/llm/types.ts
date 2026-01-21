@@ -1,8 +1,16 @@
 export type LLMProvider = 'anthropic' | 'openai' | 'gemini';
 
+export interface ToolResult {
+  toolUseId: string;
+  result: string;
+  isError?: boolean;
+}
+
 export interface LLMMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  toolCalls?: ToolCall[];      // For assistant messages with tool calls
+  toolResults?: ToolResult[];  // For user messages with tool results
 }
 
 export interface ToolDefinition {
