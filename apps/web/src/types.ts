@@ -123,3 +123,11 @@ export interface ProjectSearchResponse {
   filesSearched: number;
   truncated: boolean;
 }
+
+export interface ProjectGlobResponse {
+  pattern: string;
+  basePath: string;
+  files: string[];
+  count: number;
+  truncated: boolean;
+}

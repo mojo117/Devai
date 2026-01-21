@@ -8,6 +8,7 @@ import type {
   ProjectFilesResponse,
   ProjectFileResponse,
   ProjectSearchResponse,
+  ProjectGlobResponse,
   SessionsResponse,
   SessionMessagesResponse,
   SettingResponse,
@@ -215,6 +216,24 @@ export async function searchProjectFiles(
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: 'Failed to search files' }));
     throw new Error(error.error || 'Failed to search files');
+  }
+  return res.json();
+}
+
+export async function globProjectFiles(
+  pattern: string,
+  path?: string
+): Promise<ProjectGlobResponse> {
+  const params = new URLSearchParams({ pattern });
+  if (path) {
+    params.set('path', path);
+  }
+  const res = await fetch(`${API_BASE}/project/glob?${params.toString()}`, {
+    headers: withAuthHeaders(),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to glob files' }));
+    throw new Error(error.error || 'Failed to glob files');
   }
   return res.json();
 }

@@ -2,7 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { resolve } from 'path';
 import { config } from '../config.js';
 import { getProjectContext, clearProjectCache } from '../scanner/projectScanner.js';
-import { listFiles, readFile, grepFiles } from '../tools/fs.js';
+import { listFiles, readFile, grepFiles, globFiles } from '../tools/fs.js';
 import type { ProjectContext } from '@devai/shared';
 
 // Validate that a path is within allowed roots
@@ -135,6 +135,29 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
       const status = error instanceof Error && error.message.includes('Access denied') ? 403 : 400;
       return reply.status(status).send({
         error: 'Failed to search files',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
+
+  // Find files matching a glob pattern (must be within allowed roots)
+  app.get('/project/glob', async (request, reply) => {
+    const { path, pattern } = request.query as { path?: string; pattern?: string };
+
+    if (!pattern || pattern.trim().length === 0) {
+      return reply.status(400).send({
+        error: 'Glob pattern is required.',
+      });
+    }
+
+    const basePath = path && path.trim().length > 0 ? path.trim() : undefined;
+
+    try {
+      return await globFiles(pattern.trim(), basePath);
+    } catch (error) {
+      const status = error instanceof Error && error.message.includes('Access denied') ? 403 : 400;
+      return reply.status(status).send({
+        error: 'Failed to glob files',
         details: error instanceof Error ? error.message : 'Unknown error',
       });
     }

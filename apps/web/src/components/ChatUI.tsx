@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import { sendMessage, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction } from '../api';
+import { sendMessage, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction, globProjectFiles } from '../api';
 import type { ChatMessage, LLMProvider, SessionSummary } from '../types';
 import { InlineAction, type PendingAction } from './InlineAction';
 
@@ -26,9 +26,10 @@ interface ChatUIProps {
   provider: LLMProvider;
   projectRoot?: string | null;
   skillIds?: string[];
+  allowedRoots?: string[];
 }
 
-export function ChatUI({ provider, projectRoot, skillIds }: ChatUIProps) {
+export function ChatUI({ provider, projectRoot, skillIds, allowedRoots }: ChatUIProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -37,6 +38,10 @@ export function ChatUI({ provider, projectRoot, skillIds }: ChatUIProps) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
+  const [fileHints, setFileHints] = useState<string[]>([]);
+  const [fileHintsLoading, setFileHintsLoading] = useState(false);
+  const [fileHintsError, setFileHintsError] = useState<string | null>(null);
+  const [activeHintIndex, setActiveHintIndex] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const planItems = extractPlanItems(messages);
 
@@ -81,6 +86,42 @@ export function ChatUI({ provider, projectRoot, skillIds }: ChatUIProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  useEffect(() => {
+    const token = extractAtToken(input);
+    if (!token) {
+      setFileHints([]);
+      setFileHintsError(null);
+      return;
+    }
+
+    let cancelled = false;
+    const timeout = setTimeout(async () => {
+      setFileHintsLoading(true);
+      setFileHintsError(null);
+      try {
+        const basePath = allowedRoots && allowedRoots.length > 0 ? allowedRoots[0] : undefined;
+        const safeToken = escapeGlob(token.value);
+        const pattern = `**/*${safeToken}*`;
+        const data = await globProjectFiles(pattern, basePath);
+        if (cancelled) return;
+        const files = data.files.slice(0, 20);
+        setFileHints(files);
+        setActiveHintIndex(0);
+      } catch (err) {
+        if (cancelled) return;
+        setFileHints([]);
+        setFileHintsError(err instanceof Error ? err.message : 'Failed to load file hints');
+      } finally {
+        if (!cancelled) setFileHintsLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [input, allowedRoots]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
@@ -96,6 +137,7 @@ export function ChatUI({ provider, projectRoot, skillIds }: ChatUIProps) {
     setInput('');
     setIsLoading(true);
     setToolEvents([]);
+    setFileHints([]);
 
     try {
       const response = await sendMessage(
@@ -194,6 +236,35 @@ export function ChatUI({ provider, projectRoot, skillIds }: ChatUIProps) {
       // Ignore select errors for now.
     } finally {
       setSessionsLoading(false);
+    }
+  };
+
+  const handlePickHint = (hint: string) => {
+    const token = extractAtToken(input);
+    if (!token) return;
+    const before = input.slice(0, token.start);
+    const after = input.slice(token.end);
+    const next = `${before}@${hint} ${after}`.replace(/\s{2,}/g, ' ');
+    setInput(next);
+    setFileHints([]);
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (fileHints.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveHintIndex((prev) => (prev + 1) % fileHints.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveHintIndex((prev) => (prev - 1 + fileHints.length) % fileHints.length);
+    } else if (e.key === 'Enter') {
+      const token = extractAtToken(input);
+      if (token && fileHints[activeHintIndex]) {
+        e.preventDefault();
+        handlePickHint(fileHints[activeHintIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      setFileHints([]);
     }
   };
 
@@ -417,14 +488,43 @@ export function ChatUI({ provider, projectRoot, skillIds }: ChatUIProps) {
       {/* Input */}
       <form onSubmit={handleSubmit} className="border-t border-gray-700 p-4">
         <div className="flex gap-2">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Type your message..."
-            disabled={isLoading}
-            className="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500 disabled:opacity-50"
-          />
+          <div className="relative flex-1">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleInputKeyDown}
+              placeholder="Type your message... (use @ to quick-open files)"
+              disabled={isLoading}
+              className="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+            />
+            {fileHints.length > 0 && (
+              <div className="absolute bottom-12 left-0 right-0 bg-gray-900 border border-gray-700 rounded-lg shadow-lg max-h-48 overflow-y-auto text-xs">
+                {fileHints.map((hint, idx) => (
+                  <button
+                    type="button"
+                    key={hint}
+                    onClick={() => handlePickHint(hint)}
+                    className={`w-full text-left px-3 py-2 ${
+                      idx === activeHintIndex ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-800'
+                    }`}
+                  >
+                    {hint}
+                  </button>
+                ))}
+              </div>
+            )}
+            {fileHintsLoading && (
+              <div className="absolute bottom-12 left-0 right-0 text-[10px] text-gray-400 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2">
+                Searching files...
+              </div>
+            )}
+            {fileHintsError && (
+              <div className="absolute bottom-12 left-0 right-0 text-[10px] text-red-300 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2">
+                {fileHintsError}
+              </div>
+            )}
+          </div>
           <button
             type="submit"
             disabled={isLoading || !input.trim()}
@@ -481,6 +581,23 @@ function renderMessageContent(content: string) {
       })}
     </div>
   );
+}
+
+function extractAtToken(input: string): { value: string; start: number; end: number } | null {
+  const atIndex = input.lastIndexOf('@');
+  if (atIndex === -1) return null;
+  const after = input.slice(atIndex + 1);
+  const match = after.match(/^[^\s]*/);
+  if (!match) return null;
+  return {
+    value: match[0],
+    start: atIndex,
+    end: atIndex + 1 + match[0].length,
+  };
+}
+
+function escapeGlob(value: string): string {
+  return value.replace(/([\\*?[\]{}()!])/g, '\\$1');
 }
 
 function extractPlanItems(messages: ChatMessage[]): string[] {

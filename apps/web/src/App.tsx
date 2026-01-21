@@ -389,6 +389,7 @@ function App() {
             provider={provider}
             projectRoot={health?.projectRoot}
             skillIds={selectedSkillIds}
+            allowedRoots={health?.allowedRoots}
           />
         </div>
 
