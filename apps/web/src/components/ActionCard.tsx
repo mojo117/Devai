@@ -3,6 +3,7 @@ import type { Action } from '../types';
 interface ActionCardProps {
   action: Action;
   onApprove: () => void;
+  onReject?: () => void;
 }
 
 const statusColors: Record<string, string> = {
@@ -14,7 +15,7 @@ const statusColors: Record<string, string> = {
   rejected: 'bg-gray-600',
 };
 
-export function ActionCard({ action, onApprove }: ActionCardProps) {
+export function ActionCard({ action, onApprove, onReject }: ActionCardProps) {
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-lg p-3">
       {/* Header */}
@@ -66,14 +67,24 @@ export function ActionCard({ action, onApprove }: ActionCardProps) {
         </details>
       )}
 
-      {/* Approve Button */}
+      {/* Approve/Reject Buttons */}
       {action.status === 'pending' && (
-        <button
-          onClick={onApprove}
-          className="w-full bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 px-4 rounded transition-colors"
-        >
-          Approve Action
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onApprove}
+            className="flex-1 bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 px-4 rounded transition-colors"
+          >
+            Approve
+          </button>
+          {onReject && (
+            <button
+              onClick={onReject}
+              className="flex-1 border border-red-500 text-red-300 hover:text-white hover:bg-red-600 text-sm font-medium py-2 px-4 rounded transition-colors"
+            >
+              Reject
+            </button>
+          )}
+        </div>
       )}
 
       {/* Result/Error */}

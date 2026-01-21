@@ -6,6 +6,7 @@ import { ToolsPanel } from './components/ToolsPanel';
 import { HistoryPanel } from './components/HistoryPanel';
 import { PromptsPanel } from './components/PromptsPanel';
 import { ProviderSelect } from './components/ProviderSelect';
+import { ActionsPage } from './components/ActionsPage';
 import {
   fetchHealth,
   fetchActions,
@@ -50,6 +51,7 @@ function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
   const [pinnedFiles, setPinnedFiles] = useState<string[]>([]);
+  const [view, setView] = useState<'chat' | 'actions'>('chat');
 
   useEffect(() => {
     verifyAuth()
@@ -230,6 +232,16 @@ function App() {
     }
   };
 
+  const handleReject = async (actionId: string) => {
+    try {
+      await rejectAction(actionId);
+      const data = await fetchActions();
+      setActions(data.actions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reject');
+    }
+  };
+
   const handleToggleSkill = (skillId: string) => {
     setSelectedSkillIds((prev) => (
       prev.includes(skillId)
@@ -388,7 +400,31 @@ function App() {
       {/* Header */}
       <header className="bg-gray-800 border-b border-gray-700 px-6 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <h1 className="text-xl font-bold text-blue-400">DevAI</h1>
+          <div className="flex items-center gap-4">
+            <h1 className="text-xl font-bold text-blue-400">DevAI</h1>
+            <div className="flex items-center gap-2 text-xs">
+              <button
+                onClick={() => setView('chat')}
+                className={`px-3 py-1.5 rounded border ${
+                  view === 'chat'
+                    ? 'bg-blue-600 border-blue-500 text-white'
+                    : 'border-gray-700 text-gray-300 hover:bg-gray-800'
+                }`}
+              >
+                Chat
+              </button>
+              <button
+                onClick={() => setView('actions')}
+                className={`px-3 py-1.5 rounded border ${
+                  view === 'actions'
+                    ? 'bg-blue-600 border-blue-500 text-white'
+                    : 'border-gray-700 text-gray-300 hover:bg-gray-800'
+                }`}
+              >
+                Actions
+              </button>
+            </div>
+          </div>
           <div className="flex items-center gap-4">
             <ProviderSelect
               value={provider}
@@ -420,76 +456,91 @@ function App() {
 
       {/* Main Content */}
       <div className="flex-1 flex max-w-6xl mx-auto w-full">
-        {/* Chat Area */}
-        <div className="flex-1 flex flex-col">
-          <ChatUI
-            provider={provider}
-            projectRoot={health?.projectRoot}
-            skillIds={selectedSkillIds}
-            allowedRoots={health?.allowedRoots}
-            pinnedFiles={pinnedFiles}
-            onPinFile={(file) => setPinnedFiles((prev) => (prev.includes(file) ? prev : [...prev, file]))}
+        {view === 'chat' ? (
+          <>
+            {/* Chat Area */}
+            <div className="flex-1 flex flex-col">
+              <ChatUI
+                provider={provider}
+                projectRoot={health?.projectRoot}
+                skillIds={selectedSkillIds}
+                allowedRoots={health?.allowedRoots}
+                pinnedFiles={pinnedFiles}
+                onPinFile={(file) => setPinnedFiles((prev) => (prev.includes(file) ? prev : [...prev, file]))}
+              />
+            </div>
+
+            {/* Actions Sidebar */}
+            {sortedActions.length > 0 && (
+              <aside className="w-80 border-l border-gray-700 p-4 overflow-y-auto">
+                <h2 className="text-sm font-semibold text-gray-400 mb-4">
+                  Actions ({sortedActions.length})
+                </h2>
+
+                {pendingActions.length > 0 && (
+                  <div className="mb-6">
+                    <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
+                      Pending ({pendingActions.length})
+                    </div>
+                    <div className="space-y-3">
+                      {pendingActions.map((action) => (
+                        <ActionCard
+                          key={action.id}
+                          action={action}
+                          onApprove={() => handleApprove(action.id)}
+                          onReject={() => handleReject(action.id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {activeActions.length > 0 && (
+                  <div className="mb-6">
+                    <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
+                      In Progress ({activeActions.length})
+                    </div>
+                    <div className="space-y-3">
+                      {activeActions.map((action) => (
+                        <ActionCard
+                          key={action.id}
+                          action={action}
+                          onApprove={() => handleApprove(action.id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {completedActions.length > 0 && (
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
+                      Completed ({completedActions.length})
+                    </div>
+                    <div className="space-y-3">
+                      {completedActions.map((action) => (
+                        <ActionCard
+                          key={action.id}
+                          action={action}
+                          onApprove={() => handleApprove(action.id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </aside>
+            )}
+          </>
+        ) : (
+          <ActionsPage
+            actions={sortedActions}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            onRefresh={async () => {
+              const data = await fetchActions();
+              setActions(data.actions);
+            }}
           />
-        </div>
-
-        {/* Actions Sidebar */}
-        {sortedActions.length > 0 && (
-          <aside className="w-80 border-l border-gray-700 p-4 overflow-y-auto">
-            <h2 className="text-sm font-semibold text-gray-400 mb-4">
-              Actions ({sortedActions.length})
-            </h2>
-
-            {pendingActions.length > 0 && (
-              <div className="mb-6">
-                <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
-                  Pending ({pendingActions.length})
-                </div>
-                <div className="space-y-3">
-                  {pendingActions.map((action) => (
-                    <ActionCard
-                      key={action.id}
-                      action={action}
-                      onApprove={() => handleApprove(action.id)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {activeActions.length > 0 && (
-              <div className="mb-6">
-                <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
-                  In Progress ({activeActions.length})
-                </div>
-                <div className="space-y-3">
-                  {activeActions.map((action) => (
-                    <ActionCard
-                      key={action.id}
-                      action={action}
-                      onApprove={() => handleApprove(action.id)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {completedActions.length > 0 && (
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
-                  Completed ({completedActions.length})
-                </div>
-                <div className="space-y-3">
-                  {completedActions.map((action) => (
-                    <ActionCard
-                      key={action.id}
-                      action={action}
-                      onApprove={() => handleApprove(action.id)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </aside>
         )}
       </div>
 
