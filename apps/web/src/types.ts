@@ -103,3 +103,23 @@ export interface ProjectFilesResponse {
   path: string;
   files: ProjectFileEntry[];
 }
+
+export interface ProjectFileResponse {
+  path: string;
+  content: string;
+  size: number;
+}
+
+export interface ProjectSearchMatch {
+  file: string;
+  line: number;
+  content: string;
+}
+
+export interface ProjectSearchResponse {
+  pattern: string;
+  basePath: string;
+  matches: ProjectSearchMatch[];
+  filesSearched: number;
+  truncated: boolean;
+}

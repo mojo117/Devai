@@ -6,6 +6,8 @@ import type {
   SkillsResponse,
   ProjectResponse,
   ProjectFilesResponse,
+  ProjectFileResponse,
+  ProjectSearchResponse,
   SessionsResponse,
   SessionMessagesResponse,
   SettingResponse,
@@ -182,6 +184,37 @@ export async function listProjectFiles(path: string): Promise<ProjectFilesRespon
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: 'Failed to list files' }));
     throw new Error(error.error || 'Failed to list files');
+  }
+  return res.json();
+}
+
+export async function readProjectFile(path: string): Promise<ProjectFileResponse> {
+  const params = new URLSearchParams({ path });
+  const res = await fetch(`${API_BASE}/project/file?${params.toString()}`, {
+    headers: withAuthHeaders(),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to read file' }));
+    throw new Error(error.error || 'Failed to read file');
+  }
+  return res.json();
+}
+
+export async function searchProjectFiles(
+  pattern: string,
+  path: string,
+  glob?: string
+): Promise<ProjectSearchResponse> {
+  const params = new URLSearchParams({ pattern, path });
+  if (glob && glob.trim().length > 0) {
+    params.set('glob', glob);
+  }
+  const res = await fetch(`${API_BASE}/project/search?${params.toString()}`, {
+    headers: withAuthHeaders(),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to search files' }));
+    throw new Error(error.error || 'Failed to search files');
   }
   return res.json();
 }

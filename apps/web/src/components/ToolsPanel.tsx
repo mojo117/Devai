@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
-import type { ProjectContext, ProjectFileEntry, SkillSummary } from '../types';
-import { listProjectFiles } from '../api';
+import type {
+  ProjectContext,
+  ProjectFileEntry,
+  ProjectSearchMatch,
+  SkillSummary,
+} from '../types';
+import { listProjectFiles, readProjectFile, searchProjectFiles } from '../api';
 
 interface Tool {
   name: string;
@@ -58,22 +63,39 @@ export function ToolsPanel({
   const [files, setFiles] = useState<ProjectFileEntry[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesError, setFilesError] = useState<string | null>(null);
+  const [selectedRoot, setSelectedRoot] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchGlob, setSearchGlob] = useState('');
+  const [searchResults, setSearchResults] = useState<ProjectSearchMatch[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [filePreviewPath, setFilePreviewPath] = useState<string | null>(null);
+  const [filePreviewContent, setFilePreviewContent] = useState<string | null>(null);
+  const [filePreviewError, setFilePreviewError] = useState<string | null>(null);
+  const [filePreviewLoading, setFilePreviewLoading] = useState(false);
 
   useEffect(() => {
-    if (!isOpen || !projectRoot) return;
+    if (!isOpen || !selectedRoot) return;
     setFilesLoading(true);
     setFilesError(null);
-    listProjectFiles(filesPath)
+    const path = filesPath === '.' ? selectedRoot : `${selectedRoot}/${filesPath}`;
+    listProjectFiles(path)
       .then((data) => setFiles(data.files))
       .catch((err) => setFilesError(err instanceof Error ? err.message : 'Failed to load files'))
       .finally(() => setFilesLoading(false));
-  }, [isOpen, filesPath, projectRoot]);
+  }, [isOpen, filesPath, selectedRoot]);
 
   useEffect(() => {
-    if (projectRoot) {
-      setFilesPath('.');
+    if (allowedRoots && allowedRoots.length > 0) {
+      setSelectedRoot((prev) => prev || allowedRoots[0]);
     }
-  }, [projectRoot]);
+  }, [allowedRoots]);
+
+  useEffect(() => {
+    setFilesPath('.');
+    setSearchResults([]);
+    setSearchError(null);
+  }, [selectedRoot]);
 
   const handleOpenEntry = (entry: ProjectFileEntry) => {
     if (entry.type !== 'directory') return;
@@ -87,6 +109,37 @@ export function ToolsPanel({
       if (parts.length <= 1) return '.';
       return parts.slice(0, -1).join('/');
     });
+  };
+
+  const handleSearch = async () => {
+    if (!searchQuery.trim() || !selectedRoot) return;
+    setSearchLoading(true);
+    setSearchError(null);
+    try {
+      const data = await searchProjectFiles(searchQuery.trim(), selectedRoot, searchGlob.trim() || undefined);
+      setSearchResults(data.matches);
+    } catch (err) {
+      setSearchError(err instanceof Error ? err.message : 'Search failed');
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const handlePreviewFile = async (relativePath: string) => {
+    if (!selectedRoot) return;
+    const fullPath = `${selectedRoot}/${relativePath}`;
+    setFilePreviewLoading(true);
+    setFilePreviewError(null);
+    setFilePreviewPath(relativePath);
+    try {
+      const data = await readProjectFile(fullPath);
+      setFilePreviewContent(data.content);
+    } catch (err) {
+      setFilePreviewContent(null);
+      setFilePreviewError(err instanceof Error ? err.message : 'Failed to read file');
+    } finally {
+      setFilePreviewLoading(false);
+    }
   };
 
   return (
@@ -200,12 +253,28 @@ export function ToolsPanel({
               </button>
             </div>
             <p className="text-[10px] text-gray-600 mt-1">
-              Path: {filesPath}
+              Root: {selectedRoot || 'none'} / {filesPath}
             </p>
-            {!projectRoot ? (
-              <p className="text-xs text-gray-500 mt-2">Project root not configured.</p>
+            {!selectedRoot ? (
+              <p className="text-xs text-gray-500 mt-2">No allowed root selected.</p>
             ) : (
               <>
+                {allowedRoots && allowedRoots.length > 1 && (
+                  <div className="mt-2">
+                    <label className="text-[11px] text-gray-500">Root</label>
+                    <select
+                      value={selectedRoot}
+                      onChange={(e) => setSelectedRoot(e.target.value)}
+                      className="mt-1 w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200"
+                    >
+                      {allowedRoots.map((root) => (
+                        <option key={root} value={root}>
+                          {root}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 {filesError && (
                   <p className="text-xs text-red-300 mt-2">{filesError}</p>
                 )}
@@ -237,6 +306,95 @@ export function ToolsPanel({
               </>
             )}
           </div>
+
+          <div className="mb-5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-gray-400">
+                Repo Search
+              </h2>
+              <button
+                onClick={handleSearch}
+                disabled={searchLoading || !searchQuery.trim() || !selectedRoot}
+                className="text-[10px] text-gray-400 hover:text-gray-200 disabled:opacity-50"
+              >
+                {searchLoading ? 'Searching...' : 'Run'}
+              </button>
+            </div>
+            <div className="mt-2 space-y-2">
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search pattern"
+                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200"
+              />
+              <input
+                value={searchGlob}
+                onChange={(e) => setSearchGlob(e.target.value)}
+                placeholder="Glob filter (optional)"
+                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200"
+              />
+            </div>
+            {searchError && (
+              <p className="text-xs text-red-300 mt-2">{searchError}</p>
+            )}
+            {searchResults.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {searchResults.slice(0, 20).map((match, idx) => (
+                  <div key={`${match.file}-${match.line}-${idx}`} className="bg-gray-900 rounded p-2 text-xs text-gray-200">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-[11px] text-blue-300 truncate">
+                        {match.file}:{match.line}
+                      </span>
+                      <button
+                        onClick={() => handlePreviewFile(match.file)}
+                        className="text-[10px] text-gray-400 hover:text-gray-200"
+                      >
+                        Open
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-1">{match.content}</p>
+                  </div>
+                ))}
+                {searchResults.length > 20 && (
+                  <p className="text-[10px] text-gray-500">Showing first 20 matches.</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {filePreviewPath && (
+            <div className="mb-5">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-gray-400">
+                  File Preview
+                </h2>
+                <button
+                  onClick={() => {
+                    setFilePreviewPath(null);
+                    setFilePreviewContent(null);
+                    setFilePreviewError(null);
+                  }}
+                  className="text-[10px] text-gray-400 hover:text-gray-200"
+                >
+                  Close
+                </button>
+              </div>
+              <p className="text-[10px] text-gray-600 mt-1 truncate">{filePreviewPath}</p>
+              {filePreviewLoading && (
+                <p className="text-xs text-gray-500 mt-2">Loading preview...</p>
+              )}
+              {filePreviewError && (
+                <p className="text-xs text-red-300 mt-2">{filePreviewError}</p>
+              )}
+              {filePreviewContent && (
+                <pre className="mt-2 text-[11px] bg-gray-900 p-2 rounded text-gray-300 whitespace-pre-wrap max-h-48 overflow-y-auto">
+                  {filePreviewContent.length > 2000
+                    ? `${filePreviewContent.slice(0, 2000)}\n...`
+                    : filePreviewContent}
+                </pre>
+              )}
+            </div>
+          )}
 
           <h2 className="text-sm font-semibold text-gray-400 mb-4">
             Available Tools ({AVAILABLE_TOOLS.length})
