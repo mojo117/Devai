@@ -78,13 +78,14 @@ export async function sendMessage(
   provider: LLMProvider,
   projectRoot?: string,
   skillIds?: string[],
+  pinnedFiles?: string[],
   sessionId?: string,
   onEvent?: (event: ChatStreamEvent) => void
 ): Promise<{ message: ChatMessage; pendingActions: Action[]; sessionId?: string }> {
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ messages, provider, projectRoot, skillIds, sessionId }),
+    body: JSON.stringify({ messages, provider, projectRoot, skillIds, pinnedFiles, sessionId }),
   });
 
   if (!res.ok) {

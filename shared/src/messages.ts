@@ -24,6 +24,7 @@ export interface ChatRequest {
   projectRoot: string;
   skillIds?: string[];
   sessionId?: string;
+  pinnedFiles?: string[];
 }
 
 export interface ChatResponse {

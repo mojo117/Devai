@@ -9,6 +9,10 @@ export interface ChatMessage {
   timestamp: string;
 }
 
+export interface PinnedFilesSetting {
+  files: string[];
+}
+
 export interface SessionSummary {
   id: string;
   title: string | null;

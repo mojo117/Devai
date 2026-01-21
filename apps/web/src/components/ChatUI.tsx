@@ -27,9 +27,11 @@ interface ChatUIProps {
   projectRoot?: string | null;
   skillIds?: string[];
   allowedRoots?: string[];
+  pinnedFiles?: string[];
+  onPinFile?: (file: string) => void;
 }
 
-export function ChatUI({ provider, projectRoot, skillIds, allowedRoots }: ChatUIProps) {
+export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFiles, onPinFile }: ChatUIProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -145,6 +147,7 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots }: ChatUI
         provider,
         projectRoot || undefined,
         skillIds,
+        pinnedFiles,
         sessionId || undefined,
         (event) => {
           if (event.type === 'status') {
@@ -247,6 +250,9 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots }: ChatUI
     const next = `${before}@${hint} ${after}`.replace(/\s{2,}/g, ' ');
     setInput(next);
     setFileHints([]);
+    if (onPinFile) {
+      onPinFile(hint);
+    }
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

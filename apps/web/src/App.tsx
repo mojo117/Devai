@@ -27,6 +27,7 @@ import type {
   HealthResponse,
   SkillSummary,
   ProjectContext,
+  PinnedFilesSetting,
 } from './types';
 
 function App() {
@@ -48,6 +49,7 @@ function App() {
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
+  const [pinnedFiles, setPinnedFiles] = useState<string[]>([]);
 
   useEffect(() => {
     verifyAuth()
@@ -162,10 +164,43 @@ function App() {
 
   useEffect(() => {
     if (!isAuthed) return;
+    let isMounted = true;
+
+    const loadPinned = async () => {
+      try {
+        const stored = await fetchSetting('pinnedFiles');
+        const value = stored.value as PinnedFilesSetting | null;
+        if (!isMounted) return;
+        const files = value && Array.isArray((value as PinnedFilesSetting).files)
+          ? (value as PinnedFilesSetting).files.filter((f) => typeof f === 'string')
+          : [];
+        setPinnedFiles(files);
+      } catch {
+        if (!isMounted) return;
+        setPinnedFiles([]);
+      }
+    };
+
+    loadPinned();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthed]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
     saveSetting('selectedSkills', selectedSkillIds).catch(() => {
       // Non-blocking persistence; ignore errors here.
     });
   }, [isAuthed, selectedSkillIds]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
+    saveSetting('pinnedFiles', { files: pinnedFiles }).catch(() => {
+      // Non-blocking persistence; ignore errors here.
+    });
+  }, [isAuthed, pinnedFiles]);
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -340,6 +375,8 @@ function App() {
         projectContextLoadedAt={projectContextLoadedAt}
         onRefreshProject={handleRefreshProject}
         projectLoading={projectLoading}
+        pinnedFiles={pinnedFiles}
+        onUnpinFile={(file) => setPinnedFiles((prev) => prev.filter((f) => f !== file))}
       />
 
       {/* History Panel (collapsible, right side) */}
@@ -390,6 +427,8 @@ function App() {
             projectRoot={health?.projectRoot}
             skillIds={selectedSkillIds}
             allowedRoots={health?.allowedRoots}
+            pinnedFiles={pinnedFiles}
+            onPinFile={(file) => setPinnedFiles((prev) => (prev.includes(file) ? prev : [...prev, file]))}
           />
         </div>
 

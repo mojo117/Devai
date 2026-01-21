@@ -9,6 +9,7 @@ import { getToolsForLLM, toolRequiresConfirmation, getToolDefinition } from '../
 import { executeTool } from '../tools/executor.js';
 import { createAction, getPendingActions } from '../actions/manager.js';
 import { buildActionPreview } from '../actions/preview.js';
+import { readFile } from '../tools/fs.js';
 import { logToolExecution } from '../audit/logger.js';
 import { config } from '../config.js';
 import { getProjectContext } from '../scanner/projectScanner.js';
@@ -27,6 +28,7 @@ const ChatRequestSchema = z.object({
   projectRoot: z.string().optional(),
   skillIds: z.array(z.string()).optional(),
   sessionId: z.string().optional(),
+  pinnedFiles: z.array(z.string()).optional(),
 });
 
 // System prompt for the AI assistant
@@ -137,6 +139,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
       const selectedSkills = await resolveSkills(skillIds);
       const { allowedToolNames, skillsPrompt } = summarizeSkills(selectedSkills);
+      const pinnedFilesBlock = await buildPinnedFilesBlock(parseResult.data.pinnedFiles);
 
       // Get available tools, filtered by skills if needed
       const tools = filterToolsForSkills(getToolsForLLM(), allowedToolNames);
@@ -159,9 +162,9 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         turn++;
         sendEvent({ type: 'status', status: 'thinking', turn });
 
-        const llmResponse = await llmRouter.generate(provider, {
+      const llmResponse = await llmRouter.generate(provider, {
           messages: conversationMessages,
-          systemPrompt: SYSTEM_PROMPT + projectContextBlock + skillsPrompt,
+          systemPrompt: SYSTEM_PROMPT + projectContextBlock + skillsPrompt + pinnedFilesBlock,
           toolsEnabled: true,
           tools,
         });
@@ -440,6 +443,40 @@ function buildSessionTitle(content: string): string | null {
   if (!trimmed) return null;
   if (trimmed.length <= 60) return trimmed;
   return `${trimmed.slice(0, 57)}...`;
+}
+
+async function buildPinnedFilesBlock(pinnedFiles?: string[]): Promise<string> {
+  if (!pinnedFiles || pinnedFiles.length === 0) {
+    return '';
+  }
+
+  const unique = Array.from(new Set(pinnedFiles)).slice(0, 8);
+  const sections: string[] = [];
+
+  for (const file of unique) {
+    try {
+      const result = await readFile(file);
+      const preview = truncateLines(result.content, 80);
+      sections.push(`File: ${file}\n${preview}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to read file';
+      sections.push(`File: ${file}\n[Preview error: ${message}]`);
+    }
+  }
+
+  if (sections.length === 0) {
+    return '';
+  }
+
+  return `\n\nPinned Files:\n${sections.join('\n\n')}`;
+}
+
+function truncateLines(content: string, maxLines: number): string {
+  const lines = content.split('\n');
+  if (lines.length <= maxLines) {
+    return content;
+  }
+  return `${lines.slice(0, maxLines).join('\n')}\n...`;
 }
 
 function streamToolResult(
