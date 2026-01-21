@@ -29,6 +29,7 @@ const ChatRequestSchema = z.object({
   skillIds: z.array(z.string()).optional(),
   sessionId: z.string().optional(),
   pinnedFiles: z.array(z.string()).optional(),
+  planApproved: z.boolean().optional(),
 });
 
 // System prompt for the AI assistant
@@ -97,13 +98,14 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const {
-      messages,
-      provider,
-      projectRoot: requestedProjectRoot,
-      skillIds,
-      sessionId: requestedSessionId,
-    } = parseResult.data;
+      const {
+        messages,
+        provider,
+        projectRoot: requestedProjectRoot,
+        skillIds,
+        sessionId: requestedSessionId,
+        planApproved,
+      } = parseResult.data;
 
     // Check if provider is configured
     if (!llmRouter.isProviderConfigured(provider)) {
@@ -191,7 +193,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
             arguments: toolCall.arguments,
           });
 
-          const result = await handleToolCall(toolCall, allowedToolNames, sendEvent);
+          const result = await handleToolCall(toolCall, allowedToolNames, sendEvent, planApproved === true);
           const isError = result.startsWith('Error');
 
           toolResultsForLLM.push({
@@ -277,7 +279,8 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 async function handleToolCall(
   toolCall: ToolCall,
   allowedToolNames: Set<string> | null,
-  sendEvent?: (event: Record<string, unknown>) => void
+  sendEvent?: (event: Record<string, unknown>) => void,
+  planApproved: boolean = false
 ): Promise<string> {
   const toolName = toolCall.name;
   const toolArgs = toolCall.arguments;
@@ -314,6 +317,10 @@ async function handleToolCall(
     }
 
     const preview = await buildActionPreview(requestedToolName, requestedToolArgs);
+    if (!planApproved && toolRequiresConfirmation(requestedToolName)) {
+      return 'Error: Plan not approved. Ask the user to approve the plan before requesting tool approvals.';
+    }
+
     const action = createAction({
       id: nanoid(),
       toolName: requestedToolName,

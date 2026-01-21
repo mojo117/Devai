@@ -25,6 +25,7 @@ export interface ChatRequest {
   skillIds?: string[];
   sessionId?: string;
   pinnedFiles?: string[];
+  planApproved?: boolean;
 }
 
 export interface ChatResponse {

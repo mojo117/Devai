@@ -188,6 +188,7 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
         projectRoot || undefined,
         skillIds,
         pinnedFiles,
+        planApproved,
         sessionId || undefined,
         (event) => {
           if (event.type === 'status') {
