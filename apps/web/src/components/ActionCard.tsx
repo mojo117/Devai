@@ -11,6 +11,7 @@ const statusColors: Record<string, string> = {
   executing: 'bg-purple-600',
   done: 'bg-green-600',
   failed: 'bg-red-600',
+  rejected: 'bg-gray-600',
 };
 
 export function ActionCard({ action, onApprove }: ActionCardProps) {
@@ -63,6 +64,12 @@ export function ActionCard({ action, onApprove }: ActionCardProps) {
       {action.status === 'failed' && action.error && (
         <div className="mt-2 text-xs text-red-400">
           Error: {action.error}
+        </div>
+      )}
+
+      {action.status === 'rejected' && (
+        <div className="mt-2 text-xs text-gray-400">
+          Rejected by user.
         </div>
       )}
     </div>

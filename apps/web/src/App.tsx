@@ -5,6 +5,7 @@ import { ActionCard } from './components/ActionCard';
 import { ToolsPanel } from './components/ToolsPanel';
 import { HistoryPanel } from './components/HistoryPanel';
 import { PromptsPanel } from './components/PromptsPanel';
+import { ProviderSelect } from './components/ProviderSelect';
 import {
   fetchHealth,
   fetchActions,
@@ -29,8 +30,7 @@ import type {
 } from './types';
 
 function App() {
-  // Default to OpenAI (GPT-4o)
-  const provider: LLMProvider = 'openai';
+  const [provider, setProvider] = useState<LLMProvider>('openai');
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [actions, setActions] = useState<Action[]>([]);
   const [skills, setSkills] = useState<SkillSummary[]>([]);
@@ -65,6 +65,48 @@ function App() {
       .then(setHealth)
       .catch((err) => setError(err.message));
   }, [isAuthed]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
+    let isMounted = true;
+
+    const loadProvider = async () => {
+      try {
+        const stored = await fetchSetting('preferredProvider');
+        const storedValue = stored.value;
+        if (storedValue === 'anthropic' || storedValue === 'openai' || storedValue === 'gemini') {
+          if (isMounted) setProvider(storedValue);
+        }
+      } catch {
+        // Ignore missing settings.
+      }
+    };
+
+    loadProvider();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthed]);
+
+  useEffect(() => {
+    if (!health?.providers) return;
+    const providers = health.providers;
+    const isConfigured = providers[provider];
+    if (isConfigured) return;
+
+    if (providers.openai) {
+      setProvider('openai');
+      return;
+    }
+    if (providers.anthropic) {
+      setProvider('anthropic');
+      return;
+    }
+    if (providers.gemini) {
+      setProvider('gemini');
+    }
+  }, [health?.providers, provider]);
 
   useEffect(() => {
     if (!isAuthed || !health?.projectRoot) return;
@@ -124,6 +166,13 @@ function App() {
       // Non-blocking persistence; ignore errors here.
     });
   }, [isAuthed, selectedSkillIds]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
+    saveSetting('preferredProvider', provider).catch(() => {
+      // Non-blocking persistence; ignore errors here.
+    });
+  }, [isAuthed, provider]);
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -264,7 +313,15 @@ function App() {
     );
   }
 
-  const pendingActions = actions.filter((a) => a.status === 'pending');
+  const sortedActions = [...actions].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const pendingActions = sortedActions.filter((a) => a.status === 'pending');
+  const activeActions = sortedActions.filter((a) => a.status === 'approved' || a.status === 'executing');
+  const completedActions = sortedActions.filter((a) => a.status === 'done' || a.status === 'failed' || a.status === 'rejected');
+
+  const configuredProviders = health?.providers;
+  const hasConfiguredProvider = configuredProviders
+    ? configuredProviders.anthropic || configuredProviders.openai || configuredProviders.gemini
+    : true;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -296,7 +353,16 @@ function App() {
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <h1 className="text-xl font-bold text-blue-400">DevAI</h1>
           <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-400">Model: <span className="text-green-400">GPT-4o</span></span>
+            <ProviderSelect
+              value={provider}
+              onChange={setProvider}
+              available={configuredProviders || undefined}
+            />
+            {!hasConfiguredProvider && (
+              <span className="text-xs text-red-300">
+                No provider configured
+              </span>
+            )}
             <ProjectInfo projectRoot={health?.projectRoot} />
           </div>
         </div>
@@ -327,20 +393,62 @@ function App() {
         </div>
 
         {/* Actions Sidebar */}
-        {pendingActions.length > 0 && (
+        {sortedActions.length > 0 && (
           <aside className="w-80 border-l border-gray-700 p-4 overflow-y-auto">
             <h2 className="text-sm font-semibold text-gray-400 mb-4">
-              Pending Actions ({pendingActions.length})
+              Actions ({sortedActions.length})
             </h2>
-            <div className="space-y-3">
-              {pendingActions.map((action) => (
-                <ActionCard
-                  key={action.id}
-                  action={action}
-                  onApprove={() => handleApprove(action.id)}
-                />
-              ))}
-            </div>
+
+            {pendingActions.length > 0 && (
+              <div className="mb-6">
+                <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
+                  Pending ({pendingActions.length})
+                </div>
+                <div className="space-y-3">
+                  {pendingActions.map((action) => (
+                    <ActionCard
+                      key={action.id}
+                      action={action}
+                      onApprove={() => handleApprove(action.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activeActions.length > 0 && (
+              <div className="mb-6">
+                <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
+                  In Progress ({activeActions.length})
+                </div>
+                <div className="space-y-3">
+                  {activeActions.map((action) => (
+                    <ActionCard
+                      key={action.id}
+                      action={action}
+                      onApprove={() => handleApprove(action.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {completedActions.length > 0 && (
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
+                  Completed ({completedActions.length})
+                </div>
+                <div className="space-y-3">
+                  {completedActions.map((action) => (
+                    <ActionCard
+                      key={action.id}
+                      action={action}
+                      onApprove={() => handleApprove(action.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </aside>
         )}
       </div>

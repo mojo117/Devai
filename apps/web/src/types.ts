@@ -28,7 +28,7 @@ export interface SettingResponse {
   value: unknown;
 }
 
-export type ActionStatus = 'pending' | 'approved' | 'executing' | 'done' | 'failed';
+export type ActionStatus = 'pending' | 'approved' | 'executing' | 'done' | 'failed' | 'rejected';
 
 export interface Action {
   id: string;
