@@ -25,6 +25,10 @@ export interface ChatRequest {
   skillIds?: string[];
   sessionId?: string;
   pinnedFiles?: string[];
+  projectContextOverride?: {
+    enabled?: boolean;
+    summary?: string;
+  };
   planApproved?: boolean;
 }
 

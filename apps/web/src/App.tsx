@@ -31,6 +31,7 @@ import type {
   ProjectContext,
   PinnedFilesSetting,
   IgnorePatternsSetting,
+  ProjectContextOverrideSetting,
 } from './types';
 
 function App() {
@@ -54,6 +55,10 @@ function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [pinnedFiles, setPinnedFiles] = useState<string[]>([]);
   const [ignorePatterns, setIgnorePatterns] = useState<string[]>([]);
+  const [projectContextOverride, setProjectContextOverride] = useState<ProjectContextOverrideSetting>({
+    enabled: false,
+    summary: '',
+  });
   const [view, setView] = useState<'chat' | 'actions'>('chat');
   const [contextStats, setContextStats] = useState<{
     tokensUsed: number;
@@ -95,6 +100,37 @@ function App() {
     };
 
     loadProvider();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthed]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
+    let isMounted = true;
+
+    const loadProjectContextOverride = async () => {
+      try {
+        const stored = await fetchSetting('projectContextOverride');
+        const value = stored.value as ProjectContextOverrideSetting | null;
+        if (!isMounted) return;
+        const next = value && typeof value === 'object'
+          ? {
+              enabled: Boolean((value as ProjectContextOverrideSetting).enabled),
+              summary: typeof (value as ProjectContextOverrideSetting).summary === 'string'
+                ? (value as ProjectContextOverrideSetting).summary
+                : '',
+            }
+          : { enabled: false, summary: '' };
+        setProjectContextOverride(next);
+      } catch {
+        if (!isMounted) return;
+        setProjectContextOverride({ enabled: false, summary: '' });
+      }
+    };
+
+    loadProjectContextOverride();
 
     return () => {
       isMounted = false;
@@ -244,6 +280,13 @@ function App() {
       // Non-blocking persistence; ignore errors here.
     });
   }, [isAuthed, ignorePatterns]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
+    saveSetting('projectContextOverride', projectContextOverride).catch(() => {
+      // Non-blocking persistence; ignore errors here.
+    });
+  }, [isAuthed, projectContextOverride]);
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -432,6 +475,8 @@ function App() {
         onUnpinFile={(file) => setPinnedFiles((prev) => prev.filter((f) => f !== file))}
         ignorePatterns={ignorePatterns}
         onUpdateIgnorePatterns={setIgnorePatterns}
+        projectContextOverride={projectContextOverride}
+        onUpdateProjectContextOverride={setProjectContextOverride}
         contextStats={contextStats}
       />
 
@@ -511,6 +556,7 @@ function App() {
                 allowedRoots={health?.allowedRoots}
                 pinnedFiles={pinnedFiles}
                 ignorePatterns={ignorePatterns}
+                projectContextOverride={projectContextOverride}
                 onPinFile={(file) => setPinnedFiles((prev) => (prev.includes(file) ? prev : [...prev, file]))}
                 onContextUpdate={(stats) => setContextStats(stats)}
               />

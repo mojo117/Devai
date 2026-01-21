@@ -29,6 +29,10 @@ const ChatRequestSchema = z.object({
   skillIds: z.array(z.string()).optional(),
   sessionId: z.string().optional(),
   pinnedFiles: z.array(z.string()).optional(),
+  projectContextOverride: z.object({
+    enabled: z.boolean().optional(),
+    summary: z.string().optional(),
+  }).optional(),
   planApproved: z.boolean().optional(),
 });
 
@@ -104,6 +108,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         projectRoot: requestedProjectRoot,
         skillIds,
         sessionId: requestedSessionId,
+        projectContextOverride,
         planApproved,
       } = parseResult.data;
 
@@ -135,8 +140,12 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
           projectContext = await getProjectContext(normalizedPath);
         }
       }
+      const overrideSummary = projectContextOverride?.enabled && projectContextOverride.summary?.trim().length
+        ? projectContextOverride.summary.trim()
+        : null;
+      const effectiveSummary = overrideSummary || projectContext?.summary || '';
       const projectContextBlock = validatedProjectRoot
-        ? `\n\nProject Context:\nWorking Directory: ${validatedProjectRoot}\n${projectContext?.summary || ''}`
+        ? `\n\nProject Context:\nWorking Directory: ${validatedProjectRoot}\n${effectiveSummary}`
         : '';
 
       const selectedSkills = await resolveSkills(skillIds);

@@ -30,11 +30,12 @@ interface ChatUIProps {
   allowedRoots?: string[];
   pinnedFiles?: string[];
   ignorePatterns?: string[];
+  projectContextOverride?: { enabled: boolean; summary: string };
   onPinFile?: (file: string) => void;
   onContextUpdate?: (stats: ContextStats) => void;
 }
 
-export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFiles, ignorePatterns, onPinFile, onContextUpdate }: ChatUIProps) {
+export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFiles, ignorePatterns, projectContextOverride, onPinFile, onContextUpdate }: ChatUIProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -196,6 +197,7 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
         projectRoot || undefined,
         skillIds,
         pinnedFiles,
+        projectContextOverride,
         planApproved,
         sessionId || undefined,
         (event) => {

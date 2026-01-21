@@ -17,6 +17,11 @@ export interface IgnorePatternsSetting {
   patterns: string[];
 }
 
+export interface ProjectContextOverrideSetting {
+  enabled: boolean;
+  summary: string;
+}
+
 export interface ContextStats {
   tokensUsed: number;
   tokenBudget: number;

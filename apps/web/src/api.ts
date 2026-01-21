@@ -79,6 +79,7 @@ export async function sendMessage(
   projectRoot?: string,
   skillIds?: string[],
   pinnedFiles?: string[],
+  projectContextOverride?: { enabled: boolean; summary: string },
   planApproved?: boolean,
   sessionId?: string,
   onEvent?: (event: ChatStreamEvent) => void
@@ -86,7 +87,7 @@ export async function sendMessage(
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ messages, provider, projectRoot, skillIds, pinnedFiles, planApproved, sessionId }),
+    body: JSON.stringify({ messages, provider, projectRoot, skillIds, pinnedFiles, projectContextOverride, planApproved, sessionId }),
   });
 
   if (!res.ok) {
