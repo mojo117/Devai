@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
 import { config } from './config.js';
 import { healthRoutes } from './routes/health.js';
 import { chatRoutes } from './routes/chat.js';
@@ -32,6 +33,13 @@ const corsOrigins = [
 await app.register(cors, {
   origin: corsOrigins,
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
+});
+
+// Global rate limiting (per IP)
+await app.register(rateLimit, {
+  global: true,
+  max: 120,
+  timeWindow: '1 minute',
 });
 
 // Register auth routes

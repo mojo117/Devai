@@ -4,6 +4,7 @@ interface ActionCardProps {
   action: Action;
   onApprove: () => void;
   onReject?: () => void;
+  onRetry?: () => void;
 }
 
 const statusColors: Record<string, string> = {
@@ -15,7 +16,7 @@ const statusColors: Record<string, string> = {
   rejected: 'bg-gray-600',
 };
 
-export function ActionCard({ action, onApprove, onReject }: ActionCardProps) {
+export function ActionCard({ action, onApprove, onReject, onRetry }: ActionCardProps) {
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-lg p-3">
       {/* Header */}
@@ -97,6 +98,17 @@ export function ActionCard({ action, onApprove, onReject }: ActionCardProps) {
       {action.status === 'failed' && action.error && (
         <div className="mt-2 text-xs text-red-400">
           Error: {action.error}
+        </div>
+      )}
+
+      {action.status === 'failed' && onRetry && (
+        <div className="mt-3">
+          <button
+            onClick={onRetry}
+            className="w-full border border-red-500 text-red-300 hover:text-white hover:bg-red-600 text-sm font-medium py-2 px-4 rounded transition-colors"
+          >
+            Retry
+          </button>
         </div>
       )}
 

@@ -12,6 +12,7 @@ import {
   fetchActions,
   approveAction,
   rejectAction,
+  retryAction,
   fetchSkills,
   reloadSkills,
   fetchProject,
@@ -326,6 +327,16 @@ function App() {
     }
   };
 
+  const handleRetry = async (actionId: string) => {
+    try {
+      await retryAction(actionId);
+      const data = await fetchActions();
+      setActions(data.actions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to retry');
+    }
+  };
+
   const handleToggleSkill = (skillId: string) => {
     setSelectedSkillIds((prev) => (
       prev.includes(skillId)
@@ -581,6 +592,7 @@ function App() {
                           action={action}
                           onApprove={() => handleApprove(action.id)}
                           onReject={() => handleReject(action.id)}
+                          onRetry={() => handleRetry(action.id)}
                         />
                       ))}
                     </div>
@@ -598,6 +610,7 @@ function App() {
                           key={action.id}
                           action={action}
                           onApprove={() => handleApprove(action.id)}
+                          onRetry={() => handleRetry(action.id)}
                         />
                       ))}
                     </div>
@@ -615,6 +628,7 @@ function App() {
                           key={action.id}
                           action={action}
                           onApprove={() => handleApprove(action.id)}
+                          onRetry={() => handleRetry(action.id)}
                         />
                       ))}
                     </div>
@@ -628,6 +642,7 @@ function App() {
             actions={sortedActions}
             onApprove={handleApprove}
             onReject={handleReject}
+            onRetry={handleRetry}
             onRefresh={async () => {
               const data = await fetchActions();
               setActions(data.actions);

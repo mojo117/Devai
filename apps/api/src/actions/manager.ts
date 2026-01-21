@@ -204,3 +204,7 @@ export function clearOldActions(maxAge: number = 24 * 60 * 60 * 1000): number {
 
   return cleared;
 }
+
+export function clearActionsForTests(): void {
+  actions.clear();
+}

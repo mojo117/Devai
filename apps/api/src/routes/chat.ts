@@ -91,7 +91,9 @@ NEVER guess or assume paths exist. ALWAYS verify first with fs.listFiles or fs.g
 Focus on solving the user's problem efficiently while being transparent about any changes you want to make.`;
 
 export const chatRoutes: FastifyPluginAsync = async (app) => {
-  app.post('/chat', async (request, reply) => {
+  app.post('/chat', {
+    config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
     reply.raw.setHeader('Content-Type', 'application/x-ndjson');
     const parseResult = ChatRequestSchema.safeParse(request.body);
 
@@ -295,7 +297,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
   });
 };
 
-async function handleToolCall(
+export async function handleToolCall(
   toolCall: ToolCall,
   allowedToolNames: Set<string> | null,
   sendEvent?: (event: Record<string, unknown>) => void,

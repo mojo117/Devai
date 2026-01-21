@@ -39,3 +39,12 @@ export interface RejectRequest {
 export interface RejectResponse {
   action: Action;
 }
+
+export interface RetryRequest {
+  actionId: string;
+}
+
+export interface RetryResponse {
+  action: Action;
+  originalActionId: string;
+}

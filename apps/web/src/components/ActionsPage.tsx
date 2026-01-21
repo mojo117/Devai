@@ -6,6 +6,7 @@ interface ActionsPageProps {
   actions: Action[];
   onApprove: (actionId: string) => void;
   onReject: (actionId: string) => void;
+  onRetry: (actionId: string) => void;
   onRefresh: () => void;
 }
 
@@ -19,7 +20,7 @@ const FILTERS: Array<{ key: 'all' | ActionStatus; label: string }> = [
   { key: 'rejected', label: 'Rejected' },
 ];
 
-export function ActionsPage({ actions, onApprove, onReject, onRefresh }: ActionsPageProps) {
+export function ActionsPage({ actions, onApprove, onReject, onRetry, onRefresh }: ActionsPageProps) {
   const [filter, setFilter] = useState<'all' | ActionStatus>('all');
 
   const sortedActions = useMemo(() => (
@@ -72,6 +73,7 @@ export function ActionsPage({ actions, onApprove, onReject, onRefresh }: Actions
               action={action}
               onApprove={() => onApprove(action.id)}
               onReject={() => onReject(action.id)}
+              onRetry={() => onRetry(action.id)}
             />
           ))}
         </div>
