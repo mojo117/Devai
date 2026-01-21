@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import { sendMessage, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction, globProjectFiles } from '../api';
 import type { ChatMessage, LLMProvider, SessionSummary } from '../types';
 import { InlineAction, type PendingAction } from './InlineAction';
+import { PlanPanel } from './PlanPanel';
 
 interface ToolEvent {
   id: string;
@@ -44,6 +45,8 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
   const [fileHintsLoading, setFileHintsLoading] = useState(false);
   const [fileHintsError, setFileHintsError] = useState<string | null>(null);
   const [activeHintIndex, setActiveHintIndex] = useState(0);
+  const [planApproved, setPlanApproved] = useState(false);
+  const [planLoading, setPlanLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const planItems = extractPlanItems(messages);
 
@@ -87,6 +90,43 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    if (!sessionId) {
+      setPlanApproved(false);
+      return;
+    }
+    if (planItems.length === 0) {
+      setPlanApproved(false);
+      return;
+    }
+
+    let cancelled = false;
+    const loadPlanState = async () => {
+      setPlanLoading(true);
+      try {
+        const key = `planState:${sessionId}`;
+        const stored = await fetchSetting(key);
+        const value = stored.value as { hash?: string; approved?: boolean } | null;
+        if (cancelled) return;
+        const currentHash = hashPlan(planItems);
+        if (value && value.hash === currentHash && value.approved) {
+          setPlanApproved(true);
+        } else {
+          setPlanApproved(false);
+        }
+      } catch {
+        if (!cancelled) setPlanApproved(false);
+      } finally {
+        if (!cancelled) setPlanLoading(false);
+      }
+    };
+
+    loadPlanState();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, planItems]);
 
   useEffect(() => {
     const token = extractAtToken(input);
@@ -255,6 +295,14 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
     }
   };
 
+  const handleApprovePlan = async () => {
+    if (!sessionId || planItems.length === 0) return;
+    const key = `planState:${sessionId}`;
+    const payload = { hash: hashPlan(planItems), approved: true };
+    setPlanApproved(true);
+    await saveSetting(key, payload);
+  };
+
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (fileHints.length === 0) return;
     if (e.key === 'ArrowDown') {
@@ -419,16 +467,12 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
         )}
 
         {planItems.length > 0 && (
-          <div className="bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-gray-200">
-            <div className="text-xs uppercase tracking-wide text-gray-400 mb-2">
-              Active Plan
-            </div>
-            <ol className="list-decimal list-inside space-y-1 text-sm">
-              {planItems.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ol>
-          </div>
+          <PlanPanel
+            items={planItems}
+            approved={planApproved}
+            loading={planLoading}
+            onApprove={handleApprovePlan}
+          />
         )}
 
         {messages.length === 0 && (
@@ -624,6 +668,10 @@ function extractPlanItems(messages: ChatMessage[]): string[] {
     }
   }
   return [];
+}
+
+function hashPlan(items: string[]): string {
+  return JSON.stringify(items);
 }
 
 function upsertToolEvent(
