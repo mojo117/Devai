@@ -6,17 +6,19 @@ export function PromptsPanel() {
   const [prompt, setPrompt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadedAt, setLoadedAt] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
     let isMounted = true;
-    const load = async () => {
+    const loadPrompt = async () => {
       setLoading(true);
       setError(null);
       try {
         const result = await fetchSystemPrompt();
         if (!isMounted) return;
         setPrompt(result.prompt);
+        setLoadedAt(new Date().toISOString());
       } catch (err) {
         if (!isMounted) return;
         setError(err instanceof Error ? err.message : 'Failed to load prompt');
@@ -27,7 +29,7 @@ export function PromptsPanel() {
       }
     };
 
-    load();
+    loadPrompt();
     return () => {
       isMounted = false;
     };
@@ -83,8 +85,36 @@ export function PromptsPanel() {
       >
         <div className="w-96 h-screen overflow-y-auto p-4">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-gray-400">System Prompt</h2>
-            {loading && <span className="text-[10px] text-gray-500">Loading...</span>}
+            <div>
+              <h2 className="text-sm font-semibold text-gray-400">System Prompt</h2>
+              {loadedAt && (
+                <p className="text-[10px] text-gray-600 mt-1">
+                  Loaded: {new Date(loadedAt).toLocaleTimeString()}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {loading && <span className="text-[10px] text-gray-500">Loading...</span>}
+              <button
+                onClick={async () => {
+                  setLoading(true);
+                  setError(null);
+                  try {
+                    const result = await fetchSystemPrompt();
+                    setPrompt(result.prompt);
+                    setLoadedAt(new Date().toISOString());
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : 'Failed to load prompt');
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                className="text-[10px] text-gray-400 hover:text-gray-200 disabled:opacity-50"
+                disabled={loading}
+              >
+                Refresh
+              </button>
+            </div>
           </div>
 
           {error && (
