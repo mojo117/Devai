@@ -147,6 +147,7 @@ export function ChatUI({ provider, projectRoot, skillIds }: ChatUIProps) {
               toolName: event.toolName as string,
               toolArgs: event.toolArgs as Record<string, unknown>,
               description: event.description as string,
+              preview: event.preview as PendingAction['preview'],
             };
             setPendingActions((prev) => [...prev, pendingAction]);
           }

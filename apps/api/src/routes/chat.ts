@@ -8,6 +8,7 @@ import type { LLMMessage, ToolCall, ToolDefinition as LLMToolDefinition, ToolRes
 import { getToolsForLLM, toolRequiresConfirmation, getToolDefinition } from '../tools/registry.js';
 import { executeTool } from '../tools/executor.js';
 import { createAction, getPendingActions } from '../actions/manager.js';
+import { buildActionPreview } from '../actions/preview.js';
 import { logToolExecution } from '../audit/logger.js';
 import { config } from '../config.js';
 import { getProjectContext } from '../scanner/projectScanner.js';
@@ -309,11 +310,13 @@ async function handleToolCall(
       return `Error: Tool "${requestedToolName}" does not require confirmation`;
     }
 
+    const preview = await buildActionPreview(requestedToolName, requestedToolArgs);
     const action = createAction({
       id: nanoid(),
       toolName: requestedToolName,
       toolArgs: requestedToolArgs,
       description,
+      preview,
     });
 
     // Send action_pending event to client for inline approval UI
@@ -324,6 +327,7 @@ async function handleToolCall(
         toolName: action.toolName,
         toolArgs: action.toolArgs,
         description: action.description,
+        preview: action.preview,
       });
     }
 

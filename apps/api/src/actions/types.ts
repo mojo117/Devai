@@ -1,5 +1,11 @@
 export type ActionStatus = 'pending' | 'approved' | 'executing' | 'done' | 'failed' | 'rejected';
 
+export interface ActionPreview {
+  kind: 'diff';
+  path: string;
+  diff: string;
+}
+
 export interface Action {
   id: string;
   toolName: string;
@@ -7,6 +13,7 @@ export interface Action {
   description: string;
   status: ActionStatus;
   createdAt: string;
+  preview?: ActionPreview;
   approvedAt?: string;
   rejectedAt?: string;
   executedAt?: string;
@@ -19,4 +26,5 @@ export interface CreateActionParams {
   toolName: string;
   toolArgs: Record<string, unknown>;
   description: string;
+  preview?: ActionPreview;
 }

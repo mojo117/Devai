@@ -5,6 +5,11 @@ export interface PendingAction {
   toolName: string;
   toolArgs: Record<string, unknown>;
   description: string;
+  preview?: {
+    kind: 'diff';
+    path: string;
+    diff: string;
+  };
 }
 
 interface InlineActionProps {
@@ -86,6 +91,17 @@ export function InlineAction({ action, onApprove, onReject }: InlineActionProps)
           {JSON.stringify(action.toolArgs, null, 2)}
         </pre>
       </details>
+
+      {action.preview?.diff && (
+        <details className="mb-3">
+          <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-400">
+            View patch preview
+          </summary>
+          <pre className="mt-2 text-xs bg-gray-950 p-2 rounded overflow-x-auto text-gray-300 whitespace-pre-wrap">
+            {action.preview.diff}
+          </pre>
+        </details>
+      )}
 
       {/* Error message */}
       {error && (

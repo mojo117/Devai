@@ -13,6 +13,7 @@ export function createAction(params: CreateActionParams): Action {
     description: params.description,
     status: 'pending',
     createdAt: new Date().toISOString(),
+    preview: params.preview,
   };
 
   actions.set(action.id, action);
