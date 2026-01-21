@@ -48,6 +48,11 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
   const [activeHintIndex, setActiveHintIndex] = useState(0);
   const [planApproved, setPlanApproved] = useState(false);
   const [planLoading, setPlanLoading] = useState(false);
+  const [retryState, setRetryState] = useState<null | {
+    input: string;
+    userMessage: ChatMessage;
+    runRequest: () => Promise<{ message: ChatMessage; sessionId?: string } | null>;
+  }>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const planItems = extractPlanItems(messages);
 
@@ -177,12 +182,13 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    const originalInput = input;
     setInput('');
     setIsLoading(true);
     setToolEvents([]);
     setFileHints([]);
 
-    try {
+    const runRequest = async (): Promise<{ message: ChatMessage; sessionId?: string } | null> => {
       const response = await sendMessage(
         [...messages, userMessage],
         provider,
@@ -255,11 +261,51 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
       }
       setMessages((prev) => [...prev, response.message]);
       await refreshSessions(response.sessionId);
+      return { message: response.message, sessionId: response.sessionId };
+    };
+
+    try {
+      await runRequest();
+      setRetryState(null);
     } catch (error) {
+      const err = error instanceof Error ? error.message : 'Unknown error';
+      const shouldRetry = /network|fetch|timeout|503|502|504|tempor/i.test(err);
+
       const errorMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        content: `Error: ${err}${shouldRetry ? '\\n\\nYou can retry the last message below.' : ''}`,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+
+      if (shouldRetry) {
+        setRetryState({
+          input: originalInput,
+          userMessage,
+          runRequest,
+        });
+      } else {
+        setRetryState(null);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleRetry = async () => {
+    if (!retryState) return;
+    setIsLoading(true);
+    setToolEvents([]);
+    try {
+      await retryState.runRequest();
+      setRetryState(null);
+    } catch (error) {
+      const err = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: `Error: ${err}`,
         timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, errorMessage]);
@@ -548,6 +594,18 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
 
       {/* Input */}
       <form onSubmit={handleSubmit} className="border-t border-gray-700 p-4">
+        {retryState && !isLoading && (
+          <div className="mb-2 flex items-center justify-between bg-gray-800 border border-gray-700 rounded px-3 py-2 text-xs text-gray-300">
+            <span>Last message failed.</span>
+            <button
+              type="button"
+              onClick={handleRetry}
+              className="text-blue-300 hover:text-blue-200"
+            >
+              Retry
+            </button>
+          </div>
+        )}
         <div className="flex gap-2">
           <div className="relative flex-1">
             <input
