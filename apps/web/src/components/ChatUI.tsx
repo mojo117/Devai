@@ -29,11 +29,12 @@ interface ChatUIProps {
   skillIds?: string[];
   allowedRoots?: string[];
   pinnedFiles?: string[];
+  ignorePatterns?: string[];
   onPinFile?: (file: string) => void;
   onContextUpdate?: (stats: ContextStats) => void;
 }
 
-export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFiles, onPinFile, onContextUpdate }: ChatUIProps) {
+export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFiles, ignorePatterns, onPinFile, onContextUpdate }: ChatUIProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -150,7 +151,7 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
         const basePath = allowedRoots && allowedRoots.length > 0 ? allowedRoots[0] : undefined;
         const safeToken = escapeGlob(token.value);
         const pattern = `**/*${safeToken}*`;
-        const data = await globProjectFiles(pattern, basePath);
+        const data = await globProjectFiles(pattern, basePath, ignorePatterns);
         if (cancelled) return;
         const files = data.files.slice(0, 20);
         setFileHints(files);
@@ -168,7 +169,7 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
       cancelled = true;
       clearTimeout(timeout);
     };
-  }, [input, allowedRoots]);
+  }, [input, allowedRoots, ignorePatterns]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

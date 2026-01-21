@@ -179,8 +179,11 @@ export async function refreshProject(): Promise<ProjectResponse> {
   return res.json();
 }
 
-export async function listProjectFiles(path: string): Promise<ProjectFilesResponse> {
+export async function listProjectFiles(path: string, ignore?: string[]): Promise<ProjectFilesResponse> {
   const params = new URLSearchParams({ path });
+  if (ignore && ignore.length > 0) {
+    params.set('ignore', ignore.join(','));
+  }
   const res = await fetch(`${API_BASE}/project/files?${params.toString()}`, {
     headers: withAuthHeaders(),
   });
@@ -206,11 +209,15 @@ export async function readProjectFile(path: string): Promise<ProjectFileResponse
 export async function searchProjectFiles(
   pattern: string,
   path: string,
-  glob?: string
+  glob?: string,
+  ignore?: string[]
 ): Promise<ProjectSearchResponse> {
   const params = new URLSearchParams({ pattern, path });
   if (glob && glob.trim().length > 0) {
     params.set('glob', glob);
+  }
+  if (ignore && ignore.length > 0) {
+    params.set('ignore', ignore.join(','));
   }
   const res = await fetch(`${API_BASE}/project/search?${params.toString()}`, {
     headers: withAuthHeaders(),
@@ -224,11 +231,15 @@ export async function searchProjectFiles(
 
 export async function globProjectFiles(
   pattern: string,
-  path?: string
+  path?: string,
+  ignore?: string[]
 ): Promise<ProjectGlobResponse> {
   const params = new URLSearchParams({ pattern });
   if (path) {
     params.set('path', path);
+  }
+  if (ignore && ignore.length > 0) {
+    params.set('ignore', ignore.join(','));
   }
   const res = await fetch(`${API_BASE}/project/glob?${params.toString()}`, {
     headers: withAuthHeaders(),

@@ -42,6 +42,8 @@ interface ToolsPanelProps {
   projectLoading: boolean;
   pinnedFiles: string[];
   onUnpinFile: (file: string) => void;
+  ignorePatterns: string[];
+  onUpdateIgnorePatterns: (patterns: string[]) => void;
   contextStats?: {
     tokensUsed: number;
     tokenBudget: number;
@@ -65,6 +67,8 @@ export function ToolsPanel({
   projectLoading,
   pinnedFiles,
   onUnpinFile,
+  ignorePatterns,
+  onUpdateIgnorePatterns,
   contextStats,
 }: ToolsPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -83,17 +87,18 @@ export function ToolsPanel({
   const [filePreviewContent, setFilePreviewContent] = useState<string | null>(null);
   const [filePreviewError, setFilePreviewError] = useState<string | null>(null);
   const [filePreviewLoading, setFilePreviewLoading] = useState(false);
+  const [ignoreInput, setIgnoreInput] = useState('');
 
   useEffect(() => {
     if (!isOpen || !selectedRoot) return;
     setFilesLoading(true);
     setFilesError(null);
     const path = filesPath === '.' ? selectedRoot : `${selectedRoot}/${filesPath}`;
-    listProjectFiles(path)
+    listProjectFiles(path, ignorePatterns)
       .then((data) => setFiles(data.files))
       .catch((err) => setFilesError(err instanceof Error ? err.message : 'Failed to load files'))
       .finally(() => setFilesLoading(false));
-  }, [isOpen, filesPath, selectedRoot]);
+  }, [isOpen, filesPath, selectedRoot, ignorePatterns]);
 
   useEffect(() => {
     if (allowedRoots && allowedRoots.length > 0) {
@@ -106,6 +111,10 @@ export function ToolsPanel({
     setSearchResults([]);
     setSearchError(null);
   }, [selectedRoot]);
+
+  useEffect(() => {
+    setIgnoreInput(ignorePatterns.join('\n'));
+  }, [ignorePatterns]);
 
   const handleOpenEntry = (entry: ProjectFileEntry) => {
     if (entry.type !== 'directory') return;
@@ -126,13 +135,26 @@ export function ToolsPanel({
     setSearchLoading(true);
     setSearchError(null);
     try {
-      const data = await searchProjectFiles(searchQuery.trim(), selectedRoot, searchGlob.trim() || undefined);
+      const data = await searchProjectFiles(
+        searchQuery.trim(),
+        selectedRoot,
+        searchGlob.trim() || undefined,
+        ignorePatterns
+      );
       setSearchResults(data.matches);
     } catch (err) {
       setSearchError(err instanceof Error ? err.message : 'Search failed');
     } finally {
       setSearchLoading(false);
     }
+  };
+
+  const handleApplyIgnore = () => {
+    const patterns = ignoreInput
+      .split(/[\n,]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    onUpdateIgnorePatterns(patterns);
   };
 
   const handlePreviewFile = async (relativePath: string) => {
@@ -242,6 +264,27 @@ export function ToolsPanel({
                   ))}
                 </div>
               )}
+            </div>
+            <div className="mt-4">
+              <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                Ignore Patterns
+              </div>
+              <textarea
+                value={ignoreInput}
+                onChange={(e) => setIgnoreInput(e.target.value)}
+                rows={3}
+                placeholder="e.g. node_modules/**, **/dist/**"
+                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200"
+              />
+              <div className="mt-2 flex items-center justify-between text-[10px] text-gray-500">
+                <span>{ignorePatterns.length} active</span>
+                <button
+                  onClick={handleApplyIgnore}
+                  className="text-[10px] text-gray-400 hover:text-gray-200"
+                >
+                  Apply
+                </button>
+              </div>
             </div>
           </div>
 

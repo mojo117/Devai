@@ -11,6 +11,7 @@ import {
   fetchHealth,
   fetchActions,
   approveAction,
+  rejectAction,
   fetchSkills,
   reloadSkills,
   fetchProject,
@@ -29,6 +30,7 @@ import type {
   SkillSummary,
   ProjectContext,
   PinnedFilesSetting,
+  IgnorePatternsSetting,
 } from './types';
 
 function App() {
@@ -51,6 +53,7 @@ function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
   const [pinnedFiles, setPinnedFiles] = useState<string[]>([]);
+  const [ignorePatterns, setIgnorePatterns] = useState<string[]>([]);
   const [view, setView] = useState<'chat' | 'actions'>('chat');
   const [contextStats, setContextStats] = useState<{
     tokensUsed: number;
@@ -92,6 +95,32 @@ function App() {
     };
 
     loadProvider();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthed]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
+    let isMounted = true;
+
+    const loadIgnorePatterns = async () => {
+      try {
+        const stored = await fetchSetting('ignorePatterns');
+        const value = stored.value as IgnorePatternsSetting | null;
+        if (!isMounted) return;
+        const patterns = value && Array.isArray((value as IgnorePatternsSetting).patterns)
+          ? (value as IgnorePatternsSetting).patterns.filter((p) => typeof p === 'string')
+          : [];
+        setIgnorePatterns(patterns);
+      } catch {
+        if (!isMounted) return;
+        setIgnorePatterns([]);
+      }
+    };
+
+    loadIgnorePatterns();
 
     return () => {
       isMounted = false;
@@ -208,6 +237,13 @@ function App() {
       // Non-blocking persistence; ignore errors here.
     });
   }, [isAuthed, pinnedFiles]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
+    saveSetting('ignorePatterns', { patterns: ignorePatterns }).catch(() => {
+      // Non-blocking persistence; ignore errors here.
+    });
+  }, [isAuthed, ignorePatterns]);
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -394,6 +430,8 @@ function App() {
         projectLoading={projectLoading}
         pinnedFiles={pinnedFiles}
         onUnpinFile={(file) => setPinnedFiles((prev) => prev.filter((f) => f !== file))}
+        ignorePatterns={ignorePatterns}
+        onUpdateIgnorePatterns={setIgnorePatterns}
         contextStats={contextStats}
       />
 
@@ -472,6 +510,7 @@ function App() {
                 skillIds={selectedSkillIds}
                 allowedRoots={health?.allowedRoots}
                 pinnedFiles={pinnedFiles}
+                ignorePatterns={ignorePatterns}
                 onPinFile={(file) => setPinnedFiles((prev) => (prev.includes(file) ? prev : [...prev, file]))}
                 onContextUpdate={(stats) => setContextStats(stats)}
               />

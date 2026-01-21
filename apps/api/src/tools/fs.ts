@@ -242,14 +242,18 @@ export interface GlobResult {
   truncated: boolean;
 }
 
-export async function globFiles(pattern: string, basePath?: string): Promise<GlobResult> {
+export async function globFiles(
+  pattern: string,
+  basePath?: string,
+  ignore?: string[]
+): Promise<GlobResult> {
   // Validate basePath is within allowed roots, or use first allowed root
   const searchPath = basePath ? await validatePath(basePath) : config.allowedRoots[0];
 
   const files = await fg(pattern, {
     cwd: searchPath,
     onlyFiles: true,
-    ignore: ['**/node_modules/**', '**/.git/**'],
+    ignore: ['**/node_modules/**', '**/.git/**', ...(ignore || [])],
     absolute: false,
   });
 
@@ -283,7 +287,8 @@ export interface GrepResult {
 export async function grepFiles(
   pattern: string,
   searchPath: string,
-  fileGlob?: string
+  fileGlob?: string,
+  ignore?: string[]
 ): Promise<GrepResult> {
   const validatedPath = await validatePath(searchPath);
   const regex = new RegExp(pattern, 'gi');
@@ -293,7 +298,7 @@ export async function grepFiles(
   const files = await fg(globPattern, {
     cwd: validatedPath,
     onlyFiles: true,
-    ignore: ['**/node_modules/**', '**/.git/**'],
+    ignore: ['**/node_modules/**', '**/.git/**', ...(ignore || [])],
   });
 
   const matches: GrepMatch[] = [];

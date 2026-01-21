@@ -13,6 +13,10 @@ export interface PinnedFilesSetting {
   files: string[];
 }
 
+export interface IgnorePatternsSetting {
+  patterns: string[];
+}
+
 export interface ContextStats {
   tokensUsed: number;
   tokenBudget: number;
