@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { sendMessage, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction, globProjectFiles } from '../api';
-import type { ChatMessage, LLMProvider, SessionSummary } from '../types';
+import type { ChatMessage, ContextStats, LLMProvider, SessionSummary } from '../types';
 import { InlineAction, type PendingAction } from './InlineAction';
 import { PlanPanel } from './PlanPanel';
 
@@ -30,9 +30,10 @@ interface ChatUIProps {
   allowedRoots?: string[];
   pinnedFiles?: string[];
   onPinFile?: (file: string) => void;
+  onContextUpdate?: (stats: ContextStats) => void;
 }
 
-export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFiles, onPinFile }: ChatUIProps) {
+export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFiles, onPinFile, onContextUpdate }: ChatUIProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -237,8 +238,17 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
             };
             setPendingActions((prev) => [...prev, pendingAction]);
           }
+          if (event.type === 'context_stats' && onContextUpdate) {
+            const stats = event.stats as ContextStats | undefined;
+            if (stats) {
+              onContextUpdate(stats);
+            }
+          }
         }
       );
+      if (response.contextStats && onContextUpdate) {
+        onContextUpdate(response.contextStats);
+      }
       if (response.sessionId) {
         setSessionId(response.sessionId);
         await saveSetting('lastSessionId', response.sessionId);

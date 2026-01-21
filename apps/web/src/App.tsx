@@ -52,6 +52,11 @@ function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [pinnedFiles, setPinnedFiles] = useState<string[]>([]);
   const [view, setView] = useState<'chat' | 'actions'>('chat');
+  const [contextStats, setContextStats] = useState<{
+    tokensUsed: number;
+    tokenBudget: number;
+    note?: string;
+  } | null>(null);
 
   useEffect(() => {
     verifyAuth()
@@ -389,6 +394,7 @@ function App() {
         projectLoading={projectLoading}
         pinnedFiles={pinnedFiles}
         onUnpinFile={(file) => setPinnedFiles((prev) => prev.filter((f) => f !== file))}
+        contextStats={contextStats}
       />
 
       {/* History Panel (collapsible, right side) */}
@@ -467,6 +473,7 @@ function App() {
                 allowedRoots={health?.allowedRoots}
                 pinnedFiles={pinnedFiles}
                 onPinFile={(file) => setPinnedFiles((prev) => (prev.includes(file) ? prev : [...prev, file]))}
+                onContextUpdate={(stats) => setContextStats(stats)}
               />
             </div>
 

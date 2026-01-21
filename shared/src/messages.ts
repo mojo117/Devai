@@ -32,4 +32,9 @@ export interface ChatResponse {
   message: ChatMessage;
   pendingActions: Action[];
   sessionId?: string;
+  contextStats?: {
+    tokensUsed: number;
+    tokenBudget: number;
+    note?: string;
+  };
 }

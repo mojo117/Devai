@@ -42,6 +42,11 @@ interface ToolsPanelProps {
   projectLoading: boolean;
   pinnedFiles: string[];
   onUnpinFile: (file: string) => void;
+  contextStats?: {
+    tokensUsed: number;
+    tokenBudget: number;
+    note?: string;
+  } | null;
 }
 
 export function ToolsPanel({
@@ -60,6 +65,7 @@ export function ToolsPanel({
   projectLoading,
   pinnedFiles,
   onUnpinFile,
+  contextStats,
 }: ToolsPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isAccessOpen, setIsAccessOpen] = useState(false);
@@ -188,6 +194,29 @@ export function ToolsPanel({
               <p className="text-xs text-gray-500 mt-2">
                 Project context not available.
               </p>
+            )}
+            {contextStats && (
+              <div className="mt-3">
+                <div className="flex items-center justify-between text-[10px] text-gray-500">
+                  <span>Context usage</span>
+                  <span>
+                    ~{contextStats.tokensUsed}/{contextStats.tokenBudget}
+                  </span>
+                </div>
+                <div className="mt-1 h-2 bg-gray-900 rounded">
+                  <div
+                    className="h-2 rounded bg-blue-600"
+                    style={{
+                      width: `${Math.min(100, Math.round((contextStats.tokensUsed / contextStats.tokenBudget) * 100))}%`,
+                    }}
+                  />
+                </div>
+                {contextStats.note && (
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    {contextStats.note}
+                  </p>
+                )}
+              </div>
             )}
             <div className="mt-3">
               <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">

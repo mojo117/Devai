@@ -82,7 +82,7 @@ export async function sendMessage(
   planApproved?: boolean,
   sessionId?: string,
   onEvent?: (event: ChatStreamEvent) => void
-): Promise<{ message: ChatMessage; pendingActions: Action[]; sessionId?: string }> {
+): Promise<{ message: ChatMessage; pendingActions: Action[]; sessionId?: string; contextStats?: { tokensUsed: number; tokenBudget: number; note?: string } }> {
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
@@ -106,7 +106,7 @@ export async function sendMessage(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  let finalResponse: { message: ChatMessage; pendingActions: Action[]; sessionId?: string } | null = null;
+  let finalResponse: { message: ChatMessage; pendingActions: Action[]; sessionId?: string; contextStats?: { tokensUsed: number; tokenBudget: number; note?: string } } | null = null;
 
   while (true) {
     const { value, done } = await reader.read();

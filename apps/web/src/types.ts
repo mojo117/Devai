@@ -13,6 +13,12 @@ export interface PinnedFilesSetting {
   files: string[];
 }
 
+export interface ContextStats {
+  tokensUsed: number;
+  tokenBudget: number;
+  note?: string;
+}
+
 export interface SessionSummary {
   id: string;
   title: string | null;

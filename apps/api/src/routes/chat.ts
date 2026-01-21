@@ -246,12 +246,22 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       // Get current pending actions
       const pendingActions = getPendingActions();
 
+      const contextStats = buildContextStats({
+        systemPrompt: SYSTEM_PROMPT,
+        projectContextBlock,
+        skillsPrompt,
+        pinnedFilesBlock,
+        messages: conversationMessages,
+      });
+
       const response: ChatResponse = {
         message: responseMessage,
         pendingActions,
         sessionId: activeSessionId,
+        contextStats,
       };
 
+      sendEvent({ type: 'context_stats', stats: contextStats });
       sendEvent({ type: 'response', response });
       reply.raw.end();
       return reply;
@@ -450,6 +460,29 @@ function buildSessionTitle(content: string): string | null {
   if (!trimmed) return null;
   if (trimmed.length <= 60) return trimmed;
   return `${trimmed.slice(0, 57)}...`;
+}
+
+function buildContextStats(input: {
+  systemPrompt: string;
+  projectContextBlock: string;
+  skillsPrompt: string;
+  pinnedFilesBlock: string;
+  messages: LLMMessage[];
+}): { tokensUsed: number; tokenBudget: number; note: string } {
+  const combinedPrompt = input.systemPrompt + input.projectContextBlock + input.skillsPrompt + input.pinnedFilesBlock;
+  const messageText = input.messages.map((m) => m.content || '').join('\n');
+  const tokensUsed = estimateTokens(combinedPrompt + messageText);
+  const tokenBudget = 16000;
+  return {
+    tokensUsed,
+    tokenBudget,
+    note: 'Approximate token usage based on character count.',
+  };
+}
+
+function estimateTokens(text: string): number {
+  if (!text) return 0;
+  return Math.ceil(text.length / 4);
 }
 
 async function buildPinnedFilesBlock(pinnedFiles?: string[]): Promise<string> {
