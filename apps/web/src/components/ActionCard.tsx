@@ -44,6 +44,17 @@ export function ActionCard({ action, onApprove }: ActionCardProps) {
         </pre>
       </details>
 
+      {action.preview?.summary && (
+        <details className="mb-3">
+          <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-400">
+            View action summary
+          </summary>
+          <pre className="mt-2 text-xs bg-gray-950 p-2 rounded overflow-x-auto text-gray-300 whitespace-pre-wrap">
+            {action.preview.summary}
+          </pre>
+        </details>
+      )}
+
       {action.preview?.diff && (
         <details className="mb-3">
           <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-400">

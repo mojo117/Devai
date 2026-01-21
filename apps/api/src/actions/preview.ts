@@ -6,7 +6,7 @@ export async function buildActionPreview(
   toolName: string,
   toolArgs: Record<string, unknown>
 ): Promise<ActionPreview | undefined> {
-  if (toolName !== 'fs.writeFile' && toolName !== 'fs.edit') {
+  if (toolName !== 'fs.writeFile' && toolName !== 'fs.edit' && toolName !== 'fs.move' && toolName !== 'fs.delete') {
     return undefined;
   }
 
@@ -50,6 +50,24 @@ export async function buildActionPreview(
     const newContent = oldContent.replace(oldString, newString);
     const diff = createUnifiedDiff(path, oldContent, newContent, true);
     return { kind: 'diff', path, diff };
+  }
+
+  if (toolName === 'fs.move') {
+    const source = typeof toolArgs.source === 'string' ? toolArgs.source : '<unknown>';
+    const destination = typeof toolArgs.destination === 'string' ? toolArgs.destination : '<unknown>';
+    return {
+      kind: 'summary',
+      path: source,
+      summary: `Move or rename:\n- from: ${source}\n- to: ${destination}`,
+    };
+  }
+
+  if (toolName === 'fs.delete') {
+    return {
+      kind: 'summary',
+      path,
+      summary: `Delete path:\n- ${path}`,
+    };
   }
 
   return undefined;

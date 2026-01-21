@@ -1,9 +1,10 @@
 export type ActionStatus = 'pending' | 'approved' | 'executing' | 'done' | 'failed' | 'rejected';
 
 export interface ActionPreview {
-  kind: 'diff';
+  kind: 'diff' | 'summary';
   path: string;
-  diff: string;
+  diff?: string;
+  summary?: string;
 }
 
 export interface Action {
