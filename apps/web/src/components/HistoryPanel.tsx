@@ -61,17 +61,17 @@ export function HistoryPanel() {
   };
 
   return (
-    <div className="fixed right-0 top-[calc(50%+320px)] -translate-y-1/2 z-40">
+    <div className="fixed left-0 top-[calc(50%+200px)] -translate-y-1/2 z-40">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="absolute right-0 top-1/2 -translate-y-1/2 bg-purple-700 hover:bg-purple-600 text-gray-200 px-2 py-4 rounded-l-lg shadow-lg transition-all"
+        className="absolute left-full top-1/2 -translate-y-1/2 bg-purple-700 hover:bg-purple-600 text-gray-200 px-2 py-4 rounded-r-lg shadow-lg transition-all"
         style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
       >
-        {isOpen ? '>' : '<'} History
+        History {isOpen ? '<' : '>'}
       </button>
 
       <div
-        className={`bg-gray-800 border-l border-gray-700 shadow-xl transition-all duration-300 overflow-hidden ${
+        className={`bg-gray-800 border-r border-gray-700 shadow-xl transition-all duration-300 overflow-hidden ${
           isOpen ? 'w-80' : 'w-0'
         }`}
       >
