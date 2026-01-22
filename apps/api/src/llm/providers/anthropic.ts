@@ -117,8 +117,12 @@ export class AnthropicProvider implements LLMProviderAdapter {
 
   listModels(): string[] {
     return [
+      // Claude 4.5 (Latest)
+      'claude-opus-4-5-20251101',
+      // Claude 4
       'claude-sonnet-4-20250514',
       'claude-opus-4-20250514',
+      // Claude 3.5
       'claude-3-5-sonnet-20241022',
       'claude-3-5-haiku-20241022',
     ];

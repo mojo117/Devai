@@ -140,3 +140,115 @@ export async function gitCommit(message: string): Promise<GitCommitResult> {
     filesChanged: result.summary.changes,
   };
 }
+
+export interface GitPushResult {
+  remote: string;
+  branch: string;
+  success: boolean;
+  message: string;
+}
+
+export async function gitPush(
+  remote: string = 'origin',
+  branch?: string
+): Promise<GitPushResult> {
+  const git = await getGit();
+
+  // Get current branch if not specified
+  const status = await git.status();
+  const targetBranch = branch || status.current || 'dev';
+
+  // Safety check: never push to main/master directly
+  if (targetBranch === 'main' || targetBranch === 'master') {
+    throw new Error(
+      `Sicherheitsregel: Push zu ${targetBranch} ist nicht erlaubt. Nutze dev Branch.`
+    );
+  }
+
+  try {
+    await git.push(remote, targetBranch);
+    return {
+      remote,
+      branch: targetBranch,
+      success: true,
+      message: `Erfolgreich zu ${remote}/${targetBranch} gepusht`,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return {
+      remote,
+      branch: targetBranch,
+      success: false,
+      message: `Push fehlgeschlagen: ${errorMessage}`,
+    };
+  }
+}
+
+export interface GitPullResult {
+  remote: string;
+  branch: string;
+  success: boolean;
+  message: string;
+  changes: {
+    files: number;
+    insertions: number;
+    deletions: number;
+  };
+}
+
+export async function gitPull(
+  remote: string = 'origin',
+  branch?: string
+): Promise<GitPullResult> {
+  const git = await getGit();
+
+  // Get current branch if not specified
+  const status = await git.status();
+  const targetBranch = branch || status.current || 'dev';
+
+  try {
+    const result = await git.pull(remote, targetBranch);
+
+    return {
+      remote,
+      branch: targetBranch,
+      success: true,
+      message: result.summary.changes > 0
+        ? `${result.summary.changes} Dateien aktualisiert`
+        : 'Bereits auf dem neuesten Stand',
+      changes: {
+        files: result.summary.changes,
+        insertions: result.summary.insertions,
+        deletions: result.summary.deletions,
+      },
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return {
+      remote,
+      branch: targetBranch,
+      success: false,
+      message: `Pull fehlgeschlagen: ${errorMessage}`,
+      changes: { files: 0, insertions: 0, deletions: 0 },
+    };
+  }
+}
+
+export interface GitAddResult {
+  files: string[];
+  success: boolean;
+}
+
+export async function gitAdd(files: string[] = ['.']): Promise<GitAddResult> {
+  const git = await getGit();
+
+  try {
+    await git.add(files);
+    return {
+      files,
+      success: true,
+    };
+  } catch (error) {
+    throw new Error(`Git add fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}

@@ -1,21 +1,46 @@
 import type { ToolDefinition as LLMToolDefinition } from '../llm/types.js';
 
 export type ToolName =
-  | 'fs.listFiles'
-  | 'fs.readFile'
-  | 'fs.writeFile'
-  | 'fs.glob'
-  | 'fs.grep'
-  | 'fs.edit'
-  | 'fs.mkdir'
-  | 'fs.move'
-  | 'fs.delete'
-  | 'git.status'
-  | 'git.diff'
-  | 'git.commit'
-  | 'github.triggerWorkflow'
-  | 'github.getWorkflowRunStatus'
-  | 'logs.getStagingLogs'
+  // File System Tools
+  | 'fs_listFiles'
+  | 'fs_readFile'
+  | 'fs_writeFile'
+  | 'fs_glob'
+  | 'fs_grep'
+  | 'fs_edit'
+  | 'fs_mkdir'
+  | 'fs_move'
+  | 'fs_delete'
+  // Git Tools
+  | 'git_status'
+  | 'git_diff'
+  | 'git_commit'
+  | 'git_push'
+  | 'git_pull'
+  | 'git_add'
+  // GitHub Tools
+  | 'github_triggerWorkflow'
+  | 'github_getWorkflowRunStatus'
+  // Logs Tools
+  | 'logs_getStagingLogs'
+  // DevOps Tools (DEVO)
+  | 'bash_execute'
+  | 'ssh_execute'
+  | 'pm2_status'
+  | 'pm2_restart'
+  | 'pm2_stop'
+  | 'pm2_start'
+  | 'pm2_logs'
+  | 'pm2_reloadAll'
+  | 'pm2_save'
+  | 'npm_install'
+  | 'npm_run'
+  // Agent Meta-Tools
+  | 'delegateToKoda'
+  | 'delegateToDevo'
+  | 'escalateToChapo'
+  | 'askUser'
+  | 'requestApproval'
   | 'askForConfirmation';
 
 export interface ToolDefinition {
@@ -36,7 +61,7 @@ export interface ToolDefinition {
 export const TOOL_REGISTRY: ToolDefinition[] = [
   // File System Tools
   {
-    name: 'fs.listFiles',
+    name: 'fs_listFiles',
     description: 'List files and directories in a given path',
     parameters: {
       type: 'object',
@@ -51,7 +76,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     requiresConfirmation: false,
   },
   {
-    name: 'fs.readFile',
+    name: 'fs_readFile',
     description: 'Read the contents of a file',
     parameters: {
       type: 'object',
@@ -66,7 +91,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     requiresConfirmation: false,
   },
   {
-    name: 'fs.writeFile',
+    name: 'fs_writeFile',
     description: 'Write content to a file. This action requires user confirmation.',
     parameters: {
       type: 'object',
@@ -85,7 +110,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     requiresConfirmation: true,
   },
   {
-    name: 'fs.glob',
+    name: 'fs_glob',
     description: 'Find files matching a glob pattern (e.g., **/*.ts, src/**/*.tsx)',
     parameters: {
       type: 'object',
@@ -104,7 +129,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     requiresConfirmation: false,
   },
   {
-    name: 'fs.grep',
+    name: 'fs_grep',
     description: 'Search for text/regex pattern in files',
     parameters: {
       type: 'object',
@@ -127,7 +152,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     requiresConfirmation: false,
   },
   {
-    name: 'fs.edit',
+    name: 'fs_edit',
     description: 'Make targeted edits to a file (find and replace a unique string). This action requires user confirmation.',
     parameters: {
       type: 'object',
@@ -150,7 +175,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     requiresConfirmation: true,
   },
   {
-    name: 'fs.mkdir',
+    name: 'fs_mkdir',
     description: 'Create a new directory. This action requires user confirmation.',
     parameters: {
       type: 'object',
@@ -165,7 +190,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     requiresConfirmation: true,
   },
   {
-    name: 'fs.move',
+    name: 'fs_move',
     description: 'Move or rename a file or directory. This action requires user confirmation.',
     parameters: {
       type: 'object',
@@ -184,7 +209,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     requiresConfirmation: true,
   },
   {
-    name: 'fs.delete',
+    name: 'fs_delete',
     description: 'Delete a file or directory. Set recursive=true to delete non-empty directories. This action requires user confirmation.',
     parameters: {
       type: 'object',
@@ -205,7 +230,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
 
   // Git Tools
   {
-    name: 'git.status',
+    name: 'git_status',
     description: 'Show the working tree status (modified, staged, untracked files)',
     parameters: {
       type: 'object',
@@ -214,7 +239,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     requiresConfirmation: false,
   },
   {
-    name: 'git.diff',
+    name: 'git_diff',
     description: 'Show changes between commits, commit and working tree, etc.',
     parameters: {
       type: 'object',
@@ -228,7 +253,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     requiresConfirmation: false,
   },
   {
-    name: 'git.commit',
+    name: 'git_commit',
     description: 'Create a git commit with the staged changes. This action requires user confirmation.',
     parameters: {
       type: 'object',
@@ -242,10 +267,61 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     },
     requiresConfirmation: true,
   },
+  {
+    name: 'git_push',
+    description: 'Push commits to remote repository. This action requires user confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        remote: {
+          type: 'string',
+          description: 'Remote name (default: origin)',
+        },
+        branch: {
+          type: 'string',
+          description: 'Branch name (default: current branch)',
+        },
+      },
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'git_pull',
+    description: 'Pull changes from remote repository. This action requires user confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        remote: {
+          type: 'string',
+          description: 'Remote name (default: origin)',
+        },
+        branch: {
+          type: 'string',
+          description: 'Branch name (default: current branch)',
+        },
+      },
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'git_add',
+    description: 'Stage files for commit',
+    parameters: {
+      type: 'object',
+      properties: {
+        files: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Files to stage (default: all changes)',
+        },
+      },
+    },
+    requiresConfirmation: false,
+  },
 
   // GitHub Tools
   {
-    name: 'github.triggerWorkflow',
+    name: 'github_triggerWorkflow',
     description: 'Trigger a GitHub Actions workflow via workflow_dispatch. This action requires user confirmation.',
     parameters: {
       type: 'object',
@@ -268,7 +344,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     requiresConfirmation: true,
   },
   {
-    name: 'github.getWorkflowRunStatus',
+    name: 'github_getWorkflowRunStatus',
     description: 'Get the status of a GitHub Actions workflow run',
     parameters: {
       type: 'object',
@@ -285,7 +361,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
 
   // Logs Tools
   {
-    name: 'logs.getStagingLogs',
+    name: 'logs_getStagingLogs',
     description: 'Get recent logs from the staging environment',
     parameters: {
       type: 'object',
@@ -318,6 +394,334 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
         },
       },
       required: ['toolName', 'toolArgs'],
+    },
+    requiresConfirmation: false,
+  },
+
+  // DevOps Tools (DEVO agent)
+  {
+    name: 'bash_execute',
+    description: 'Execute a bash command locally. This action requires user confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: {
+          type: 'string',
+          description: 'The bash command to execute',
+        },
+        cwd: {
+          type: 'string',
+          description: 'Working directory for the command',
+        },
+        timeout: {
+          type: 'number',
+          description: 'Timeout in milliseconds (default: 15000)',
+        },
+      },
+      required: ['command'],
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'ssh_execute',
+    description: 'Execute a command on a remote server via SSH. This action requires user confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        host: {
+          type: 'string',
+          description: 'Host alias (baso, klyde, infrit) or IP address',
+        },
+        command: {
+          type: 'string',
+          description: 'The command to execute on the remote server',
+        },
+        timeout: {
+          type: 'number',
+          description: 'Timeout in milliseconds (default: 30000)',
+        },
+      },
+      required: ['host', 'command'],
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'pm2_status',
+    description: 'Get PM2 process status from the server',
+    parameters: {
+      type: 'object',
+      properties: {
+        host: {
+          type: 'string',
+          description: 'Host alias (default: baso)',
+        },
+      },
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'pm2_restart',
+    description: 'Restart a PM2 process. This action requires user confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        processName: {
+          type: 'string',
+          description: 'Name of the PM2 process to restart',
+        },
+        host: {
+          type: 'string',
+          description: 'Host alias (default: baso)',
+        },
+      },
+      required: ['processName'],
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'pm2_stop',
+    description: 'Stop a PM2 process. This action requires user confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        processName: {
+          type: 'string',
+          description: 'Name of the PM2 process to stop',
+        },
+        host: {
+          type: 'string',
+          description: 'Host alias (default: baso)',
+        },
+      },
+      required: ['processName'],
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'pm2_start',
+    description: 'Start a PM2 process. This action requires user confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        processName: {
+          type: 'string',
+          description: 'Name of the PM2 process to start',
+        },
+        host: {
+          type: 'string',
+          description: 'Host alias (default: baso)',
+        },
+      },
+      required: ['processName'],
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'pm2_logs',
+    description: 'Get PM2 logs for a process',
+    parameters: {
+      type: 'object',
+      properties: {
+        processName: {
+          type: 'string',
+          description: 'Name of the PM2 process',
+        },
+        lines: {
+          type: 'number',
+          description: 'Number of log lines to retrieve (default: 50)',
+        },
+        host: {
+          type: 'string',
+          description: 'Host alias (default: baso)',
+        },
+      },
+      required: ['processName'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'pm2_reloadAll',
+    description: 'Reload all PM2 processes. This action requires user confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        host: {
+          type: 'string',
+          description: 'Host alias (default: baso)',
+        },
+      },
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'pm2_save',
+    description: 'Save current PM2 process list. This action requires user confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        host: {
+          type: 'string',
+          description: 'Host alias (default: baso)',
+        },
+      },
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'npm_install',
+    description: 'Run npm install. This action requires user confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        packageName: {
+          type: 'string',
+          description: 'Package name to install (optional, installs all if not specified)',
+        },
+        cwd: {
+          type: 'string',
+          description: 'Working directory for the command',
+        },
+      },
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'npm_run',
+    description: 'Run an npm script. This action requires user confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        script: {
+          type: 'string',
+          description: 'The npm script to run',
+        },
+        cwd: {
+          type: 'string',
+          description: 'Working directory for the command',
+        },
+      },
+      required: ['script'],
+    },
+    requiresConfirmation: true,
+  },
+
+  // Agent Meta-Tools
+  {
+    name: 'delegateToKoda',
+    description: 'Delegate a code-related task to KODA (Senior Developer). Only available to CHAPO.',
+    parameters: {
+      type: 'object',
+      properties: {
+        task: {
+          type: 'string',
+          description: 'Description of the coding task',
+        },
+        context: {
+          type: 'object',
+          description: 'Gathered context and relevant information',
+        },
+        files: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'List of relevant file paths',
+        },
+      },
+      required: ['task'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'delegateToDevo',
+    description: 'Delegate a DevOps task to DEVO (DevOps Engineer). Only available to CHAPO.',
+    parameters: {
+      type: 'object',
+      properties: {
+        task: {
+          type: 'string',
+          description: 'Description of the DevOps task',
+        },
+        context: {
+          type: 'object',
+          description: 'Gathered context and relevant information',
+        },
+        commands: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Suggested commands to execute',
+        },
+      },
+      required: ['task'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'escalateToChapo',
+    description: 'Escalate a problem to CHAPO (Task Coordinator). Available to KODA and DEVO.',
+    parameters: {
+      type: 'object',
+      properties: {
+        issueType: {
+          type: 'string',
+          description: 'Type of issue: error, clarification, or blocker',
+        },
+        description: {
+          type: 'string',
+          description: 'Description of the problem',
+        },
+        context: {
+          type: 'object',
+          description: 'Relevant context (error messages, logs, etc.)',
+        },
+        suggestedSolutions: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Possible solutions to the problem',
+        },
+      },
+      required: ['issueType', 'description'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'askUser',
+    description: 'Ask the user a question for clarification. Only available to CHAPO.',
+    parameters: {
+      type: 'object',
+      properties: {
+        question: {
+          type: 'string',
+          description: 'The question to ask the user',
+        },
+        options: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Possible answer options (optional)',
+        },
+      },
+      required: ['question'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'requestApproval',
+    description: 'Request user approval for a risky action. Only available to CHAPO.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          description: 'Description of the action requiring approval',
+        },
+        risk: {
+          type: 'string',
+          description: 'Risk level: low, medium, or high',
+        },
+        details: {
+          type: 'object',
+          description: 'Additional details about the action',
+        },
+      },
+      required: ['action', 'risk'],
     },
     requiresConfirmation: false,
   },

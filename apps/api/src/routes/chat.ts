@@ -16,6 +16,9 @@ import { getProjectContext } from '../scanner/projectScanner.js';
 import { getSkillById, getSkillLoadState, refreshSkills } from '../skills/registry.js';
 import type { SkillManifest } from '@devai/shared';
 import { createSession, saveMessage, updateSessionTitleIfEmpty } from '../db/queries.js';
+import { processRequest as processMultiAgentRequest } from '../agents/router.js';
+import { getState, getOrCreateState } from '../agents/stateManager.js';
+import type { AgentStreamEvent } from '../agents/types.js';
 
 const ChatRequestSchema = z.object({
   messages: z.array(z.object({
@@ -301,6 +304,138 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
   app.get('/system-prompt', async (_request, reply) => {
     return reply.send({ prompt: SYSTEM_PROMPT });
   });
+
+  // Multi-agent chat endpoint (CHAPO → KODA/DEVO)
+  const MultiAgentRequestSchema = z.object({
+    message: z.string(),
+    sessionId: z.string().optional(),
+    projectRoot: z.string().optional(),
+  });
+
+  app.post('/chat/agents', {
+    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
+    reply.raw.setHeader('Content-Type', 'application/x-ndjson');
+
+    const parseResult = MultiAgentRequestSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: 'Invalid request',
+        details: parseResult.error.issues,
+      });
+    }
+
+    const { message, sessionId: requestedSessionId, projectRoot } = parseResult.data;
+
+    // Validate project root
+    let validatedProjectRoot: string | null = null;
+    if (projectRoot) {
+      const normalizedPath = resolve(projectRoot);
+      const isAllowed = config.allowedRoots.some((root) => {
+        const absoluteRoot = resolve(root);
+        return normalizedPath.startsWith(absoluteRoot + '/') || normalizedPath === absoluteRoot;
+      });
+      if (isAllowed) {
+        validatedProjectRoot = normalizedPath;
+      }
+    }
+
+    try {
+      const activeSessionId = requestedSessionId || (await createSession()).id;
+
+      // Initialize or get state
+      const state = getOrCreateState(activeSessionId);
+      if (validatedProjectRoot) {
+        state.taskContext.originalRequest = message;
+      }
+
+      const sendEvent = (event: AgentStreamEvent | Record<string, unknown>) => {
+        reply.raw.write(`${JSON.stringify(event)}\n`);
+      };
+
+      sendEvent({
+        type: 'agent_switch',
+        from: 'chapo',  // Initial agent
+        to: 'chapo',
+        reason: 'Initiating multi-agent workflow',
+      });
+
+      // Process request through multi-agent system
+      const result = await processMultiAgentRequest(
+        activeSessionId,
+        message,
+        validatedProjectRoot || config.allowedRoots[0],
+        sendEvent
+      );
+
+      // Build response message
+      const responseMessage: ChatMessage = {
+        id: nanoid(),
+        role: 'assistant',
+        content: result,
+        timestamp: new Date().toISOString(),
+      };
+
+      // Save messages
+      const userMessage: ChatMessage = {
+        id: nanoid(),
+        role: 'user',
+        content: message,
+        timestamp: new Date().toISOString(),
+      };
+
+      await saveMessage(activeSessionId, userMessage);
+      await saveMessage(activeSessionId, responseMessage);
+
+      const title = buildSessionTitle(message);
+      if (title) {
+        await updateSessionTitleIfEmpty(activeSessionId, title);
+      }
+
+      // Get final state for response
+      const finalState = getState(activeSessionId);
+      const pendingActions = getPendingActions();
+
+      sendEvent({
+        type: 'response',
+        response: {
+          message: responseMessage,
+          pendingActions,
+          sessionId: activeSessionId,
+          agentHistory: finalState?.agentHistory || [],
+        },
+      });
+
+      reply.raw.end();
+      return reply;
+    } catch (error) {
+      app.log.error(error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return reply.status(500).send({
+        error: 'Multi-agent processing failed',
+        details: errorMessage,
+      });
+    }
+  });
+
+  // Get agent state for a session
+  app.get('/chat/agents/:sessionId/state', async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const state = getState(sessionId);
+
+    if (!state) {
+      return reply.status(404).send({ error: 'Session not found' });
+    }
+
+    return reply.send({
+      sessionId,
+      currentPhase: state.currentPhase,
+      activeAgent: state.activeAgent,
+      agentHistory: state.agentHistory,
+      pendingApprovals: state.pendingApprovals,
+      pendingQuestions: state.pendingQuestions,
+    });
+  });
 };
 
 export async function handleToolCall(
@@ -387,11 +522,11 @@ export async function handleToolCall(
 
 function generateActionDescription(toolName: string, args: Record<string, unknown>): string {
   switch (toolName) {
-    case 'fs.writeFile':
+    case 'fs_writeFile':
       return `Write to file: ${args.path}`;
-    case 'git.commit':
+    case 'git_commit':
       return `Git commit: "${args.message}"`;
-    case 'github.triggerWorkflow':
+    case 'github_triggerWorkflow':
       return `Trigger workflow: ${args.workflow} on ${args.ref}`;
     default:
       return `Execute: ${toolName}`;
@@ -571,19 +706,19 @@ function formatToolResult(toolName: string, result: unknown): string {
 
   // Handle specific tool results
   switch (toolName) {
-    case 'fs.listFiles': {
+    case 'fs_listFiles': {
       const r = result as { path: string; files: Array<{ name: string; type: string }> };
       const files = r.files.map((f) => `${f.type === 'directory' ? '??' : '??'} ${f.name}`);
       return `**Files in ${r.path}:**\n${files.join('\n')}`;
     }
 
-    case 'fs.readFile': {
+    case 'fs_readFile': {
       const r = result as { path: string; content: string; size: number };
       const preview = r.content.length > 500 ? r.content.substring(0, 500) + '\n...' : r.content;
       return `**${r.path}** (${r.size} bytes):\n\`\`\`\n${preview}\n\`\`\``;
     }
 
-    case 'git.status': {
+    case 'git_status': {
       const r = result as {
         branch: string;
         staged: string[];
@@ -597,13 +732,13 @@ function formatToolResult(toolName: string, result: unknown): string {
       return `**Git Status:**\n${lines.join('\n')}`;
     }
 
-    case 'git.diff': {
+    case 'git_diff': {
       const r = result as { diff: string; filesChanged: number };
       const preview = r.diff.length > 1000 ? r.diff.substring(0, 1000) + '\n...' : r.diff;
       return `**Git Diff** (${r.filesChanged} files):\n\`\`\`diff\n${preview}\n\`\`\``;
     }
 
-    case 'logs.getStagingLogs': {
+    case 'logs_getStagingLogs': {
       const r = result as { lines: string[]; totalLines: number };
       const preview = r.lines.slice(-20).join('\n');
       return `**Staging Logs** (${r.totalLines} total lines, showing last 20):\n\`\`\`\n${preview}\n\`\`\``;

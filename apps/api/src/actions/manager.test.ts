@@ -30,7 +30,7 @@ describe('actions manager', () => {
 
     const action = createAction({
       id: 'action-1',
-      toolName: 'fs.listFiles',
+      toolName: 'fs_listFiles',
       toolArgs: { path: '.' },
       description: 'List files',
     });
@@ -51,7 +51,7 @@ describe('actions manager', () => {
 
     const action = createAction({
       id: 'action-2',
-      toolName: 'fs.readFile',
+      toolName: 'fs_readFile',
       toolArgs: { path: 'README.md' },
       description: 'Read file',
     });
@@ -65,7 +65,7 @@ describe('actions manager', () => {
   it('rejects pending actions', async () => {
     const action = createAction({
       id: 'action-3',
-      toolName: 'git.status',
+      toolName: 'git_status',
       toolArgs: {},
       description: 'Status',
     });

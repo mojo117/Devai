@@ -5,7 +5,6 @@ import { ActionCard } from './components/ActionCard';
 import { ToolsPanel } from './components/ToolsPanel';
 import { HistoryPanel } from './components/HistoryPanel';
 import { PromptsPanel } from './components/PromptsPanel';
-import { ProviderSelect } from './components/ProviderSelect';
 import { ActionsPage } from './components/ActionsPage';
 import {
   fetchHealth,
@@ -25,7 +24,6 @@ import {
   clearAuthToken,
 } from './api';
 import type {
-  LLMProvider,
   Action,
   HealthResponse,
   SkillSummary,
@@ -36,7 +34,6 @@ import type {
 } from './types';
 
 function App() {
-  const [provider, setProvider] = useState<LLMProvider>('openai');
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [actions, setActions] = useState<Action[]>([]);
   const [skills, setSkills] = useState<SkillSummary[]>([]);
@@ -82,29 +79,6 @@ function App() {
     fetchHealth()
       .then(setHealth)
       .catch((err) => setError(err.message));
-  }, [isAuthed]);
-
-  useEffect(() => {
-    if (!isAuthed) return;
-    let isMounted = true;
-
-    const loadProvider = async () => {
-      try {
-        const stored = await fetchSetting('preferredProvider');
-        const storedValue = stored.value;
-        if (storedValue === 'anthropic' || storedValue === 'openai' || storedValue === 'gemini') {
-          if (isMounted) setProvider(storedValue);
-        }
-      } catch {
-        // Ignore missing settings.
-      }
-    };
-
-    loadProvider();
-
-    return () => {
-      isMounted = false;
-    };
   }, [isAuthed]);
 
   useEffect(() => {
@@ -163,25 +137,6 @@ function App() {
       isMounted = false;
     };
   }, [isAuthed]);
-
-  useEffect(() => {
-    if (!health?.providers) return;
-    const providers = health.providers;
-    const isConfigured = providers[provider];
-    if (isConfigured) return;
-
-    if (providers.openai) {
-      setProvider('openai');
-      return;
-    }
-    if (providers.anthropic) {
-      setProvider('anthropic');
-      return;
-    }
-    if (providers.gemini) {
-      setProvider('gemini');
-    }
-  }, [health?.providers, provider]);
 
   useEffect(() => {
     if (!isAuthed || !health?.projectRoot) return;
@@ -288,13 +243,6 @@ function App() {
       // Non-blocking persistence; ignore errors here.
     });
   }, [isAuthed, projectContextOverride]);
-
-  useEffect(() => {
-    if (!isAuthed) return;
-    saveSetting('preferredProvider', provider).catch(() => {
-      // Non-blocking persistence; ignore errors here.
-    });
-  }, [isAuthed, provider]);
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -460,11 +408,6 @@ function App() {
   const activeActions = sortedActions.filter((a) => a.status === 'approved' || a.status === 'executing');
   const completedActions = sortedActions.filter((a) => a.status === 'done' || a.status === 'failed' || a.status === 'rejected');
 
-  const configuredProviders = health?.providers;
-  const hasConfiguredProvider = configuredProviders
-    ? configuredProviders.anthropic || configuredProviders.openai || configuredProviders.gemini
-    : true;
-
   return (
     <div className="min-h-screen flex flex-col">
       {/* Tools Panel (collapsible) */}
@@ -526,16 +469,6 @@ function App() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <ProviderSelect
-              value={provider}
-              onChange={setProvider}
-              available={configuredProviders || undefined}
-            />
-            {!hasConfiguredProvider && (
-              <span className="text-xs text-red-300">
-                No provider configured
-              </span>
-            )}
             <ProjectInfo projectRoot={health?.projectRoot} />
           </div>
         </div>
@@ -561,7 +494,7 @@ function App() {
             {/* Chat Area */}
             <div className="flex-1 flex flex-col">
               <ChatUI
-                provider={provider}
+                provider="anthropic"
                 projectRoot={health?.projectRoot}
                 skillIds={selectedSkillIds}
                 allowedRoots={health?.allowedRoots}

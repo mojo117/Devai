@@ -12,7 +12,7 @@ describe('chat plan gate', () => {
       id: 'tool-1',
       name: 'askForConfirmation',
       arguments: {
-        toolName: 'fs.writeFile',
+        toolName: 'fs_writeFile',
         toolArgs: { path: 'README.md', content: 'hi' },
         description: 'Write to file: README.md',
       },

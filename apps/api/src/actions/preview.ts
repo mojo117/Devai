@@ -6,7 +6,7 @@ export async function buildActionPreview(
   toolName: string,
   toolArgs: Record<string, unknown>
 ): Promise<ActionPreview | undefined> {
-  if (toolName !== 'fs.writeFile' && toolName !== 'fs.edit' && toolName !== 'fs.move' && toolName !== 'fs.delete') {
+  if (toolName !== 'fs_writeFile' && toolName !== 'fs_edit' && toolName !== 'fs_move' && toolName !== 'fs_delete') {
     return undefined;
   }
 
@@ -19,14 +19,14 @@ export async function buildActionPreview(
     };
   }
 
-  if (toolName === 'fs.writeFile') {
+  if (toolName === 'fs_writeFile') {
     const content = typeof toolArgs.content === 'string' ? toolArgs.content : '';
     const oldContent = await tryRead(path);
     const diff = createUnifiedDiff(path, oldContent ?? '', content, oldContent !== null);
     return { kind: 'diff', path, diff };
   }
 
-  if (toolName === 'fs.edit') {
+  if (toolName === 'fs_edit') {
     const oldString = typeof toolArgs.old_string === 'string' ? toolArgs.old_string : '';
     const newString = typeof toolArgs.new_string === 'string' ? toolArgs.new_string : '';
     const oldContent = await tryRead(path);
@@ -52,7 +52,7 @@ export async function buildActionPreview(
     return { kind: 'diff', path, diff };
   }
 
-  if (toolName === 'fs.move') {
+  if (toolName === 'fs_move') {
     const source = typeof toolArgs.source === 'string' ? toolArgs.source : '<unknown>';
     const destination = typeof toolArgs.destination === 'string' ? toolArgs.destination : '<unknown>';
     return {
@@ -62,7 +62,7 @@ export async function buildActionPreview(
     };
   }
 
-  if (toolName === 'fs.delete') {
+  if (toolName === 'fs_delete') {
     return {
       kind: 'summary',
       path,

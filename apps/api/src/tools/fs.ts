@@ -3,6 +3,33 @@ import { join, resolve, relative, dirname, basename } from 'path';
 import fg from 'fast-glob';
 import { config } from '../config.js';
 
+// Path mapping for cross-server compatibility
+// When running on Baso (77.42.90.193), files from Klyde are mounted at /mnt/klyde-projects
+// But the canonical path is /opt/Klyde/projects
+const PATH_MAPPINGS: Array<{ canonical: string; mounted: string }> = [
+  { canonical: '/opt/Klyde/projects', mounted: '/mnt/klyde-projects' },
+];
+
+// Translate canonical path to actual filesystem path
+function translatePath(path: string): string {
+  for (const mapping of PATH_MAPPINGS) {
+    if (path.startsWith(mapping.canonical)) {
+      return path.replace(mapping.canonical, mapping.mounted);
+    }
+  }
+  return path;
+}
+
+// Translate actual filesystem path back to canonical path (for display)
+function untranslatePath(path: string): string {
+  for (const mapping of PATH_MAPPINGS) {
+    if (path.startsWith(mapping.mounted)) {
+      return path.replace(mapping.mounted, mapping.canonical);
+    }
+  }
+  return path;
+}
+
 // Check if a path exists
 async function pathExists(path: string): Promise<boolean> {
   try {
@@ -53,10 +80,17 @@ async function resolvePathCaseInsensitive(basePath: string, relativePath: string
 
 // Validate that the path is within allowed roots
 // File access is restricted to /opt/Klyde/projects and /workingtrees
+// Handles path translation for cross-server compatibility
 async function validatePath(path: string): Promise<string> {
   // Handle empty or root path requests - default to first allowed root
   if (!path || path === '/' || path === '.' || path === './') {
-    return config.allowedRoots[0];
+    const defaultRoot = config.allowedRoots[0];
+    // Return the translated path (actual filesystem location)
+    const translated = translatePath(defaultRoot);
+    if (await pathExists(translated)) {
+      return translated;
+    }
+    return defaultRoot;
   }
 
   const segments = path.split(/[\\/]/).filter(Boolean);
@@ -76,23 +110,33 @@ async function validatePath(path: string): Promise<string> {
   for (const root of allowedRoots) {
     const absoluteRoot = resolve(root);
     if (normalizedPath.startsWith(absoluteRoot + '/') || normalizedPath === absoluteRoot) {
+      // Translate to actual filesystem path
+      const translatedRoot = translatePath(absoluteRoot);
+      const translatedPath = translatePath(normalizedPath);
+
       // Try case-insensitive resolution for the part after the root
       const relativePart = relative(absoluteRoot, normalizedPath);
       if (relativePart) {
-        return await resolvePathCaseInsensitive(absoluteRoot, relativePart);
+        const resolved = await resolvePathCaseInsensitive(translatedRoot, relativePart);
+        return resolved;
       }
-      return normalizedPath;
+      return translatedPath;
     }
   }
 
   // For relative paths, try each allowed root
   for (const root of allowedRoots) {
     const absoluteRoot = resolve(root);
+    const translatedRoot = translatePath(absoluteRoot);
     const rootBasename = absoluteRoot.split('/').pop() || '';
     let cleanPath = path;
 
     // If the path IS the root's basename (e.g., "projects"), return the root
     if (segments.length === 1 && segments[0].toLowerCase() === rootBasename.toLowerCase()) {
+      // Return translated path if it exists
+      if (await pathExists(translatedRoot)) {
+        return translatedRoot;
+      }
       return absoluteRoot;
     }
 
@@ -102,9 +146,9 @@ async function validatePath(path: string): Promise<string> {
       cleanPath = segments.slice(1).join('/');
     }
 
-    // Use case-insensitive resolution
-    const resolvedPath = await resolvePathCaseInsensitive(absoluteRoot, cleanPath);
-    const relativePath = relative(absoluteRoot, resolvedPath);
+    // Use case-insensitive resolution with translated root
+    const resolvedPath = await resolvePathCaseInsensitive(translatedRoot, cleanPath);
+    const relativePath = relative(translatedRoot, resolvedPath);
 
     // Check for path traversal attacks
     if (!relativePath.startsWith('..') && !relativePath.startsWith('/')) {
@@ -164,7 +208,7 @@ export async function listFiles(path: string): Promise<ListFilesResult> {
   );
 
   return {
-    path,
+    path: untranslatePath(absolutePath), // Return canonical path for display
     files: files.sort((a, b) => {
       // Directories first, then files
       if (a.type !== b.type) {
@@ -247,8 +291,15 @@ export async function globFiles(
   basePath?: string,
   ignore?: string[]
 ): Promise<GlobResult> {
-  // Validate basePath is within allowed roots, or use first allowed root
-  const searchPath = basePath ? await validatePath(basePath) : config.allowedRoots[0];
+  // Validate basePath is within allowed roots, or use first allowed root (translated)
+  let searchPath: string;
+  if (basePath) {
+    searchPath = await validatePath(basePath);
+  } else {
+    const defaultRoot = config.allowedRoots[0];
+    const translated = translatePath(defaultRoot);
+    searchPath = await pathExists(translated) ? translated : defaultRoot;
+  }
 
   const files = await fg(pattern, {
     cwd: searchPath,
@@ -261,7 +312,7 @@ export async function globFiles(
 
   return {
     pattern,
-    basePath: searchPath,
+    basePath: untranslatePath(searchPath), // Return canonical path for display
     files: files.slice(0, config.toolMaxListEntries),
     count: files.length,
     truncated,
@@ -338,7 +389,7 @@ export async function grepFiles(
 
   return {
     pattern,
-    basePath: validatedPath,
+    basePath: untranslatePath(validatedPath), // Return canonical path for display
     matches,
     filesSearched,
     truncated: matches.length >= maxMatches,
@@ -412,9 +463,12 @@ async function validateTargetPath(path: string): Promise<string> {
   for (const root of allowedRoots) {
     const absoluteRoot = resolve(root);
     if (normalizedPath.startsWith(absoluteRoot + '/') || normalizedPath === absoluteRoot) {
+      // Translate to actual filesystem path
+      const translatedRoot = translatePath(absoluteRoot);
+      const translatedPath = translatePath(normalizedPath);
       // Verify the root actually exists on this system
-      if (await pathExists(absoluteRoot)) {
-        return normalizedPath;
+      if (await pathExists(translatedRoot)) {
+        return translatedPath;
       }
     }
   }
@@ -426,9 +480,10 @@ async function validateTargetPath(path: string): Promise<string> {
   // For relative paths, try each allowed root (only if root exists)
   for (const root of allowedRoots) {
     const absoluteRoot = resolve(root);
+    const translatedRoot = translatePath(absoluteRoot);
 
-    // Skip roots that don't exist on this system
-    if (!await pathExists(absoluteRoot)) {
+    // Skip roots that don't exist on this system (check translated path)
+    if (!await pathExists(translatedRoot)) {
       continue;
     }
 
@@ -442,7 +497,7 @@ async function validateTargetPath(path: string): Promise<string> {
     // Try to match the first segment case-insensitively against existing directories
     const firstSegment = cleanSegments[0];
     if (firstSegment) {
-      const match = await findCaseInsensitiveMatch(absoluteRoot, firstSegment);
+      const match = await findCaseInsensitiveMatch(translatedRoot, firstSegment);
       if (match) {
         // Replace first segment with correctly-cased version
         cleanSegments[0] = match;
@@ -450,8 +505,8 @@ async function validateTargetPath(path: string): Promise<string> {
     }
 
     const cleanPath = cleanSegments.join('/');
-    const fullPath = join(absoluteRoot, cleanPath);
-    const relativePath = relative(absoluteRoot, fullPath);
+    const fullPath = join(translatedRoot, cleanPath);
+    const relativePath = relative(translatedRoot, fullPath);
 
     // Check for path traversal attacks
     if (!relativePath.startsWith('..') && !relativePath.startsWith('/')) {
