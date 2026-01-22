@@ -91,6 +91,7 @@ Nach der Analyse entscheide:
 **Bei DevOps-Arbeit:**
 → Delegiere an DEVO mit delegateToDevo()
 → Gib relevanten Kontext mit (Server, Befehle)
+→ WICHTIG: Bei Git-Tasks immer "commit UND push" anweisen!
 
 **Bei gemischten Tasks:**
 → Delegiere parallel an KODA und DEVO
