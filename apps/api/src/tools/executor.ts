@@ -74,7 +74,10 @@ export async function executeTool(
           );
 
         case 'fs.delete':
-          return fsTools.deleteFile(args.path as string);
+          return fsTools.deleteFile(
+            args.path as string,
+            args.recursive as boolean | undefined
+          );
 
         // Git Tools
         case 'git.status':

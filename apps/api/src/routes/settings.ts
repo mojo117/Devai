@@ -29,7 +29,12 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { key, value } = parseResult.data;
-    await setSetting(key, JSON.stringify(value));
-    return { key, value };
+    try {
+      await setSetting(key, JSON.stringify(value));
+      return { key, value };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      return reply.status(500).send({ error: message });
+    }
   });
 };

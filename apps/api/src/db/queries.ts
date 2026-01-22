@@ -156,6 +156,7 @@ export async function setSetting(key: string, value: string, userId: string = DE
 
   if (error) {
     console.error('Failed to save setting:', error);
+    throw new Error(`Failed to save setting: ${error.message}`);
   }
 }
 

@@ -33,7 +33,6 @@ const ChatRequestSchema = z.object({
     enabled: z.boolean().optional(),
     summary: z.string().optional(),
   }).optional(),
-  planApproved: z.boolean().optional(),
 });
 
 // System prompt for the AI assistant
@@ -47,7 +46,7 @@ FILE SYSTEM:
 - fs.writeFile(path, content): Write content to a file (REQUIRES USER CONFIRMATION)
 - fs.mkdir(path): Create a new directory (REQUIRES USER CONFIRMATION)
 - fs.move(source, destination): Move or rename a file/directory (REQUIRES USER CONFIRMATION)
-- fs.delete(path): Delete a file or empty directory (REQUIRES USER CONFIRMATION)
+- fs.delete(path, recursive?): Delete a file or directory. Set recursive=true for non-empty directories (REQUIRES USER CONFIRMATION)
 - fs.glob(pattern, path?): Find files matching a glob pattern (e.g., **/*.ts, src/**/*.tsx)
 - fs.grep(pattern, path, glob?): Search for text/regex pattern in files
 - fs.edit(path, old_string, new_string): Make targeted edits to a file (REQUIRES USER CONFIRMATION)
@@ -65,9 +64,17 @@ LOGS:
 - logs.getStagingLogs(lines): Get staging environment logs
 
 CONFIRMATION:
-- askForConfirmation(toolName, toolArgs, description): Request approval for a tool that requires confirmation (returns actionId)
+- askForConfirmation(toolName, toolArgs, description): Request approval for a tool that requires confirmation
 
-IMPORTANT: For tools that require confirmation, first call askForConfirmation with the tool name and args. Only proceed after user approval.
+IMPORTANT: For tools marked with (REQUIRES USER CONFIRMATION), you MUST:
+1. Call askForConfirmation(toolName, toolArgs, description) with the tool name, arguments, and a clear description
+2. The user will see an Approve/Reject button in the UI
+3. The action will only execute after the user approves it
+
+Example:
+User: "Delete the archive folder"
+You: First verify it exists with fs.listFiles, then call:
+askForConfirmation("fs.delete", {"path": "/path/to/archive", "recursive": true}, "Delete the archive folder")
 
 When exploring a codebase, use fs.glob to find files and fs.grep to search for specific code. This is more efficient than listing directories manually.
 
@@ -111,7 +118,6 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         skillIds,
         sessionId: requestedSessionId,
         projectContextOverride,
-        planApproved,
       } = parseResult.data;
 
     // Check if provider is configured
@@ -204,7 +210,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
             arguments: toolCall.arguments,
           });
 
-          const result = await handleToolCall(toolCall, allowedToolNames, sendEvent, planApproved === true);
+          const result = await handleToolCall(toolCall, allowedToolNames, sendEvent);
           const isError = result.startsWith('Error');
 
           toolResultsForLLM.push({
@@ -300,8 +306,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 export async function handleToolCall(
   toolCall: ToolCall,
   allowedToolNames: Set<string> | null,
-  sendEvent?: (event: Record<string, unknown>) => void,
-  planApproved: boolean = false
+  sendEvent?: (event: Record<string, unknown>) => void
 ): Promise<string> {
   const toolName = toolCall.name;
   const toolArgs = toolCall.arguments;
@@ -338,9 +343,6 @@ export async function handleToolCall(
     }
 
     const preview = await buildActionPreview(requestedToolName, requestedToolArgs);
-    if (!planApproved && toolRequiresConfirmation(requestedToolName)) {
-      return 'Error: Plan not approved. Ask the user to approve the plan before requesting tool approvals.';
-    }
 
     const action = createAction({
       id: nanoid(),

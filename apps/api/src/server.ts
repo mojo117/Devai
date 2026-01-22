@@ -38,7 +38,7 @@ await app.register(cors, {
 // Global rate limiting (per IP)
 await app.register(rateLimit, {
   global: true,
-  max: 120,
+  max: 300,
   timeWindow: '1 minute',
 });
 

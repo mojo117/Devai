@@ -1,4 +1,4 @@
-import { readdir, readFile as fsReadFile, writeFile as fsWriteFile, stat, access, mkdir as fsMkdir, rename, unlink, rmdir } from 'fs/promises';
+import { readdir, readFile as fsReadFile, writeFile as fsWriteFile, stat, access, mkdir as fsMkdir, rename, unlink, rmdir, rm } from 'fs/promises';
 import { join, resolve, relative, dirname, basename } from 'path';
 import fg from 'fast-glob';
 import { config } from '../config.js';
@@ -528,15 +528,16 @@ export async function moveFile(source: string, destination: string): Promise<Mov
   };
 }
 
-// ============ DELETE - Delete files and empty directories ============
+// ============ DELETE - Delete files and directories ============
 
 export interface DeleteResult {
   path: string;
   deleted: boolean;
   type: 'file' | 'directory';
+  itemsDeleted?: number;
 }
 
-export async function deleteFile(path: string): Promise<DeleteResult> {
+export async function deleteFile(path: string, recursive: boolean = false): Promise<DeleteResult> {
   const absolutePath = await validatePath(path);
 
   // Check if path exists
@@ -547,10 +548,13 @@ export async function deleteFile(path: string): Promise<DeleteResult> {
   const stats = await stat(absolutePath);
 
   if (stats.isDirectory()) {
-    // Only delete empty directories
     const entries = await readdir(absolutePath);
-    if (entries.length > 0) {
-      throw new Error(`Cannot delete non-empty directory: ${path} (contains ${entries.length} items)`);
+    if (entries.length > 0 && !recursive) {
+      throw new Error(`Cannot delete non-empty directory: ${path} (contains ${entries.length} items). Set recursive=true to delete all contents.`);
+    }
+    if (recursive && entries.length > 0) {
+      await rm(absolutePath, { recursive: true, force: true });
+      return { path, deleted: true, type: 'directory', itemsDeleted: entries.length };
     }
     await rmdir(absolutePath);
     return { path, deleted: true, type: 'directory' };

@@ -185,13 +185,17 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
   },
   {
     name: 'fs.delete',
-    description: 'Delete a file or empty directory. This action requires user confirmation.',
+    description: 'Delete a file or directory. Set recursive=true to delete non-empty directories. This action requires user confirmation.',
     parameters: {
       type: 'object',
       properties: {
         path: {
           type: 'string',
-          description: 'The path to delete (file or empty directory)',
+          description: 'The path to delete (file or directory)',
+        },
+        recursive: {
+          type: 'boolean',
+          description: 'If true, recursively delete directory contents. Required for non-empty directories.',
         },
       },
       required: ['path'],

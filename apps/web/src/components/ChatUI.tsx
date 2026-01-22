@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import { sendMessage, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction, globProjectFiles } from '../api';
+import { sendMessage, fetchSessions, createSession, fetchSessionMessages, saveSetting, updateSessionTitle, approveAction, rejectAction, globProjectFiles } from '../api';
 import type { ChatMessage, ContextStats, LLMProvider, SessionSummary } from '../types';
 import { InlineAction, type PendingAction } from './InlineAction';
-import { PlanPanel } from './PlanPanel';
 
 interface ToolEvent {
   id: string;
@@ -48,15 +47,12 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
   const [fileHintsLoading, setFileHintsLoading] = useState(false);
   const [fileHintsError, setFileHintsError] = useState<string | null>(null);
   const [activeHintIndex, setActiveHintIndex] = useState(0);
-  const [planApproved, setPlanApproved] = useState(false);
-  const [planLoading, setPlanLoading] = useState(false);
   const [retryState, setRetryState] = useState<null | {
     input: string;
     userMessage: ChatMessage;
     runRequest: () => Promise<{ message: ChatMessage; sessionId?: string } | null>;
   }>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const planItems = extractPlanItems(messages);
 
   const refreshSessions = async (selectId?: string | null) => {
     const sessionList = await fetchSessions();
@@ -100,43 +96,6 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
   }, [messages]);
 
   useEffect(() => {
-    if (!sessionId) {
-      setPlanApproved(false);
-      return;
-    }
-    if (planItems.length === 0) {
-      setPlanApproved(false);
-      return;
-    }
-
-    let cancelled = false;
-    const loadPlanState = async () => {
-      setPlanLoading(true);
-      try {
-        const key = `planState:${sessionId}`;
-        const stored = await fetchSetting(key);
-        const value = stored.value as { hash?: string; approved?: boolean } | null;
-        if (cancelled) return;
-        const currentHash = hashPlan(planItems);
-        if (value && value.hash === currentHash && value.approved) {
-          setPlanApproved(true);
-        } else {
-          setPlanApproved(false);
-        }
-      } catch {
-        if (!cancelled) setPlanApproved(false);
-      } finally {
-        if (!cancelled) setPlanLoading(false);
-      }
-    };
-
-    loadPlanState();
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionId, planItems]);
-
-  useEffect(() => {
     const token = extractAtToken(input);
     if (!token) {
       setFileHints([]);
@@ -172,33 +131,30 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
     };
   }, [input, allowedRoots, ignorePatterns]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
+  const sendChatMessage = async (content: string) => {
+    if (isLoading) return;
 
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'user',
-      content: input.trim(),
+      content,
       timestamp: new Date().toISOString(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
-    const originalInput = input;
-    setInput('');
+    const currentMessages = [...messages, userMessage];
+    setMessages(currentMessages);
     setIsLoading(true);
     setToolEvents([]);
     setFileHints([]);
 
     const runRequest = async (): Promise<{ message: ChatMessage; sessionId?: string } | null> => {
       const response = await sendMessage(
-        [...messages, userMessage],
+        currentMessages,
         provider,
         projectRoot || undefined,
         skillIds,
         pinnedFiles,
         projectContextOverride,
-        planApproved,
         sessionId || undefined,
         (event) => {
           if (event.type === 'status') {
@@ -284,7 +240,7 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
 
       if (shouldRetry) {
         setRetryState({
-          input: originalInput,
+          input: content,
           userMessage,
           runRequest,
         });
@@ -294,6 +250,14 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim() || isLoading) return;
+    const content = input.trim();
+    setInput('');
+    await sendChatMessage(content);
   };
 
   const handleRetry = async () => {
@@ -353,14 +317,6 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
     if (onPinFile) {
       onPinFile(hint);
     }
-  };
-
-  const handleApprovePlan = async () => {
-    if (!sessionId || planItems.length === 0) return;
-    const key = `planState:${sessionId}`;
-    const payload = { hash: hashPlan(planItems), approved: true };
-    setPlanApproved(true);
-    await saveSetting(key, payload);
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -524,15 +480,6 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
               ))}
             </div>
           </div>
-        )}
-
-        {planItems.length > 0 && (
-          <PlanPanel
-            items={planItems}
-            approved={planApproved}
-            loading={planLoading}
-            onApprove={handleApprovePlan}
-          />
         )}
 
         {messages.length === 0 && (
@@ -720,30 +667,6 @@ function extractAtToken(input: string): { value: string; start: number; end: num
 
 function escapeGlob(value: string): string {
   return value.replace(/([\\*?[\]{}()!])/g, '\\$1');
-}
-
-function extractPlanItems(messages: ChatMessage[]): string[] {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message.role !== 'assistant') continue;
-    const lines = message.content.split('\n').map((line) => line.trim());
-    const planStart = lines.findIndex((line) => line.toLowerCase().startsWith('plan'));
-    if (planStart === -1) continue;
-
-    const planLines = lines.slice(planStart + 1).filter(Boolean);
-    const items = planLines
-      .map((line) => line.replace(/^[\-\d\.\)\s]+/, '').trim())
-      .filter(Boolean);
-
-    if (items.length > 0) {
-      return items;
-    }
-  }
-  return [];
-}
-
-function hashPlan(items: string[]): string {
-  return JSON.stringify(items);
 }
 
 function upsertToolEvent(
