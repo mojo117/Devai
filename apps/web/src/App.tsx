@@ -7,6 +7,7 @@ import { HistoryPanel } from './components/HistoryPanel';
 import { PromptsPanel } from './components/PromptsPanel';
 import { ActionsPage } from './components/ActionsPage';
 import { SystemFeed, type FeedEvent, toolEventToFeedEvent } from './components/SystemFeed';
+import { ResizableDivider } from './components/ResizableDivider';
 import {
   fetchHealth,
   fetchActions,
@@ -66,11 +67,20 @@ function App() {
   } | null>(null);
   const [feedEvents, setFeedEvents] = useState<FeedEvent[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
+  const [feedWidth, setFeedWidth] = useState(384); // Default 384px (w-96)
 
   // Convert tool events to feed events
   const handleToolEvents = useCallback((toolEvents: ToolEvent[]) => {
     const newFeedEvents = toolEvents.map(toolEventToFeedEvent);
     setFeedEvents(newFeedEvents);
+  }, []);
+
+  // Handle resize of the system feed panel
+  const handleFeedResize = useCallback((deltaX: number) => {
+    setFeedWidth((prev) => {
+      const newWidth = prev - deltaX; // Subtract because dragging right should shrink the feed
+      return Math.max(200, Math.min(800, newWidth)); // Clamp between 200px and 800px
+    });
   }, []);
 
   useEffect(() => {
@@ -150,7 +160,7 @@ function App() {
   useEffect(() => {
     if (!isAuthed || !health?.projectRoot) return;
     setProjectLoading(true);
-    fetchProject()
+    fetchProject(health.projectRoot)
       .then((data) => {
         setProjectContext(data.context);
         setProjectContextLoadedAt(new Date().toISOString());
@@ -321,9 +331,10 @@ function App() {
   };
 
   const handleRefreshProject = async () => {
+    if (!health?.projectRoot) return;
     setProjectLoading(true);
     try {
-      const data = await refreshProject();
+      const data = await refreshProject(health.projectRoot);
       setProjectContext(data.context);
       setProjectContextLoadedAt(new Date().toISOString());
     } catch (err) {
@@ -517,8 +528,11 @@ function App() {
               />
             </div>
 
+            {/* Resizable Divider */}
+            <ResizableDivider onResize={handleFeedResize} />
+
             {/* System Feed - Right Side */}
-            <aside className="w-96 flex-shrink-0">
+            <aside className="flex-shrink-0" style={{ width: feedWidth }}>
               <SystemFeed events={feedEvents} isLoading={chatLoading} />
             </aside>
           </>

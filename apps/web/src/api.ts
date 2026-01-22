@@ -156,8 +156,9 @@ export async function reloadSkills(): Promise<SkillsResponse> {
   return res.json();
 }
 
-export async function fetchProject(): Promise<ProjectResponse> {
-  const res = await fetch(`${API_BASE}/project`, {
+export async function fetchProject(projectPath: string): Promise<ProjectResponse> {
+  const params = new URLSearchParams({ path: projectPath });
+  const res = await fetch(`${API_BASE}/project?${params.toString()}`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) {
@@ -167,8 +168,9 @@ export async function fetchProject(): Promise<ProjectResponse> {
   return res.json();
 }
 
-export async function refreshProject(): Promise<ProjectResponse> {
-  const res = await fetch(`${API_BASE}/project/refresh`, {
+export async function refreshProject(projectPath: string): Promise<ProjectResponse> {
+  const params = new URLSearchParams({ path: projectPath });
+  const res = await fetch(`${API_BASE}/project/refresh?${params.toString()}`, {
     method: 'POST',
     headers: withAuthHeaders(),
   });
@@ -363,5 +365,103 @@ export async function fetchSystemPrompt(): Promise<{ prompt: string }> {
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch system prompt');
+  return res.json();
+}
+
+// Multi-Agent API
+
+export interface AgentHistoryEntry {
+  entryId: string;
+  timestamp: string;
+  agent: 'chapo' | 'koda' | 'devo';
+  action: string;
+  input?: unknown;
+  output?: unknown;
+  toolCalls?: Array<{
+    name: string;
+    arguments: Record<string, unknown>;
+    result?: string;
+  }>;
+  duration: number;
+  status: 'success' | 'error' | 'escalated' | 'waiting';
+}
+
+export interface MultiAgentResponse {
+  message: ChatMessage;
+  pendingActions: Action[];
+  sessionId?: string;
+  agentHistory?: AgentHistoryEntry[];
+}
+
+export async function sendMultiAgentMessage(
+  message: string,
+  projectRoot?: string,
+  sessionId?: string,
+  onEvent?: (event: ChatStreamEvent) => void
+): Promise<MultiAgentResponse> {
+  const res = await fetch(`${API_BASE}/chat/agents`, {
+    method: 'POST',
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ message, projectRoot, sessionId }),
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || 'Failed to send multi-agent message');
+  }
+
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/x-ndjson')) {
+    return res.json();
+  }
+
+  if (!res.body) {
+    throw new Error('Missing response body');
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalResponse: MultiAgentResponse | null = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const event = JSON.parse(line) as { type?: string; response?: unknown };
+      if (onEvent) {
+        onEvent(event as ChatStreamEvent);
+      }
+      if (event.type === 'response') {
+        finalResponse = event.response as MultiAgentResponse;
+      }
+    }
+  }
+
+  if (!finalResponse) {
+    throw new Error('No response received from server');
+  }
+
+  return finalResponse;
+}
+
+export async function fetchAgentState(sessionId: string): Promise<{
+  sessionId: string;
+  currentPhase: string;
+  activeAgent: string;
+  agentHistory: AgentHistoryEntry[];
+  pendingApprovals: unknown[];
+  pendingQuestions: unknown[];
+}> {
+  const res = await fetch(`${API_BASE}/chat/agents/${sessionId}/state`, {
+    headers: withAuthHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to fetch agent state');
   return res.json();
 }
