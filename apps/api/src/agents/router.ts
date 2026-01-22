@@ -27,6 +27,8 @@ import * as stateManager from './stateManager.js';
 import { llmRouter } from '../llm/router.js';
 import { executeTool } from '../tools/executor.js';
 import { getToolsForLLM, toolRequiresConfirmation } from '../tools/registry.js';
+import { createAction } from '../actions/manager.js';
+import { buildActionPreview } from '../actions/preview.js';
 import type { LLMMessage, ToolCall } from '../llm/types.js';
 
 // Agent definitions
@@ -488,9 +490,48 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
         args: toolCall.arguments,
       });
 
+      // Check if tool requires confirmation - create pending action for UI approval
+      if (toolRequiresConfirmation(toolCall.name)) {
+        const preview = await buildActionPreview(toolCall.name, toolCall.arguments);
+        const description = generateToolDescription(toolCall.name, toolCall.arguments);
+
+        const action = createAction({
+          id: nanoid(),
+          toolName: toolCall.name,
+          toolArgs: toolCall.arguments,
+          description,
+          preview,
+        });
+
+        // Send action_pending event for inline approval in UI
+        sendEvent({
+          type: 'action_pending',
+          actionId: action.id,
+          toolName: action.toolName,
+          toolArgs: action.toolArgs,
+          description: action.description,
+          preview: action.preview,
+        });
+
+        // Add tool result to messages indicating action is pending
+        messages.push({
+          role: 'assistant',
+          content: response.content || '',
+          toolCalls: response.toolCalls,
+        });
+        messages.push({
+          role: 'user',
+          content: '',
+          toolResults: [{
+            toolUseId: toolCall.id,
+            result: `Action created for approval: ${description} (Action ID: ${action.id})`,
+            isError: false,
+          }],
+        });
+        continue;
+      }
+
       const startTime = Date.now();
-      // In multi-agent mode, tools are executed directly after CHAPO approval
-      // No per-tool confirmation needed - approval was granted at task level
       const result = await executeTool(toolCall.name, toolCall.arguments);
       const duration = Date.now() - startTime;
 
@@ -526,6 +567,48 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
           isError: !result.success,
         }],
       });
+    }
+  }
+
+  // Helper function to generate tool descriptions
+  function generateToolDescription(toolName: string, args: Record<string, unknown>): string {
+    switch (toolName) {
+      case 'fs_writeFile':
+        return `Write to file: ${args.path}`;
+      case 'fs_edit':
+        return `Edit file: ${args.path}`;
+      case 'fs_mkdir':
+        return `Create directory: ${args.path}`;
+      case 'fs_move':
+        return `Move: ${args.source} → ${args.destination}`;
+      case 'fs_delete':
+        return `Delete: ${args.path}`;
+      case 'git_commit':
+        return `Git commit: "${args.message}"`;
+      case 'git_push':
+        return `Git push to ${args.remote || 'origin'}/${args.branch || 'current branch'}`;
+      case 'git_pull':
+        return `Git pull from ${args.remote || 'origin'}/${args.branch || 'current branch'}`;
+      case 'github_triggerWorkflow':
+        return `Trigger workflow: ${args.workflow} on ${args.ref}`;
+      case 'bash_execute':
+        return `Execute: ${args.command}`;
+      case 'ssh_execute':
+        return `SSH to ${args.host}: ${args.command}`;
+      case 'pm2_restart':
+        return `PM2 restart: ${args.processName}`;
+      case 'pm2_stop':
+        return `PM2 stop: ${args.processName}`;
+      case 'pm2_start':
+        return `PM2 start: ${args.processName}`;
+      case 'pm2_reloadAll':
+        return `PM2 reload all processes`;
+      case 'npm_install':
+        return args.packageName ? `npm install ${args.packageName}` : 'npm install';
+      case 'npm_run':
+        return `npm run ${args.script}`;
+      default:
+        return `Execute: ${toolName}`;
     }
   }
 
