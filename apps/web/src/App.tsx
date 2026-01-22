@@ -508,11 +508,11 @@ function App() {
       )}
 
       {/* Main Content */}
-      <div className="flex-1 flex w-full">
+      <div className="flex-1 flex w-full overflow-hidden min-h-0">
         {view === 'chat' ? (
           <>
             {/* Chat Area - Left Side */}
-            <div className="flex-1 flex flex-col min-w-0">
+            <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
               <ChatUI
                 provider="anthropic"
                 projectRoot={health?.projectRoot}
@@ -532,7 +532,7 @@ function App() {
             <ResizableDivider onResize={handleFeedResize} />
 
             {/* System Feed - Right Side */}
-            <aside className="flex-shrink-0" style={{ width: feedWidth }}>
+            <aside className="flex-shrink-0 min-h-0 overflow-hidden" style={{ width: feedWidth }}>
               <SystemFeed events={feedEvents} isLoading={chatLoading} />
             </aside>
           </>

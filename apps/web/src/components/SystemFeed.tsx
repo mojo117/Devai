@@ -16,16 +16,19 @@ interface SystemFeedProps {
 }
 
 export function SystemFeed({ events, isLoading }: SystemFeedProps) {
-  const feedEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
+  // Auto-scroll to bottom when new events arrive
   useEffect(() => {
-    feedEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    }
   }, [events]);
 
   return (
-    <div className="flex flex-col h-full bg-gray-900 border-l border-gray-700">
+    <div className="flex flex-col h-full bg-gray-900 border-l border-gray-700 overflow-hidden">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-gray-700 bg-gray-800">
+      <div className="px-4 py-3 border-b border-gray-700 bg-gray-800 flex-shrink-0">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-gray-200">System Feed</h2>
           {isLoading && (
@@ -37,20 +40,23 @@ export function SystemFeed({ events, isLoading }: SystemFeedProps) {
         </div>
       </div>
 
-      {/* Events List */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-2">
-        {events.length === 0 && !isLoading && (
-          <div className="text-center text-gray-500 py-8">
-            <p className="text-sm">No system events yet</p>
-            <p className="text-xs mt-1">Tool calls and logs will appear here</p>
-          </div>
-        )}
+      {/* Events List - fills from bottom, new items at bottom */}
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto p-2 flex flex-col justify-end min-h-0"
+      >
+        <div className="space-y-2">
+          {events.length === 0 && !isLoading && (
+            <div className="text-center text-gray-500 py-8">
+              <p className="text-sm">No system events yet</p>
+              <p className="text-xs mt-1">Tool calls and logs will appear here</p>
+            </div>
+          )}
 
-        {events.map((event) => (
-          <FeedEventCard key={event.id} event={event} />
-        ))}
-
-        <div ref={feedEndRef} />
+          {events.map((event) => (
+            <FeedEventCard key={event.id} event={event} />
+          ))}
+        </div>
       </div>
     </div>
   );
