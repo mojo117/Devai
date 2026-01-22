@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
-import { ChatUI } from './components/ChatUI';
+import { useState, useEffect, useCallback } from 'react';
+import { ChatUI, type ToolEvent } from './components/ChatUI';
 import { ProjectInfo } from './components/ProjectInfo';
 import { ActionCard } from './components/ActionCard';
 import { ToolsPanel } from './components/ToolsPanel';
 import { HistoryPanel } from './components/HistoryPanel';
 import { PromptsPanel } from './components/PromptsPanel';
 import { ActionsPage } from './components/ActionsPage';
+import { SystemFeed, type FeedEvent, toolEventToFeedEvent } from './components/SystemFeed';
 import {
   fetchHealth,
   fetchActions,
@@ -63,6 +64,14 @@ function App() {
     tokenBudget: number;
     note?: string;
   } | null>(null);
+  const [feedEvents, setFeedEvents] = useState<FeedEvent[]>([]);
+  const [chatLoading, setChatLoading] = useState(false);
+
+  // Convert tool events to feed events
+  const handleToolEvents = useCallback((toolEvents: ToolEvent[]) => {
+    const newFeedEvents = toolEvents.map(toolEventToFeedEvent);
+    setFeedEvents(newFeedEvents);
+  }, []);
 
   useEffect(() => {
     verifyAuth()
@@ -488,11 +497,11 @@ function App() {
       )}
 
       {/* Main Content */}
-      <div className="flex-1 flex max-w-6xl mx-auto w-full">
+      <div className="flex-1 flex w-full">
         {view === 'chat' ? (
           <>
-            {/* Chat Area */}
-            <div className="flex-1 flex flex-col">
+            {/* Chat Area - Left Side */}
+            <div className="flex-1 flex flex-col min-w-0">
               <ChatUI
                 provider="anthropic"
                 projectRoot={health?.projectRoot}
@@ -503,72 +512,15 @@ function App() {
                 projectContextOverride={projectContextOverride}
                 onPinFile={(file) => setPinnedFiles((prev) => (prev.includes(file) ? prev : [...prev, file]))}
                 onContextUpdate={(stats) => setContextStats(stats)}
+                onToolEvent={handleToolEvents}
+                onLoadingChange={setChatLoading}
               />
             </div>
 
-            {/* Actions Sidebar */}
-            {sortedActions.length > 0 && (
-              <aside className="w-80 border-l border-gray-700 p-4 overflow-y-auto">
-                <h2 className="text-sm font-semibold text-gray-400 mb-4">
-                  Actions ({sortedActions.length})
-                </h2>
-
-                {pendingActions.length > 0 && (
-                  <div className="mb-6">
-                    <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
-                      Pending ({pendingActions.length})
-                    </div>
-                    <div className="space-y-3">
-                      {pendingActions.map((action) => (
-                        <ActionCard
-                          key={action.id}
-                          action={action}
-                          onApprove={() => handleApprove(action.id)}
-                          onReject={() => handleReject(action.id)}
-                          onRetry={() => handleRetry(action.id)}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {activeActions.length > 0 && (
-                  <div className="mb-6">
-                    <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
-                      In Progress ({activeActions.length})
-                    </div>
-                    <div className="space-y-3">
-                      {activeActions.map((action) => (
-                        <ActionCard
-                          key={action.id}
-                          action={action}
-                          onApprove={() => handleApprove(action.id)}
-                          onRetry={() => handleRetry(action.id)}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {completedActions.length > 0 && (
-                  <div>
-                    <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
-                      Completed ({completedActions.length})
-                    </div>
-                    <div className="space-y-3">
-                      {completedActions.map((action) => (
-                        <ActionCard
-                          key={action.id}
-                          action={action}
-                          onApprove={() => handleApprove(action.id)}
-                          onRetry={() => handleRetry(action.id)}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </aside>
-            )}
+            {/* System Feed - Right Side */}
+            <aside className="w-96 flex-shrink-0">
+              <SystemFeed events={feedEvents} isLoading={chatLoading} />
+            </aside>
           </>
         ) : (
           <ActionsPage

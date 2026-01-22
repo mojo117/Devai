@@ -26,6 +26,15 @@ interface ToolEventUpdate {
   chunk?: string;
 }
 
+export interface ToolEvent {
+  id: string;
+  type: 'status' | 'tool_call' | 'tool_result';
+  name?: string;
+  arguments?: unknown;
+  result?: unknown;
+  completed?: boolean;
+}
+
 interface ChatUIProps {
   provider: LLMProvider;
   projectRoot?: string | null;
@@ -36,12 +45,20 @@ interface ChatUIProps {
   projectContextOverride?: { enabled: boolean; summary: string };
   onPinFile?: (file: string) => void;
   onContextUpdate?: (stats: ContextStats) => void;
+  onToolEvent?: (events: ToolEvent[]) => void;
+  onLoadingChange?: (loading: boolean) => void;
 }
 
-export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFiles, ignorePatterns, projectContextOverride, onPinFile, onContextUpdate }: ChatUIProps) {
+export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFiles, ignorePatterns, projectContextOverride, onPinFile, onContextUpdate, onToolEvent, onLoadingChange }: ChatUIProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoadingInternal] = useState(false);
+
+  // Wrapper to emit loading changes
+  const setIsLoading = (loading: boolean) => {
+    setIsLoadingInternal(loading);
+    onLoadingChange?.(loading);
+  };
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -106,6 +123,11 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Emit tool events to parent
+  useEffect(() => {
+    onToolEvent?.(toolEvents);
+  }, [toolEvents, onToolEvent]);
 
   useEffect(() => {
     const token = extractAtToken(input);
@@ -563,39 +585,6 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
                 <AgentTimeline entries={agentHistory} />
               </div>
             )}
-          </div>
-        )}
-
-        {toolEvents.length > 0 && (
-          <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 text-xs text-gray-200">
-            <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-2">
-              Tool Activity
-            </div>
-            <div className="space-y-2">
-              {toolEvents.map((event) => (
-                <div key={event.id} className="bg-gray-800 rounded p-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-gray-400 uppercase text-[10px]">{event.type}</span>
-                    {event.name && (
-                      <span className="text-blue-300 font-mono text-[11px]">{event.name}</span>
-                    )}
-                  </div>
-                  {event.type === 'status' && (
-                    <p className="text-[11px] text-gray-300 mt-1">{String(event.result)}</p>
-                  )}
-                  {event.type === 'tool_call' && event.arguments !== undefined && (
-                    <pre className="text-[11px] text-gray-300 mt-2 bg-gray-950 rounded p-2 overflow-x-auto">
-                      {formatToolPayload(event.arguments)}
-                    </pre>
-                  )}
-                  {event.type === 'tool_result' && event.result !== undefined && (
-                    <pre className="text-[11px] text-gray-300 mt-2 bg-gray-950 rounded p-2 overflow-x-auto">
-                      {formatToolPayload(event.result)}
-                    </pre>
-                  )}
-                </div>
-              ))}
-            </div>
           </div>
         )}
 
