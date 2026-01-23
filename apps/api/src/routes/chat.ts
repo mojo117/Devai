@@ -479,7 +479,7 @@ export async function handleToolCall(
 
     const preview = await buildActionPreview(requestedToolName, requestedToolArgs);
 
-    const action = createAction({
+    const action = await createAction({
       id: nanoid(),
       toolName: requestedToolName,
       toolArgs: requestedToolArgs,

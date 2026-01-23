@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
+import fastifyWebsocket from '@fastify/websocket';
 import { config } from './config.js';
 import { healthRoutes } from './routes/health.js';
 import { chatRoutes } from './routes/chat.js';
@@ -11,6 +12,7 @@ import { sessionsRoutes } from './routes/sessions.js';
 import { settingsRoutes } from './routes/settings.js';
 import { authMiddleware, registerAuthRoutes } from './routes/auth.js';
 import { initDb } from './db/index.js';
+import { websocketRoutes } from './websocket/routes.js';
 
 await initDb();
 
@@ -42,6 +44,9 @@ await app.register(rateLimit, {
   timeWindow: '1 minute',
 });
 
+// Register WebSocket support
+await app.register(fastifyWebsocket);
+
 // Register auth routes
 await registerAuthRoutes(app);
 
@@ -49,7 +54,7 @@ await registerAuthRoutes(app);
 app.addHook('preHandler', async (request, reply) => {
   const url = request.url || '';
   if (!url.startsWith('/api')) return;
-  if (url.startsWith('/api/health') || url.startsWith('/api/auth')) return;
+  if (url.startsWith('/api/health') || url.startsWith('/api/auth') || url.startsWith('/api/ws')) return;
   await authMiddleware(request, reply);
 });
 
@@ -61,6 +66,7 @@ await app.register(projectRoutes, { prefix: '/api' });
 await app.register(skillsRoutes, { prefix: '/api' });
 await app.register(sessionsRoutes, { prefix: '/api' });
 await app.register(settingsRoutes, { prefix: '/api' });
+await app.register(websocketRoutes, { prefix: '/api' });
 
 // Start server
 const start = async () => {

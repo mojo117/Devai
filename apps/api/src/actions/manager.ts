@@ -1,11 +1,58 @@
 import type { Action, ActionStatus, CreateActionParams } from './types.js';
 import { executeTool } from '../tools/executor.js';
 import { auditLog } from '../audit/logger.js';
+import {
+  saveAction,
+  getActionById,
+  getAllActionsFromDb,
+  getPendingActionsFromDb,
+  updateActionInDb,
+  type DbAction,
+} from '../db/queries.js';
+import { notifyActionPending, notifyActionUpdated } from '../websocket/actionBroadcaster.js';
 
-// In-memory action store
-const actions = new Map<string, Action>();
+// In-memory cache for fast access (synced with database)
+const actionsCache = new Map<string, Action>();
+let cacheInitialized = false;
 
-export function createAction(params: CreateActionParams): Action {
+// Convert DB action to API action
+function dbToAction(db: DbAction): Action {
+  return {
+    id: db.id,
+    toolName: db.tool_name,
+    toolArgs: db.tool_args,
+    description: db.description,
+    status: db.status as ActionStatus,
+    createdAt: db.created_at,
+    preview: db.preview as unknown as Action['preview'],
+    approvedAt: db.approved_at || undefined,
+    rejectedAt: db.rejected_at || undefined,
+    executedAt: db.executed_at || undefined,
+    result: db.result,
+    error: db.error || undefined,
+  };
+}
+
+// Initialize cache from database on first use
+async function ensureCache(): Promise<void> {
+  if (cacheInitialized) return;
+
+  try {
+    const dbActions = await getAllActionsFromDb();
+    for (const dbAction of dbActions) {
+      actionsCache.set(dbAction.id, dbToAction(dbAction));
+    }
+    cacheInitialized = true;
+  } catch (error) {
+    console.error('[Action Cache] Failed to initialize from DB:', error);
+    // Continue with empty cache - will work in memory-only mode
+    cacheInitialized = true;
+  }
+}
+
+export async function createAction(params: CreateActionParams): Promise<Action> {
+  await ensureCache();
+
   const action: Action = {
     id: params.id,
     toolName: params.toolName,
@@ -16,7 +63,21 @@ export function createAction(params: CreateActionParams): Action {
     preview: params.preview,
   };
 
-  actions.set(action.id, action);
+  // Save to cache immediately
+  actionsCache.set(action.id, action);
+
+  // Persist to database (don't block on this)
+  saveAction({
+    id: action.id,
+    toolName: action.toolName,
+    toolArgs: action.toolArgs,
+    description: action.description,
+    status: action.status,
+    preview: action.preview as unknown as Record<string, unknown>,
+    createdAt: action.createdAt,
+  }).catch((err) => {
+    console.error('[Action Persist] Failed to save action:', err);
+  });
 
   // Log the action creation
   auditLog({
@@ -26,39 +87,71 @@ export function createAction(params: CreateActionParams): Action {
     args: sanitizeArgs(action.toolArgs),
   });
 
+  // Broadcast via WebSocket
+  notifyActionPending(action);
+
   return action;
 }
 
-export function getAction(id: string): Action | undefined {
-  return actions.get(id);
+export async function getAction(id: string): Promise<Action | undefined> {
+  await ensureCache();
+
+  // Check cache first
+  const cached = actionsCache.get(id);
+  if (cached) return cached;
+
+  // Fallback to database
+  const dbAction = await getActionById(id);
+  if (dbAction) {
+    const action = dbToAction(dbAction);
+    actionsCache.set(id, action);
+    return action;
+  }
+
+  return undefined;
 }
 
-export function getAllActions(): Action[] {
-  return Array.from(actions.values());
+export async function getAllActions(): Promise<Action[]> {
+  await ensureCache();
+  return Array.from(actionsCache.values());
 }
 
-export function getPendingActions(): Action[] {
-  return Array.from(actions.values()).filter((a) => a.status === 'pending');
+export async function getPendingActions(): Promise<Action[]> {
+  await ensureCache();
+  return Array.from(actionsCache.values()).filter((a) => a.status === 'pending');
 }
 
-export function updateActionStatus(id: string, status: ActionStatus): Action | undefined {
-  const action = actions.get(id);
+export async function updateActionStatus(id: string, status: ActionStatus): Promise<Action | undefined> {
+  await ensureCache();
+
+  const action = actionsCache.get(id);
   if (!action) return undefined;
 
   action.status = status;
 
+  const updates: Record<string, string> = { status };
   if (status === 'approved') {
     action.approvedAt = new Date().toISOString();
+    updates.approvedAt = action.approvedAt;
   } else if (status === 'executing' || status === 'done' || status === 'failed') {
     action.executedAt = new Date().toISOString();
+    updates.executedAt = action.executedAt;
   }
 
-  actions.set(id, action);
+  actionsCache.set(id, action);
+
+  // Persist to database
+  updateActionInDb(id, updates).catch((err) => {
+    console.error('[Action Persist] Failed to update action status:', err);
+  });
+
   return action;
 }
 
 export async function rejectAction(id: string): Promise<Action> {
-  const action = actions.get(id);
+  await ensureCache();
+
+  const action = actionsCache.get(id);
 
   if (!action) {
     throw new Error('Action not found');
@@ -71,7 +164,15 @@ export async function rejectAction(id: string): Promise<Action> {
   // Mark as rejected
   action.status = 'rejected';
   action.rejectedAt = new Date().toISOString();
-  actions.set(id, action);
+  actionsCache.set(id, action);
+
+  // Persist to database
+  updateActionInDb(id, {
+    status: 'rejected',
+    rejectedAt: action.rejectedAt,
+  }).catch((err) => {
+    console.error('[Action Persist] Failed to update rejection:', err);
+  });
 
   auditLog({
     action: 'action.rejected',
@@ -79,11 +180,16 @@ export async function rejectAction(id: string): Promise<Action> {
     actionId: action.id,
   });
 
+  // Broadcast via WebSocket
+  notifyActionUpdated(action);
+
   return action;
 }
 
 export async function approveAndExecuteAction(id: string): Promise<Action> {
-  const action = actions.get(id);
+  await ensureCache();
+
+  const action = actionsCache.get(id);
 
   if (!action) {
     throw new Error('Action not found');
@@ -96,7 +202,7 @@ export async function approveAndExecuteAction(id: string): Promise<Action> {
   // Mark as approved
   action.status = 'approved';
   action.approvedAt = new Date().toISOString();
-  actions.set(id, action);
+  actionsCache.set(id, action);
 
   auditLog({
     action: 'action.approved',
@@ -106,7 +212,15 @@ export async function approveAndExecuteAction(id: string): Promise<Action> {
 
   // Mark as executing
   action.status = 'executing';
-  actions.set(id, action);
+  actionsCache.set(id, action);
+
+  // Persist approved status
+  updateActionInDb(id, {
+    status: 'executing',
+    approvedAt: action.approvedAt,
+  }).catch((err) => {
+    console.error('[Action Persist] Failed to update approval:', err);
+  });
 
   // Execute the tool
   try {
@@ -149,7 +263,21 @@ export async function approveAndExecuteAction(id: string): Promise<Action> {
     });
   }
 
-  actions.set(id, action);
+  actionsCache.set(id, action);
+
+  // Persist final state
+  updateActionInDb(id, {
+    status: action.status,
+    result: action.result,
+    error: action.error,
+    executedAt: action.executedAt,
+  }).catch((err) => {
+    console.error('[Action Persist] Failed to update execution result:', err);
+  });
+
+  // Broadcast via WebSocket
+  notifyActionUpdated(action);
+
   return action;
 }
 
@@ -190,21 +318,30 @@ function summarizeResult(result: unknown): string {
 }
 
 // Clear old actions (optional cleanup)
-export function clearOldActions(maxAge: number = 24 * 60 * 60 * 1000): number {
+export async function clearOldActions(maxAge: number = 24 * 60 * 60 * 1000): Promise<number> {
+  await ensureCache();
+
   const cutoff = Date.now() - maxAge;
   let cleared = 0;
 
-  for (const [id, action] of actions.entries()) {
+  for (const [id, action] of actionsCache.entries()) {
     const createdAt = new Date(action.createdAt).getTime();
     if (createdAt < cutoff && action.status !== 'pending') {
-      actions.delete(id);
+      actionsCache.delete(id);
       cleared++;
     }
   }
+
+  // Also clean up in database
+  const { deleteOldActions: deleteOldActionsFromDb } = await import('../db/queries.js');
+  deleteOldActionsFromDb(maxAge).catch((err) => {
+    console.error('[Action Cleanup] Failed to clean old actions from DB:', err);
+  });
 
   return cleared;
 }
 
 export function clearActionsForTests(): void {
-  actions.clear();
+  actionsCache.clear();
+  cacheInitialized = false;
 }

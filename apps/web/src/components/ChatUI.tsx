@@ -1,20 +1,22 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import { sendMessage, sendMultiAgentMessage, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction, globProjectFiles } from '../api';
+import { sendMessage, sendMultiAgentMessage, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction, globProjectFiles, fetchPendingActions, batchApproveActions, batchRejectActions } from '../api';
 import type { ChatStreamEvent } from '../api';
-import type { ChatMessage, ContextStats, LLMProvider, SessionSummary } from '../types';
+import type { ChatMessage, ContextStats, LLMProvider, SessionSummary, Action } from '../types';
 import type { AgentHistoryEntry } from '../api';
 import { InlineAction, type PendingAction } from './InlineAction';
 import { AgentStatus, type AgentName, type AgentPhase } from './AgentStatus';
 import { AgentHistory, AgentTimeline } from './AgentHistory';
+import { useActionWebSocket } from '../hooks/useActionWebSocket';
 
-interface ToolEvent {
+export interface ToolEvent {
   id: string;
   type: 'status' | 'tool_call' | 'tool_result';
   name?: string;
   arguments?: unknown;
   result?: unknown;
   completed?: boolean;
+  agent?: AgentName;
 }
 
 interface ToolEventUpdate {
@@ -24,15 +26,7 @@ interface ToolEventUpdate {
   result?: unknown;
   completed?: boolean;
   chunk?: string;
-}
-
-export interface ToolEvent {
-  id: string;
-  type: 'status' | 'tool_call' | 'tool_result';
-  name?: string;
-  arguments?: unknown;
-  result?: unknown;
-  completed?: boolean;
+  agent?: AgentName;
 }
 
 interface ChatUIProps {
@@ -47,9 +41,10 @@ interface ChatUIProps {
   onContextUpdate?: (stats: ContextStats) => void;
   onToolEvent?: (events: ToolEvent[]) => void;
   onLoadingChange?: (loading: boolean) => void;
+  clearFeedTrigger?: number; // Increment to trigger feed clear
 }
 
-export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFiles, ignorePatterns, projectContextOverride, onPinFile, onContextUpdate, onToolEvent, onLoadingChange }: ChatUIProps) {
+export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFiles, ignorePatterns, projectContextOverride, onPinFile, onContextUpdate, onToolEvent, onLoadingChange, clearFeedTrigger }: ChatUIProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoadingInternal] = useState(false);
@@ -64,6 +59,12 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
+
+  // Debug: log pendingActions changes
+  useEffect(() => {
+    console.log('[ChatUI] pendingActions changed:', pendingActions.length, pendingActions);
+  }, [pendingActions]);
+
   const [fileHints, setFileHints] = useState<string[]>([]);
   const [fileHintsLoading, setFileHintsLoading] = useState(false);
   const [fileHintsError, setFileHintsError] = useState<string | null>(null);
@@ -128,6 +129,158 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
   useEffect(() => {
     onToolEvent?.(toolEvents);
   }, [toolEvents, onToolEvent]);
+
+  // Persist tool events to localStorage (keyed by sessionId)
+  useEffect(() => {
+    if (!sessionId || toolEvents.length === 0) return;
+    try {
+      const key = `devai_feed_${sessionId}`;
+      // Keep only last 100 events to avoid localStorage bloat
+      const toStore = toolEvents.slice(-100);
+      localStorage.setItem(key, JSON.stringify(toStore));
+    } catch {
+      // Ignore storage errors
+    }
+  }, [sessionId, toolEvents]);
+
+  // Load persisted tool events when session changes
+  useEffect(() => {
+    if (!sessionId) return;
+    try {
+      const key = `devai_feed_${sessionId}`;
+      const stored = localStorage.getItem(key);
+      if (stored) {
+        const parsed = JSON.parse(stored) as ToolEvent[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setToolEvents(parsed);
+        }
+      } else {
+        // New session or no stored events, clear current events
+        setToolEvents([]);
+      }
+    } catch {
+      // Ignore parse errors
+    }
+  }, [sessionId]);
+
+  // Clear feed when triggered by parent
+  useEffect(() => {
+    if (clearFeedTrigger && clearFeedTrigger > 0) {
+      setToolEvents([]);
+      if (sessionId) {
+        try {
+          const key = `devai_feed_${sessionId}`;
+          localStorage.removeItem(key);
+        } catch {
+          // Ignore storage errors
+        }
+      }
+    }
+  }, [clearFeedTrigger, sessionId]);
+
+  // WebSocket handlers for real-time action updates
+  const handleActionPending = useCallback((action: Action) => {
+    console.log('[ChatUI] handleActionPending called:', action);
+    setPendingActions((prev) => {
+      // Check if action already exists
+      if (prev.some((a) => a.actionId === action.id)) {
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          actionId: action.id,
+          toolName: action.toolName,
+          toolArgs: action.toolArgs,
+          description: action.description,
+          preview: action.preview,
+        },
+      ];
+    });
+  }, []);
+
+  const handleActionUpdated = useCallback((action: Action) => {
+    // Remove from pending if no longer pending
+    if (action.status !== 'pending') {
+      setPendingActions((prev) => prev.filter((a) => a.actionId !== action.id));
+    }
+  }, []);
+
+  const handleInitialSync = useCallback((actions: Action[]) => {
+    setPendingActions((prev) => {
+      const existingIds = new Set(prev.map((a) => a.actionId));
+      const newActions = actions
+        .filter((a) => a.status === 'pending' && !existingIds.has(a.id))
+        .map((a) => ({
+          actionId: a.id,
+          toolName: a.toolName,
+          toolArgs: a.toolArgs,
+          description: a.description,
+          preview: a.preview,
+        }));
+
+      if (newActions.length > 0) {
+        return [...prev, ...newActions];
+      }
+      return prev;
+    });
+  }, []);
+
+  // Connect to WebSocket for real-time action updates
+  const { isConnected: wsConnected, connectionState: _wsState } = useActionWebSocket({
+    sessionId: sessionId || undefined,
+    onActionPending: handleActionPending,
+    onActionUpdated: handleActionUpdated,
+    onInitialSync: handleInitialSync,
+    enabled: true,
+  });
+
+  // Fallback polling for when WebSocket is disconnected (recovers missed events)
+  useEffect(() => {
+    // Skip polling if WebSocket is connected
+    if (wsConnected) return;
+
+    let isMounted = true;
+
+    const syncPendingActions = async () => {
+      try {
+        const data = await fetchPendingActions();
+        if (!isMounted) return;
+
+        // Merge with existing pending actions (avoid duplicates)
+        setPendingActions((prev) => {
+          const existingIds = new Set(prev.map((a) => a.actionId));
+          const newActions = data.actions
+            .filter((a) => !existingIds.has(a.id))
+            .map((a) => ({
+              actionId: a.id,
+              toolName: a.toolName,
+              toolArgs: a.toolArgs,
+              description: a.description,
+              preview: a.preview,
+            }));
+
+          if (newActions.length > 0) {
+            return [...prev, ...newActions];
+          }
+          return prev;
+        });
+      } catch {
+        // Silently ignore polling errors
+      }
+    };
+
+    // Initial sync on mount
+    syncPendingActions();
+
+    // Poll every 5 seconds (less frequent since WebSocket is primary)
+    const interval = setInterval(syncPendingActions, 5000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [wsConnected]);
 
   useEffect(() => {
     const token = extractAtToken(input);
@@ -231,6 +384,9 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
         }
 
         // Handle common events
+        // Get agent from event if available (multi-agent mode)
+        const eventAgent = event.agent as AgentName | undefined;
+
         if (event.type === 'status') {
           setToolEvents((prev) => [
             ...prev,
@@ -238,6 +394,7 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
               id: crypto.randomUUID(),
               type: 'status',
               result: event.status,
+              agent: eventAgent || activeAgent || undefined,
             },
           ]);
         }
@@ -247,6 +404,7 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
             type: 'tool_call',
             name: event.name as string | undefined,
             arguments: event.arguments,
+            agent: eventAgent || activeAgent || undefined,
           });
         }
         if (event.type === 'tool_result_chunk') {
@@ -256,6 +414,7 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
             type: 'tool_result',
             name: event.name as string | undefined,
             chunk,
+            agent: eventAgent || activeAgent || undefined,
           });
         }
         if (event.type === 'tool_result') {
@@ -265,9 +424,11 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
             name: event.name as string | undefined,
             result: event.result,
             completed: Boolean(event.completed),
+            agent: eventAgent || activeAgent || undefined,
           });
         }
         if (event.type === 'action_pending') {
+          console.log('[ChatUI] Stream action_pending event:', event);
           const pendingAction: PendingAction = {
             actionId: event.actionId as string,
             toolName: event.toolName as string,
@@ -275,7 +436,13 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
             description: event.description as string,
             preview: event.preview as PendingAction['preview'],
           };
-          setPendingActions((prev) => [...prev, pendingAction]);
+          // Check for duplicates (action might also come via WebSocket)
+          setPendingActions((prev) => {
+            if (prev.some((a) => a.actionId === pendingAction.actionId)) {
+              return prev;
+            }
+            return [...prev, pendingAction];
+          });
         }
         if (event.type === 'context_stats' && onContextUpdate) {
           const stats = event.stats as ContextStats | undefined;
@@ -483,6 +650,92 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
     }, 1000);
   };
 
+  const handleBatchApprove = async () => {
+    if (pendingActions.length === 0) return;
+
+    const actionIds = pendingActions.map((a) => a.actionId);
+    const actionDescriptions = new Map(pendingActions.map((a) => [a.actionId, a.description]));
+
+    try {
+      const response = await batchApproveActions(actionIds);
+
+      // Build detailed result message
+      const succeeded = response.results.filter((r) => r.success);
+      const failed = response.results.filter((r) => !r.success);
+
+      let content = `**Batch Approval Results:**\n\n`;
+
+      if (succeeded.length > 0) {
+        content += `✅ **${succeeded.length} action(s) completed:**\n`;
+        for (const r of succeeded) {
+          const desc = actionDescriptions.get(r.actionId) || r.actionId;
+          content += `- ${desc}\n`;
+        }
+        content += '\n';
+      }
+
+      if (failed.length > 0) {
+        content += `❌ **${failed.length} action(s) failed:**\n`;
+        for (const r of failed) {
+          const desc = actionDescriptions.get(r.actionId) || r.actionId;
+          content += `- ${desc}: ${r.error || 'Unknown error'}\n`;
+        }
+      }
+
+      const batchMessage: ChatMessage = {
+        id: `batch-approved-${Date.now()}`,
+        role: 'assistant',
+        content,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, batchMessage]);
+
+      // Clear all pending actions
+      setTimeout(() => {
+        setPendingActions([]);
+      }, 500);
+    } catch (error) {
+      const errorMessage: ChatMessage = {
+        id: `batch-error-${Date.now()}`,
+        role: 'assistant',
+        content: `**Batch approval failed:** ${error instanceof Error ? error.message : 'Unknown error'}`,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    }
+  };
+
+  const handleBatchReject = async () => {
+    if (pendingActions.length === 0) return;
+
+    const actionIds = pendingActions.map((a) => a.actionId);
+
+    try {
+      await batchRejectActions(actionIds);
+
+      const batchMessage: ChatMessage = {
+        id: `batch-rejected-${Date.now()}`,
+        role: 'assistant',
+        content: `**Batch rejected:** ${actionIds.length} action(s) rejected`,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, batchMessage]);
+
+      // Clear all pending actions
+      setTimeout(() => {
+        setPendingActions([]);
+      }, 500);
+    } catch (error) {
+      const errorMessage: ChatMessage = {
+        id: `batch-error-${Date.now()}`,
+        role: 'assistant',
+        content: `**Batch rejection failed:** ${error instanceof Error ? error.message : 'Unknown error'}`,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    }
+  };
+
   const handleRestartChat = async () => {
     if (messages.length === 0) {
       // No messages to save, just create new session
@@ -637,6 +890,28 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
       {/* Pending Actions - Fixed above input, always visible */}
       {pendingActions.length > 0 && (
         <div className="border-t border-gray-700 px-4 py-2 space-y-2">
+          {/* Batch action buttons when multiple actions pending */}
+          {pendingActions.length > 1 && (
+            <div className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2 mb-2">
+              <span className="text-xs text-gray-400">
+                {pendingActions.length} actions pending
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleBatchApprove}
+                  className="text-xs bg-green-600 hover:bg-green-500 text-white px-3 py-1 rounded font-medium transition-colors"
+                >
+                  Approve All
+                </button>
+                <button
+                  onClick={handleBatchReject}
+                  className="text-xs bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-medium transition-colors"
+                >
+                  Reject All
+                </button>
+              </div>
+            </div>
+          )}
           {pendingActions.map((action) => (
             <InlineAction
               key={action.actionId}
@@ -790,6 +1065,7 @@ function upsertToolEvent(
         arguments: update.arguments,
         result: update.chunk || update.result,
         completed: update.completed,
+        agent: update.agent,
       };
       return [...prev, initial];
     }
@@ -802,6 +1078,7 @@ function upsertToolEvent(
       arguments: update.arguments ?? existing.arguments,
       completed: update.completed ?? existing.completed,
       result: update.result ?? existing.result,
+      agent: update.agent ?? existing.agent,
     };
 
     if (update.chunk) {

@@ -118,7 +118,28 @@ export async function sendMessage(
 
     for (const line of lines) {
       if (!line.trim()) continue;
-      const event = JSON.parse(line) as { type?: string; response?: unknown };
+      try {
+        const event = JSON.parse(line) as { type?: string; response?: unknown };
+        if (onEvent) {
+          onEvent(event as ChatStreamEvent);
+        }
+        if (event.type === 'response') {
+          finalResponse = event.response as {
+            message: ChatMessage;
+            pendingActions: Action[];
+            sessionId?: string;
+          };
+        }
+      } catch (e) {
+        console.warn('Failed to parse NDJSON line:', line, e);
+      }
+    }
+  }
+
+  // Process any remaining buffer content after stream ends
+  if (buffer.trim()) {
+    try {
+      const event = JSON.parse(buffer) as { type?: string; response?: unknown };
       if (onEvent) {
         onEvent(event as ChatStreamEvent);
       }
@@ -129,6 +150,8 @@ export async function sendMessage(
           sessionId?: string;
         };
       }
+    } catch (e) {
+      console.warn('Failed to parse final NDJSON buffer:', buffer, e);
     }
   }
 
@@ -315,6 +338,44 @@ export async function fetchActions(): Promise<{ actions: Action[] }> {
   return res.json();
 }
 
+export async function fetchPendingActions(): Promise<{ actions: Action[] }> {
+  const res = await fetch(`${API_BASE}/actions/pending`, {
+    headers: withAuthHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to fetch pending actions');
+  return res.json();
+}
+
+export async function batchApproveActions(actionIds: string[]): Promise<{ results: Array<{ actionId: string; success: boolean; error?: string; result?: unknown }> }> {
+  const res = await fetch(`${API_BASE}/actions/approve-batch`, {
+    method: 'POST',
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ actionIds }),
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || 'Failed to batch approve actions');
+  }
+
+  return res.json();
+}
+
+export async function batchRejectActions(actionIds: string[]): Promise<{ results: Array<{ actionId: string; success: boolean; error?: string }> }> {
+  const res = await fetch(`${API_BASE}/actions/reject-batch`, {
+    method: 'POST',
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ actionIds }),
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || 'Failed to batch reject actions');
+  }
+
+  return res.json();
+}
+
 export async function approveAction(actionId: string): Promise<{ action: Action; result?: unknown }> {
   const res = await fetch(`${API_BASE}/actions/approve`, {
     method: 'POST',
@@ -434,13 +495,32 @@ export async function sendMultiAgentMessage(
 
     for (const line of lines) {
       if (!line.trim()) continue;
-      const event = JSON.parse(line) as { type?: string; response?: unknown };
+      try {
+        const event = JSON.parse(line) as { type?: string; response?: unknown };
+        if (onEvent) {
+          onEvent(event as ChatStreamEvent);
+        }
+        if (event.type === 'response') {
+          finalResponse = event.response as MultiAgentResponse;
+        }
+      } catch (e) {
+        console.warn('Failed to parse NDJSON line:', line, e);
+      }
+    }
+  }
+
+  // Process any remaining buffer content after stream ends
+  if (buffer.trim()) {
+    try {
+      const event = JSON.parse(buffer) as { type?: string; response?: unknown };
       if (onEvent) {
         onEvent(event as ChatStreamEvent);
       }
       if (event.type === 'response') {
         finalResponse = event.response as MultiAgentResponse;
       }
+    } catch (e) {
+      console.warn('Failed to parse final NDJSON buffer:', buffer, e);
     }
   }
 

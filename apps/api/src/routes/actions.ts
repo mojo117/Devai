@@ -16,25 +16,29 @@ const ApproveRequestSchema = z.object({
   actionId: z.string(),
 });
 
+const BatchApproveRequestSchema = z.object({
+  actionIds: z.array(z.string()).min(1).max(50),
+});
+
 export const actionRoutes: FastifyPluginAsync = async (app) => {
   // Get all actions
   app.get('/actions', async () => {
     return {
-      actions: getAllActions(),
+      actions: await getAllActions(),
     };
   });
 
   // Get only pending actions
   app.get('/actions/pending', async () => {
     return {
-      actions: getPendingActions(),
+      actions: await getPendingActions(),
     };
   });
 
   // Get single action by ID
   app.get('/actions/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const action = getAction(id);
+    const action = await getAction(id);
 
     if (!action) {
       return reply.status(404).send({ error: 'Action not found' });
@@ -113,6 +117,78 @@ export const actionRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  // Batch approve multiple actions
+  app.post('/actions/approve-batch', {
+    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
+    const parseResult = BatchApproveRequestSchema.safeParse(request.body);
+
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: 'Invalid request',
+        details: parseResult.error.issues,
+      });
+    }
+
+    const { actionIds } = parseResult.data;
+    const results: Array<{ actionId: string; success: boolean; error?: string; result?: unknown }> = [];
+
+    for (const actionId of actionIds) {
+      try {
+        const action = await approveAndExecuteAction(actionId);
+        results.push({
+          actionId,
+          success: action.status === 'done',
+          error: action.error,
+          result: action.result,
+        });
+      } catch (error) {
+        results.push({
+          actionId,
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+
+    return { results };
+  });
+
+  // Batch reject multiple actions
+  app.post('/actions/reject-batch', {
+    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
+    const parseResult = BatchApproveRequestSchema.safeParse(request.body);
+
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: 'Invalid request',
+        details: parseResult.error.issues,
+      });
+    }
+
+    const { actionIds } = parseResult.data;
+    const results: Array<{ actionId: string; success: boolean; error?: string }> = [];
+
+    for (const actionId of actionIds) {
+      try {
+        await rejectAction(actionId);
+        results.push({
+          actionId,
+          success: true,
+        });
+      } catch (error) {
+        results.push({
+          actionId,
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+
+    return { results };
+  });
+
   // Retry a failed action (creates a new pending action)
   app.post('/actions/retry', {
     config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
@@ -127,7 +203,7 @@ export const actionRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { actionId } = parseResult.data;
-    const action = getAction(actionId);
+    const action = await getAction(actionId);
 
     if (!action) {
       return reply.status(404).send({ error: 'Action not found' });
@@ -138,7 +214,7 @@ export const actionRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const preview = await buildActionPreview(action.toolName, action.toolArgs);
-    const retryAction = createAction({
+    const retryAction = await createAction({
       id: nanoid(),
       toolName: action.toolName,
       toolArgs: action.toolArgs,
