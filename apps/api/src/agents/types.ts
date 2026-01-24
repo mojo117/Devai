@@ -8,7 +8,7 @@ export type AgentName = 'chapo' | 'koda' | 'devo' | 'scout';
 
 export type AgentRole = 'Task Coordinator' | 'Senior Developer' | 'DevOps Engineer' | 'Exploration Specialist';
 
-export type TaskType = 'code_change' | 'devops' | 'mixed' | 'unclear';
+export type TaskType = 'code_change' | 'devops' | 'exploration' | 'mixed' | 'unclear';
 
 export type RiskLevel = 'low' | 'medium' | 'high';
 

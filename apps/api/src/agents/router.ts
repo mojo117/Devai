@@ -188,7 +188,10 @@ export async function processRequest(
 
     let result: string;
 
-    if (qualification.taskType === 'mixed' && qualification.targetAgent === null) {
+    if (qualification.taskType === 'exploration' || qualification.targetAgent === 'chapo') {
+      // CHAPO already executed the tools during qualification - return results directly
+      result = qualification.reasoning;
+    } else if (qualification.taskType === 'mixed' && qualification.targetAgent === null) {
       // Parallel execution of KODA and DEVO
       result = await runParallelExecution(
         sessionId,
@@ -198,7 +201,7 @@ export async function processRequest(
         sendEvent
       );
     } else if (qualification.targetAgent) {
-      // Single agent execution
+      // Single agent execution (KODA or DEVO)
       result = await delegateToAgent(
         sessionId,
         qualification.targetAgent,
@@ -207,8 +210,8 @@ export async function processRequest(
         sendEvent
       );
     } else {
-      // Chapo handles it (simple read-only task)
-      result = `Task analysiert:\n\n${qualification.reasoning}`;
+      // Fallback: Chapo handles it (simple read-only task)
+      result = qualification.reasoning || 'Task verarbeitet.';
     }
 
     // Phase 3: Review
@@ -271,26 +274,19 @@ async function runChapoQualification(
 
   const systemPrompt = `${chapo.systemPrompt}
 ${claudeMdBlock}
-AKTUELLE AUFGABE: Task-Qualifizierung
-
-Analysiere den User-Request und:
-1. Sammle relevanten Kontext (nutze fs.glob, fs.readFile, git.status)
-2. Bestimme den Task-Typ: code_change | devops | mixed | unclear
-3. Bewerte das Risiko: low | medium | high
-4. Entscheide, ob Klarstellung oder Freigabe nötig ist
-5. Bestimme den Ziel-Agenten: koda (Code) | devo (DevOps) | null (parallel/unklar)
-
 ${projectRoot ? `Working Directory: ${projectRoot}` : ''}
 
-Antworte am Ende mit einem JSON-Block im Format:
+WICHTIG: Bei Read-Only Anfragen (Dateien auflisten, lesen, suchen, Git-Status) führe das Tool SOFORT aus.
+Gib NUR JSON zurück wenn du an KODA/DEVO delegieren musst.
+
+Falls Delegation nötig:
 \`\`\`json
 {
-  "taskType": "code_change|devops|mixed|unclear",
+  "taskType": "code_change|devops|exploration|mixed",
   "riskLevel": "low|medium|high",
-  "targetAgent": "koda|devo|null",
+  "targetAgent": "koda|devo|chapo",
   "requiresApproval": true/false,
-  "requiresClarification": true/false,
-  "clarificationQuestion": "...",
+  "requiresClarification": false,
   "reasoning": "..."
 }
 \`\`\``;
@@ -405,17 +401,18 @@ Antworte am Ende mit einem JSON-Block im Format:
     }
   }
 
-  // Default qualification
+  // Default qualification - Act First, Ask Later
+  // If CHAPO didn't output JSON, it likely executed tools directly (exploration)
+  // Don't ask for clarification - let the results speak
   return {
-    taskType: 'unclear',
-    riskLevel: 'medium',
-    complexity: 'moderate',
-    targetAgent: null,
-    requiresApproval: true,
-    requiresClarification: true,
-    clarificationQuestion: 'Kannst du mir mehr Details zu deinem Request geben?',
+    taskType: 'exploration',
+    riskLevel: 'low',
+    complexity: 'simple',
+    targetAgent: 'chapo',  // CHAPO handles it directly
+    requiresApproval: false,
+    requiresClarification: false,  // NEVER ask by default!
     gatheredContext,
-    reasoning: finalContent,
+    reasoning: finalContent || 'Read-Only Exploration ausgeführt',
   };
 }
 
