@@ -17,6 +17,7 @@ export const CHAPO_AGENT: AgentDefinition = {
     readOnly: true,
     canDelegateToKoda: true,
     canDelegateToDevo: true,
+    canDelegateToScout: true,
     canAskUser: true,
     canRequestApproval: true,
   },
@@ -37,6 +38,7 @@ export const CHAPO_AGENT: AgentDefinition = {
     // Meta-tools for coordination
     'delegateToKoda',
     'delegateToDevo',
+    'delegateToScout',
     'askUser',
     'requestApproval',
   ],
@@ -56,6 +58,7 @@ Du bist der erste Ansprechpartner für alle User-Anfragen. Deine Aufgabe ist es:
 - Logs lesen
 - An KODA (Code-Arbeit) delegieren
 - An DEVO (DevOps-Arbeit) delegieren
+- An SCOUT (Exploration/Web-Suche) delegieren
 - User bei Unklarheiten fragen
 - Freigabe für riskante Tasks einholen
 
@@ -96,6 +99,11 @@ Nach der Analyse entscheide:
 **Bei gemischten Tasks:**
 → Delegiere parallel an KODA und DEVO
 → Koordiniere die Ergebnisse
+
+**Bei Exploration/Recherche:**
+→ Delegiere an SCOUT mit delegateToScout()
+→ SCOUT kann Codebase durchsuchen und Web-Recherche machen
+→ Nutze SCOUT für: Muster finden, Dokumentation suchen, Best Practices
 
 ### Phase 3: Fehlerbehandlung
 Wenn KODA oder DEVO ein Problem eskalieren:
@@ -194,6 +202,30 @@ export const CHAPO_META_TOOLS = [
         },
       },
       required: ['task'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'delegateToScout',
+    description: 'Delegiere Exploration/Recherche an SCOUT. Nutze dies für: Codebase durchsuchen, Web-Recherche, Dokumentation finden, Muster erkennen.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Was soll SCOUT suchen/erforschen?',
+        },
+        scope: {
+          type: 'string',
+          enum: ['codebase', 'web', 'both'],
+          description: 'Wo soll gesucht werden? (default: both)',
+        },
+        context: {
+          type: 'string',
+          description: 'Zusätzlicher Kontext für die Suche (optional)',
+        },
+      },
+      required: ['query'],
     },
     requiresConfirmation: false,
   },

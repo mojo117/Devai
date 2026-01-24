@@ -406,7 +406,8 @@ export interface EditResult {
 export async function editFile(
   path: string,
   oldString: string,
-  newString: string
+  newString: string,
+  replaceAll: boolean = false
 ): Promise<EditResult> {
   const absolutePath = await validatePath(path);
   if (!isAllowedExtension(path)) {
@@ -416,18 +417,29 @@ export async function editFile(
   const content = await fsReadFile(absolutePath, 'utf-8');
 
   if (!content.includes(oldString)) {
-    throw new Error('Edit failed: old_string not found in file');
-  }
-
-  // Count occurrences to ensure uniqueness
-  const occurrences = content.split(oldString).length - 1;
-  if (occurrences > 1) {
+    // Provide helpful context on failure
+    const lines = content.split('\n');
+    const preview = lines.slice(0, 10).join('\n');
     throw new Error(
-      `Edit failed: old_string found ${occurrences} times. Provide more context to make it unique.`
+      `Edit failed: old_string not found in file.\n` +
+      `File preview (first 10 lines):\n${preview}${lines.length > 10 ? '\n...' : ''}`
     );
   }
 
-  const newContent = content.replace(oldString, newString);
+  // Count occurrences
+  const occurrences = content.split(oldString).length - 1;
+
+  // If not replaceAll, require unique match
+  if (!replaceAll && occurrences > 1) {
+    throw new Error(
+      `Edit failed: old_string found ${occurrences} times. ` +
+      `Provide more context to make it unique, or set replace_all=true.`
+    );
+  }
+
+  const newContent = replaceAll
+    ? content.split(oldString).join(newString)
+    : content.replace(oldString, newString);
 
   // Size check for the new content
   const bytes = Buffer.byteLength(newContent, 'utf-8');
@@ -439,7 +451,7 @@ export async function editFile(
 
   return {
     path,
-    replacements: 1,
+    replacements: replaceAll ? occurrences : 1,
   };
 }
 

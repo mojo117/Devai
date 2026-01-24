@@ -6,6 +6,7 @@ import * as logsTools from './logs.js';
 import * as bashTools from './bash.js';
 import * as sshTools from './ssh.js';
 import * as pm2Tools from './pm2.js';
+import * as webTools from './web.js';
 import { config } from '../config.js';
 
 export interface ToolExecutionResult {
@@ -64,7 +65,8 @@ export async function executeTool(
           return fsTools.editFile(
             args.path as string,
             args.old_string as string,
-            args.new_string as string
+            args.new_string as string,
+            args.replace_all as boolean | undefined
           );
 
         case 'fs_mkdir':
@@ -121,6 +123,18 @@ export async function executeTool(
         // Logs Tools
         case 'logs_getStagingLogs':
           return logsTools.getStagingLogs(args.lines as number | undefined);
+
+        // Web Tools (SCOUT agent)
+        case 'web_search':
+          return webTools.webSearch(args.query as string, {
+            limit: args.limit as number | undefined,
+            freshness: args.freshness as 'day' | 'week' | 'month' | undefined,
+          });
+
+        case 'web_fetch':
+          return webTools.webFetch(args.url as string, {
+            timeout: args.timeout as number | undefined,
+          });
 
         // DevOps Tools - Bash
         case 'bash_execute':

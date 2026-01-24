@@ -19,6 +19,7 @@ export const DEVO_AGENT: AgentDefinition = {
     canGitPush: true,
     canTriggerWorkflows: true,
     canManagePM2: true,
+    canDelegateToScout: true,
     canEscalate: true,
   },
 
@@ -47,6 +48,8 @@ export const DEVO_AGENT: AgentDefinition = {
     'fs_readFile',
     // Logs
     'logs_getStagingLogs',
+    // Exploration (spawn SCOUT for searches)
+    'delegateToScout',
     // Escalation
     'escalateToChapo',
   ],
@@ -79,6 +82,9 @@ Du bist der DevOps-Experte. Deine Aufgabe ist es, Infrastructure-Tasks auszufüh
 ### GitHub Actions
 - github.triggerWorkflow(workflow, ref, inputs) - Workflow triggern
 - github.getWorkflowRunStatus(runId) - Workflow-Status prüfen
+
+### Exploration
+- delegateToScout(query, scope) - SCOUT für Codebase/Web-Suche spawnen
 
 ## WORKFLOW
 

@@ -42,10 +42,11 @@ interface ChatUIProps {
   onContextUpdate?: (stats: ContextStats) => void;
   onToolEvent?: (events: ToolEvent[]) => void;
   onLoadingChange?: (loading: boolean) => void;
+  onAgentChange?: (agent: AgentName | null, phase: AgentPhase) => void;
   clearFeedTrigger?: number; // Increment to trigger feed clear
 }
 
-export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFiles, ignorePatterns, projectContextOverride, onPinFile, onContextUpdate, onToolEvent, onLoadingChange, clearFeedTrigger }: ChatUIProps) {
+export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFiles, ignorePatterns, projectContextOverride, onPinFile, onContextUpdate, onToolEvent, onLoadingChange, onAgentChange, clearFeedTrigger }: ChatUIProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoadingInternal] = useState(false);
@@ -86,6 +87,11 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
   const [agentPhase, setAgentPhase] = useState<AgentPhase>('idle');
   const [agentHistory, setAgentHistory] = useState<AgentHistoryEntry[]>([]);
   const [showAgentHistory, setShowAgentHistory] = useState(false);
+
+  // Notify parent of agent changes
+  useEffect(() => {
+    onAgentChange?.(activeAgent, agentPhase);
+  }, [activeAgent, agentPhase, onAgentChange]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 

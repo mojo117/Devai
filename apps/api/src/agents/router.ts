@@ -22,6 +22,17 @@ import type {
   QualificationResult,
   GatheredContext,
   ExecutedTool,
+  // Plan Mode types
+  ChapoPerspective,
+  KodaPerspective,
+  DevoPerspective,
+  ExecutionPlan,
+  PlanTask,
+  EffortEstimate,
+  TaskPriority,
+  // SCOUT types
+  ScoutResult,
+  ScoutScope,
 } from './types.js';
 import * as stateManager from './stateManager.js';
 import { llmRouter } from '../llm/router.js';
@@ -35,6 +46,8 @@ import type { LLMMessage, ToolCall } from '../llm/types.js';
 import { CHAPO_AGENT } from './chapo.js';
 import { KODA_AGENT } from './koda.js';
 import { DEVO_AGENT } from './devo.js';
+import { SCOUT_AGENT } from './scout.js';
+import { loadClaudeMdContext, formatClaudeMdBlock } from '../scanner/claudeMdLoader.js';
 
 export type SendEventFn = (event: AgentStreamEvent) => void;
 
@@ -42,6 +55,7 @@ const AGENTS: Record<AgentName, AgentDefinition> = {
   chapo: CHAPO_AGENT,
   koda: KODA_AGENT,
   devo: DEVO_AGENT,
+  scout: SCOUT_AGENT,
 };
 
 function buildToolResultContent(result: { success: boolean; result?: unknown; error?: string }): { content: string; isError: boolean } {
@@ -88,6 +102,14 @@ export async function processRequest(
   stateManager.setOriginalRequest(sessionId, userMessage);
   stateManager.setPhase(sessionId, 'qualification');
   stateManager.setActiveAgent(sessionId, 'chapo');
+
+  // Load CLAUDE.md project instructions and store in state
+  if (projectRoot) {
+    const claudeMdContext = await loadClaudeMdContext(projectRoot);
+    const claudeMdBlock = formatClaudeMdBlock(claudeMdContext);
+    stateManager.setGatheredInfo(sessionId, 'claudeMdBlock', claudeMdBlock);
+    stateManager.setGatheredInfo(sessionId, 'projectRoot', projectRoot);
+  }
 
   sendEvent({ type: 'agent_start', agent: 'chapo', phase: 'qualification' });
 
@@ -139,7 +161,29 @@ export async function processRequest(
       return `Dieser Task erfordert deine Freigabe:\n\n**${userMessage}**\n\nRisiko-Level: ${qualification.riskLevel}\n\nBitte bestätige, dass ich fortfahren soll.`;
     }
 
-    // Phase 2: Execute based on task type
+    // Phase 2: Check if Plan Mode is required
+    if (determinePlanModeRequired(qualification)) {
+      console.info('[agents] Plan Mode required', {
+        sessionId,
+        taskType: qualification.taskType,
+        complexity: qualification.complexity,
+        riskLevel: qualification.riskLevel,
+      });
+
+      // Run Plan Mode - returns plan for user approval
+      const plan = await runPlanMode(
+        sessionId,
+        userMessage,
+        qualification,
+        sendEvent
+      );
+
+      // Plan Mode pauses here for user approval
+      // The plan will be executed after user approves via handlePlanApproval
+      return `**Plan erstellt und wartet auf Genehmigung**\n\n${plan.summary}\n\n**Risiko:** ${plan.overallRisk}\n**Tasks:** ${plan.tasks.length}\n\nBitte überprüfe den Plan und bestätige die Ausführung.`;
+    }
+
+    // Phase 2: Execute based on task type (simple tasks without Plan Mode)
     stateManager.setPhase(sessionId, 'execution');
 
     let result: string;
@@ -221,8 +265,12 @@ async function runChapoQualification(
   const chapo = getAgent('chapo');
   const tools = getToolsForLLM().filter((t) => chapo.tools.includes(t.name));
 
-  const systemPrompt = `${chapo.systemPrompt}
+  // Get CLAUDE.md project instructions from state (loaded in processRequest)
+  const state = stateManager.getState(sessionId);
+  const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
 
+  const systemPrompt = `${chapo.systemPrompt}
+${claudeMdBlock}
 AKTUELLE AUFGABE: Task-Qualifizierung
 
 Analysiere den User-Request und:
@@ -393,6 +441,10 @@ async function delegateToAgent(
   const agent = getAgent(targetAgent);
   const tools = getToolsForLLM().filter((t) => agent.tools.includes(t.name));
 
+  // Get CLAUDE.md project instructions from state
+  const state = stateManager.getState(sessionId);
+  const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
+
   const contextSummary = context.relevantFiles.length > 0
     ? `\n\nRelevante Dateien:\n${context.relevantFiles.join('\n')}`
     : '';
@@ -402,7 +454,7 @@ async function delegateToAgent(
     : '';
 
   const systemPrompt = `${agent.systemPrompt}
-
+${claudeMdBlock}
 KONTEXT VON CHAPO:
 ${contextSummary}${gitStatusSummary}
 
@@ -947,3 +999,967 @@ export async function handleUserApproval(
 
   return 'Session nicht gefunden.';
 }
+
+// ============================================
+// PLAN MODE FUNCTIONS
+// ============================================
+
+/**
+ * Determine if Plan Mode is required based on qualification
+ */
+export function determinePlanModeRequired(qualification: QualificationResult): boolean {
+  // Plan Mode is required for:
+  // 1. Mixed tasks (both code and ops)
+  // 2. Complex tasks
+  // 3. High-risk tasks
+  if (qualification.taskType === 'mixed') return true;
+  if (qualification.complexity === 'complex') return true;
+  if (qualification.riskLevel === 'high') return true;
+  return false;
+}
+
+/**
+ * Get CHAPO's strategic perspective
+ */
+async function getChapoPerspective(
+  sessionId: string,
+  userMessage: string,
+  qualification: QualificationResult,
+  sendEvent: SendEventFn
+): Promise<ChapoPerspective> {
+  sendEvent({ type: 'perspective_start', agent: 'chapo' });
+  sendEvent({ type: 'agent_thinking', agent: 'chapo', status: 'Strategische Analyse...' });
+
+  const chapo = getAgent('chapo');
+  const state = stateManager.getState(sessionId);
+  const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
+
+  const systemPrompt = `${chapo.systemPrompt}
+${claudeMdBlock}
+
+STRATEGISCHE ANALYSE FÜR PLAN MODE
+
+Du analysierst als CHAPO (Task Coordinator) den Request aus strategischer Sicht.
+Fokus auf:
+- Koordinationsbedarf zwischen KODA und DEVO
+- Risikobewertung und Impact-Bereiche
+- Abhängigkeiten und kritische Pfade
+
+Kontext aus Qualifizierung:
+- Task-Typ: ${qualification.taskType}
+- Risiko: ${qualification.riskLevel}
+- Komplexität: ${qualification.complexity}
+- Reasoning: ${qualification.reasoning}
+
+Antworte mit einem JSON-Block:
+\`\`\`json
+{
+  "strategicAnalysis": "Beschreibung der strategischen Überlegungen",
+  "riskAssessment": "low|medium|high",
+  "impactAreas": ["Bereich 1", "Bereich 2"],
+  "coordinationNeeds": ["Koordinationspunkt 1", "Koordinationspunkt 2"],
+  "concerns": ["Bedenken 1", "Bedenken 2"],
+  "recommendations": ["Empfehlung 1", "Empfehlung 2"],
+  "estimatedEffort": "trivial|small|medium|large",
+  "dependencies": ["Abhängigkeit 1"]
+}
+\`\`\``;
+
+  const response = await llmRouter.generate('anthropic', {
+    model: chapo.model,
+    messages: [{ role: 'user', content: userMessage }],
+    systemPrompt,
+    toolsEnabled: false,
+  });
+
+  // Parse JSON response
+  const jsonMatch = response.content.match(/```json\n([\s\S]*?)\n```/);
+  let parsed: Record<string, unknown> = {};
+  if (jsonMatch) {
+    try {
+      parsed = JSON.parse(jsonMatch[1]);
+    } catch {
+      console.warn('[agents] Failed to parse CHAPO perspective JSON');
+    }
+  }
+
+  const perspective: ChapoPerspective = {
+    agent: 'chapo',
+    analysis: (parsed.strategicAnalysis as string) || response.content,
+    concerns: (parsed.concerns as string[]) || [],
+    recommendations: (parsed.recommendations as string[]) || [],
+    estimatedEffort: (parsed.estimatedEffort as EffortEstimate) || 'medium',
+    dependencies: (parsed.dependencies as string[]) || [],
+    timestamp: new Date().toISOString(),
+    strategicAnalysis: (parsed.strategicAnalysis as string) || '',
+    riskAssessment: (parsed.riskAssessment as 'low' | 'medium' | 'high') || qualification.riskLevel,
+    impactAreas: (parsed.impactAreas as string[]) || [],
+    coordinationNeeds: (parsed.coordinationNeeds as string[]) || [],
+  };
+
+  sendEvent({ type: 'perspective_complete', agent: 'chapo', perspective });
+  return perspective;
+}
+
+/**
+ * Get KODA's code-focused perspective (read-only exploration)
+ */
+async function getKodaPerspective(
+  sessionId: string,
+  userMessage: string,
+  qualification: QualificationResult,
+  sendEvent: SendEventFn
+): Promise<KodaPerspective> {
+  sendEvent({ type: 'perspective_start', agent: 'koda' });
+  sendEvent({ type: 'agent_thinking', agent: 'koda', status: 'Code-Impact-Analyse...' });
+
+  const koda = getAgent('koda');
+  const state = stateManager.getState(sessionId);
+  const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
+
+  // KODA gets read-only tools for exploration
+  const readOnlyTools = getToolsForLLM().filter((t) =>
+    ['fs_glob', 'fs_grep', 'fs_readFile', 'fs_listFiles', 'git_status', 'git_diff'].includes(t.name)
+  );
+
+  const contextSummary = qualification.gatheredContext.relevantFiles.length > 0
+    ? `\n\nBereits gesammelte Dateien:\n${qualification.gatheredContext.relevantFiles.join('\n')}`
+    : '';
+
+  const systemPrompt = `${koda.systemPrompt}
+${claudeMdBlock}
+
+CODE-IMPACT-ANALYSE FÜR PLAN MODE
+
+Du analysierst als KODA (Senior Developer) den Request aus Code-Perspektive.
+Du hast nur READ-ONLY Zugriff - keine Änderungen erlaubt!
+
+Fokus auf:
+- Welche Dateien müssen geändert werden?
+- Welche Code-Patterns existieren bereits?
+- Gibt es potenzielle Breaking Changes?
+- Welche Tests sind nötig?
+
+${contextSummary}
+
+AUFGABE: Untersuche die Codebase und identifiziere alle betroffenen Dateien und Patterns.
+
+Antworte am Ende mit einem JSON-Block:
+\`\`\`json
+{
+  "analysis": "Zusammenfassung der Code-Analyse",
+  "affectedFiles": ["path/to/file1.ts", "path/to/file2.ts"],
+  "codePatterns": ["Pattern 1", "Pattern 2"],
+  "potentialBreakingChanges": ["Breaking Change 1"],
+  "testingRequirements": ["Test 1", "Test 2"],
+  "concerns": ["Bedenken 1"],
+  "recommendations": ["Empfehlung 1"],
+  "estimatedEffort": "trivial|small|medium|large"
+}
+\`\`\``;
+
+  const messages: LLMMessage[] = [{ role: 'user', content: userMessage }];
+
+  // Run KODA with read-only tools for exploration
+  let turn = 0;
+  const MAX_TURNS = 5;
+  let finalContent = '';
+
+  while (turn < MAX_TURNS) {
+    turn++;
+
+    const response = await llmRouter.generate('anthropic', {
+      model: koda.model,
+      messages,
+      systemPrompt,
+      tools: readOnlyTools,
+      toolsEnabled: true,
+    });
+
+    if (response.content) {
+      finalContent = response.content;
+    }
+
+    if (!response.toolCalls || response.toolCalls.length === 0) {
+      break;
+    }
+
+    messages.push({
+      role: 'assistant',
+      content: response.content || '',
+      toolCalls: response.toolCalls,
+    });
+
+    const toolResults: { toolUseId: string; result: string; isError: boolean }[] = [];
+
+    for (const toolCall of response.toolCalls) {
+      sendEvent({
+        type: 'tool_call',
+        agent: 'koda',
+        toolName: toolCall.name,
+        args: toolCall.arguments,
+      });
+
+      const result = await executeTool(toolCall.name, toolCall.arguments);
+
+      sendEvent({
+        type: 'tool_result',
+        agent: 'koda',
+        toolName: toolCall.name,
+        result: result.result,
+        success: result.success,
+      });
+
+      const toolResult = buildToolResultContent(result);
+      toolResults.push({
+        toolUseId: toolCall.id,
+        result: toolResult.content,
+        isError: toolResult.isError,
+      });
+    }
+
+    messages.push({
+      role: 'user',
+      content: '',
+      toolResults,
+    });
+  }
+
+  // Parse JSON response
+  const jsonMatch = finalContent.match(/```json\n([\s\S]*?)\n```/);
+  let parsed: Record<string, unknown> = {};
+  if (jsonMatch) {
+    try {
+      parsed = JSON.parse(jsonMatch[1]);
+    } catch {
+      console.warn('[agents] Failed to parse KODA perspective JSON');
+    }
+  }
+
+  const perspective: KodaPerspective = {
+    agent: 'koda',
+    analysis: (parsed.analysis as string) || finalContent,
+    concerns: (parsed.concerns as string[]) || [],
+    recommendations: (parsed.recommendations as string[]) || [],
+    estimatedEffort: (parsed.estimatedEffort as EffortEstimate) || 'medium',
+    timestamp: new Date().toISOString(),
+    affectedFiles: (parsed.affectedFiles as string[]) || [],
+    codePatterns: (parsed.codePatterns as string[]) || [],
+    potentialBreakingChanges: (parsed.potentialBreakingChanges as string[]) || [],
+    testingRequirements: (parsed.testingRequirements as string[]) || [],
+  };
+
+  sendEvent({ type: 'perspective_complete', agent: 'koda', perspective });
+  return perspective;
+}
+
+/**
+ * Get DEVO's ops-focused perspective (read-only exploration)
+ */
+async function getDevoPerspective(
+  sessionId: string,
+  userMessage: string,
+  qualification: QualificationResult,
+  sendEvent: SendEventFn
+): Promise<DevoPerspective> {
+  sendEvent({ type: 'perspective_start', agent: 'devo' });
+  sendEvent({ type: 'agent_thinking', agent: 'devo', status: 'DevOps-Impact-Analyse...' });
+
+  const devo = getAgent('devo');
+  const state = stateManager.getState(sessionId);
+  const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
+
+  // DEVO gets read-only tools for exploration
+  const readOnlyTools = getToolsForLLM().filter((t) =>
+    ['fs_glob', 'fs_grep', 'fs_readFile', 'fs_listFiles', 'git_status', 'git_diff', 'pm2_status'].includes(t.name)
+  );
+
+  const systemPrompt = `${devo.systemPrompt}
+${claudeMdBlock}
+
+DEVOPS-IMPACT-ANALYSE FÜR PLAN MODE
+
+Du analysierst als DEVO (DevOps Engineer) den Request aus Ops-Perspektive.
+Du hast nur READ-ONLY Zugriff - keine Änderungen erlaubt!
+
+Fokus auf:
+- Deployment-Auswirkungen
+- Rollback-Strategie
+- Betroffene Services
+- Infrastruktur-Änderungen
+
+AUFGABE: Untersuche die Infrastruktur und identifiziere alle Ops-relevanten Aspekte.
+
+Antworte am Ende mit einem JSON-Block:
+\`\`\`json
+{
+  "analysis": "Zusammenfassung der DevOps-Analyse",
+  "deploymentImpact": ["Impact 1", "Impact 2"],
+  "rollbackStrategy": "Beschreibung der Rollback-Strategie",
+  "servicesAffected": ["Service 1", "Service 2"],
+  "infrastructureChanges": ["Änderung 1"],
+  "concerns": ["Bedenken 1"],
+  "recommendations": ["Empfehlung 1"],
+  "estimatedEffort": "trivial|small|medium|large"
+}
+\`\`\``;
+
+  const messages: LLMMessage[] = [{ role: 'user', content: userMessage }];
+
+  // Run DEVO with read-only tools for exploration
+  let turn = 0;
+  const MAX_TURNS = 5;
+  let finalContent = '';
+
+  while (turn < MAX_TURNS) {
+    turn++;
+
+    const response = await llmRouter.generate('anthropic', {
+      model: devo.model,
+      messages,
+      systemPrompt,
+      tools: readOnlyTools,
+      toolsEnabled: true,
+    });
+
+    if (response.content) {
+      finalContent = response.content;
+    }
+
+    if (!response.toolCalls || response.toolCalls.length === 0) {
+      break;
+    }
+
+    messages.push({
+      role: 'assistant',
+      content: response.content || '',
+      toolCalls: response.toolCalls,
+    });
+
+    const toolResults: { toolUseId: string; result: string; isError: boolean }[] = [];
+
+    for (const toolCall of response.toolCalls) {
+      sendEvent({
+        type: 'tool_call',
+        agent: 'devo',
+        toolName: toolCall.name,
+        args: toolCall.arguments,
+      });
+
+      const result = await executeTool(toolCall.name, toolCall.arguments);
+
+      sendEvent({
+        type: 'tool_result',
+        agent: 'devo',
+        toolName: toolCall.name,
+        result: result.result,
+        success: result.success,
+      });
+
+      const toolResult = buildToolResultContent(result);
+      toolResults.push({
+        toolUseId: toolCall.id,
+        result: toolResult.content,
+        isError: toolResult.isError,
+      });
+    }
+
+    messages.push({
+      role: 'user',
+      content: '',
+      toolResults,
+    });
+  }
+
+  // Parse JSON response
+  const jsonMatch = finalContent.match(/```json\n([\s\S]*?)\n```/);
+  let parsed: Record<string, unknown> = {};
+  if (jsonMatch) {
+    try {
+      parsed = JSON.parse(jsonMatch[1]);
+    } catch {
+      console.warn('[agents] Failed to parse DEVO perspective JSON');
+    }
+  }
+
+  const perspective: DevoPerspective = {
+    agent: 'devo',
+    analysis: (parsed.analysis as string) || finalContent,
+    concerns: (parsed.concerns as string[]) || [],
+    recommendations: (parsed.recommendations as string[]) || [],
+    estimatedEffort: (parsed.estimatedEffort as EffortEstimate) || 'medium',
+    timestamp: new Date().toISOString(),
+    deploymentImpact: (parsed.deploymentImpact as string[]) || [],
+    rollbackStrategy: (parsed.rollbackStrategy as string) || 'Manual rollback via git revert',
+    servicesAffected: (parsed.servicesAffected as string[]) || [],
+    infrastructureChanges: (parsed.infrastructureChanges as string[]) || [],
+  };
+
+  sendEvent({ type: 'perspective_complete', agent: 'devo', perspective });
+  return perspective;
+}
+
+/**
+ * CHAPO synthesizes all perspectives into an execution plan with tasks
+ */
+async function synthesizePlan(
+  sessionId: string,
+  userMessage: string,
+  chapoPerspective: ChapoPerspective,
+  kodaPerspective?: KodaPerspective,
+  devoPerspective?: DevoPerspective,
+  sendEvent?: SendEventFn
+): Promise<{ summary: string; tasks: PlanTask[] }> {
+  sendEvent?.({ type: 'agent_thinking', agent: 'chapo', status: 'Synthese des Plans...' });
+
+  const chapo = getAgent('chapo');
+  const plan = stateManager.getCurrentPlan(sessionId);
+  const planId = plan?.planId || nanoid();
+
+  const perspectivesSummary = `
+CHAPO (Strategisch):
+- Analyse: ${chapoPerspective.strategicAnalysis}
+- Risiko: ${chapoPerspective.riskAssessment}
+- Impact-Bereiche: ${chapoPerspective.impactAreas.join(', ')}
+- Koordinationsbedarf: ${chapoPerspective.coordinationNeeds.join(', ')}
+- Bedenken: ${chapoPerspective.concerns.join(', ')}
+- Empfehlungen: ${chapoPerspective.recommendations.join(', ')}
+
+${kodaPerspective ? `KODA (Code):
+- Analyse: ${kodaPerspective.analysis}
+- Betroffene Dateien: ${kodaPerspective.affectedFiles.join(', ')}
+- Code-Patterns: ${kodaPerspective.codePatterns.join(', ')}
+- Breaking Changes: ${kodaPerspective.potentialBreakingChanges.join(', ')}
+- Tests: ${kodaPerspective.testingRequirements.join(', ')}
+- Bedenken: ${kodaPerspective.concerns.join(', ')}` : ''}
+
+${devoPerspective ? `DEVO (DevOps):
+- Analyse: ${devoPerspective.analysis}
+- Deployment-Impact: ${devoPerspective.deploymentImpact.join(', ')}
+- Rollback: ${devoPerspective.rollbackStrategy}
+- Services: ${devoPerspective.servicesAffected.join(', ')}
+- Infra-Änderungen: ${devoPerspective.infrastructureChanges.join(', ')}
+- Bedenken: ${devoPerspective.concerns.join(', ')}` : ''}`;
+
+  const systemPrompt = `${chapo.systemPrompt}
+
+PLAN-SYNTHESE
+
+Du hast die Perspektiven aller Agenten erhalten. Erstelle einen Execution Plan mit konkreten Tasks.
+
+${perspectivesSummary}
+
+ANFORDERUNGEN:
+1. Erstelle eine klare Zusammenfassung des Plans
+2. Definiere konkrete Tasks mit:
+   - subject: Kurzer Titel (imperativ, z.B. "Update API endpoint")
+   - description: Detaillierte Beschreibung
+   - activeForm: Präsens Partizip für Spinner (z.B. "Updating API endpoint...")
+   - assignedAgent: "koda" | "devo"
+   - priority: "critical" | "high" | "normal" | "low"
+   - blockedBy: Array von Task-Indizes die zuerst fertig sein müssen
+
+Antworte mit einem JSON-Block:
+\`\`\`json
+{
+  "summary": "Zusammenfassung des gesamten Plans",
+  "tasks": [
+    {
+      "subject": "Task-Titel",
+      "description": "Detaillierte Beschreibung",
+      "activeForm": "Doing something...",
+      "assignedAgent": "koda|devo",
+      "priority": "normal",
+      "blockedByIndices": []
+    }
+  ]
+}
+\`\`\``;
+
+  const response = await llmRouter.generate('anthropic', {
+    model: chapo.model,
+    messages: [{ role: 'user', content: userMessage }],
+    systemPrompt,
+    toolsEnabled: false,
+  });
+
+  // Parse JSON response
+  const jsonMatch = response.content.match(/```json\n([\s\S]*?)\n```/);
+  let summary = 'Plan erstellt.';
+  const tasks: PlanTask[] = [];
+
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[1]);
+      summary = parsed.summary || summary;
+
+      // Create tasks and track IDs for dependency resolution
+      const taskIds: string[] = [];
+
+      for (const taskData of parsed.tasks || []) {
+        const taskId = nanoid();
+        taskIds.push(taskId);
+
+        const task: PlanTask = {
+          taskId,
+          planId,
+          subject: taskData.subject || 'Unnamed task',
+          description: taskData.description || '',
+          activeForm: taskData.activeForm || `${taskData.subject}...`,
+          assignedAgent: taskData.assignedAgent || 'koda',
+          priority: (taskData.priority as TaskPriority) || 'normal',
+          status: 'pending',
+          blockedBy: [], // Will be resolved after all tasks are created
+          blocks: [],
+          createdAt: new Date().toISOString(),
+        };
+
+        // Store blockedByIndices temporarily for resolution
+        (task as PlanTask & { _blockedByIndices?: number[] })._blockedByIndices =
+          taskData.blockedByIndices || [];
+
+        tasks.push(task);
+      }
+
+      // Resolve blockedBy indices to actual taskIds
+      for (const task of tasks) {
+        const indices = (task as PlanTask & { _blockedByIndices?: number[] })._blockedByIndices || [];
+        for (const idx of indices) {
+          if (idx >= 0 && idx < taskIds.length) {
+            task.blockedBy.push(taskIds[idx]);
+            // Also update blocks on the blocker
+            const blockerTask = tasks[idx];
+            if (blockerTask && !blockerTask.blocks.includes(task.taskId)) {
+              blockerTask.blocks.push(task.taskId);
+            }
+          }
+        }
+        delete (task as PlanTask & { _blockedByIndices?: number[] })._blockedByIndices;
+      }
+    } catch (e) {
+      console.warn('[agents] Failed to parse plan synthesis JSON:', e);
+    }
+  }
+
+  return { summary, tasks };
+}
+
+/**
+ * Run Plan Mode - orchestrate multi-perspective planning
+ */
+export async function runPlanMode(
+  sessionId: string,
+  userMessage: string,
+  qualification: QualificationResult,
+  sendEvent: SendEventFn
+): Promise<ExecutionPlan> {
+  console.info('[agents] Starting Plan Mode', { sessionId, taskType: qualification.taskType });
+
+  sendEvent({ type: 'plan_start', sessionId });
+
+  // Phase 1: Get CHAPO's strategic perspective
+  const chapoPerspective = await getChapoPerspective(
+    sessionId,
+    userMessage,
+    qualification,
+    sendEvent
+  );
+
+  // Create the plan in state
+  const plan = stateManager.createPlan(sessionId, chapoPerspective);
+
+  // Phase 2: Get KODA and DEVO perspectives in parallel (based on task type)
+  const perspectivePromises: Promise<KodaPerspective | DevoPerspective | null>[] = [];
+
+  if (qualification.taskType === 'code_change' || qualification.taskType === 'mixed') {
+    perspectivePromises.push(
+      getKodaPerspective(sessionId, userMessage, qualification, sendEvent)
+    );
+  } else {
+    perspectivePromises.push(Promise.resolve(null));
+  }
+
+  if (qualification.taskType === 'devops' || qualification.taskType === 'mixed') {
+    perspectivePromises.push(
+      getDevoPerspective(sessionId, userMessage, qualification, sendEvent)
+    );
+  } else {
+    perspectivePromises.push(Promise.resolve(null));
+  }
+
+  const [kodaResult, devoResult] = await Promise.all(perspectivePromises);
+
+  // Add perspectives to plan
+  if (kodaResult) {
+    stateManager.addKodaPerspective(sessionId, kodaResult as KodaPerspective);
+  }
+  if (devoResult) {
+    stateManager.addDevoPerspective(sessionId, devoResult as DevoPerspective);
+  }
+
+  // Phase 3: CHAPO synthesizes all perspectives into tasks
+  const { summary, tasks } = await synthesizePlan(
+    sessionId,
+    userMessage,
+    chapoPerspective,
+    kodaResult as KodaPerspective | undefined,
+    devoResult as DevoPerspective | undefined,
+    sendEvent
+  );
+
+  // Finalize the plan
+  const finalPlan = stateManager.finalizePlan(sessionId, summary, tasks);
+
+  if (finalPlan) {
+    sendEvent({ type: 'plan_ready', plan: finalPlan });
+    sendEvent({ type: 'plan_approval_request', plan: finalPlan });
+
+    // Send task events
+    for (const task of tasks) {
+      sendEvent({ type: 'task_created', task });
+    }
+    sendEvent({ type: 'tasks_list', tasks });
+  }
+
+  return finalPlan || plan;
+}
+
+/**
+ * Execute an approved plan
+ */
+export async function executePlan(
+  sessionId: string,
+  sendEvent: SendEventFn
+): Promise<string> {
+  const plan = stateManager.getCurrentPlan(sessionId);
+  if (!plan) {
+    return 'Kein Plan gefunden.';
+  }
+
+  if (plan.status !== 'approved') {
+    return 'Plan ist nicht genehmigt.';
+  }
+
+  console.info('[agents] Executing plan', { sessionId, planId: plan.planId });
+
+  // Mark plan as executing
+  stateManager.startPlanExecution(sessionId);
+
+  const results: string[] = [];
+
+  // Execute tasks in dependency order
+  while (true) {
+    const nextTask = stateManager.getNextTask(sessionId);
+    if (!nextTask) {
+      // Check if all tasks are done
+      if (stateManager.areAllTasksCompleted(sessionId)) {
+        break;
+      }
+      // If not all completed but no next task, we might be stuck
+      const progress = stateManager.getTaskProgress(sessionId);
+      if (progress.inProgress === 0 && progress.pending > 0) {
+        // Deadlock - tasks are blocked
+        console.warn('[agents] Task execution deadlock detected');
+        break;
+      }
+      // Wait a bit and try again
+      await new Promise((r) => setTimeout(r, 100));
+      continue;
+    }
+
+    // Mark task as in progress
+    stateManager.updateTaskStatus(sessionId, nextTask.taskId, 'in_progress');
+    sendEvent({
+      type: 'task_started',
+      taskId: nextTask.taskId,
+      agent: nextTask.assignedAgent,
+    });
+    sendEvent({
+      type: 'task_update',
+      taskId: nextTask.taskId,
+      status: 'in_progress',
+      activeForm: nextTask.activeForm,
+    });
+
+    try {
+      // Delegate to assigned agent
+      const context: GatheredContext = {
+        relevantFiles: plan.kodaPerspective?.affectedFiles || [],
+        fileContents: {},
+      };
+
+      const result = await delegateToAgent(
+        sessionId,
+        nextTask.assignedAgent,
+        nextTask.description,
+        context,
+        sendEvent
+      );
+
+      // Mark task as completed
+      stateManager.updateTaskStatus(sessionId, nextTask.taskId, 'completed', {
+        result,
+        progress: 100,
+      });
+      sendEvent({
+        type: 'task_completed',
+        taskId: nextTask.taskId,
+        result,
+      });
+      sendEvent({
+        type: 'task_update',
+        taskId: nextTask.taskId,
+        status: 'completed',
+        progress: 100,
+      });
+
+      results.push(`✓ ${nextTask.subject}: ${result.substring(0, 100)}...`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+      // Mark task as failed
+      stateManager.updateTaskStatus(sessionId, nextTask.taskId, 'failed', {
+        error: errorMessage,
+      });
+      sendEvent({
+        type: 'task_failed',
+        taskId: nextTask.taskId,
+        error: errorMessage,
+      });
+      sendEvent({
+        type: 'task_update',
+        taskId: nextTask.taskId,
+        status: 'failed',
+      });
+
+      // Skip blocked tasks
+      const skipped = stateManager.skipBlockedTasks(sessionId, nextTask.taskId);
+      for (const skippedTask of skipped) {
+        sendEvent({
+          type: 'task_update',
+          taskId: skippedTask.taskId,
+          status: 'skipped',
+        });
+      }
+
+      results.push(`✗ ${nextTask.subject}: ${errorMessage}`);
+    }
+  }
+
+  // Complete the plan
+  stateManager.completePlan(sessionId);
+
+  // Get final progress
+  const progress = stateManager.getTaskProgress(sessionId);
+
+  return `Plan ausgeführt (${progress.completed}/${progress.total} Tasks erfolgreich):\n\n${results.join('\n')}`;
+}
+
+/**
+ * Handle plan approval/rejection
+ */
+export async function handlePlanApproval(
+  sessionId: string,
+  planId: string,
+  approved: boolean,
+  reason?: string,
+  sendEvent?: SendEventFn
+): Promise<string> {
+  console.info('[agents] handlePlanApproval', { sessionId, planId, approved });
+
+  const plan = stateManager.getCurrentPlan(sessionId);
+  if (!plan || plan.planId !== planId) {
+    return 'Plan nicht gefunden.';
+  }
+
+  if (approved) {
+    stateManager.approvePlan(sessionId);
+    sendEvent?.({ type: 'plan_approved', planId });
+
+    // Execute the plan
+    return executePlan(sessionId, sendEvent || (() => {}));
+  } else {
+    stateManager.rejectPlan(sessionId, reason || 'Abgelehnt durch Benutzer');
+    sendEvent?.({ type: 'plan_rejected', planId, reason: reason || 'Abgelehnt durch Benutzer' });
+
+    return `Plan abgelehnt${reason ? `: ${reason}` : ''}. Bitte gib mir mehr Details oder einen anderen Ansatz.`;
+  }
+}
+
+/**
+ * Get current plan for a session
+ */
+export function getCurrentPlan(sessionId: string): ExecutionPlan | undefined {
+  return stateManager.getCurrentPlan(sessionId);
+}
+
+/**
+ * Get tasks for a session
+ */
+export function getTasks(sessionId: string): PlanTask[] {
+  return stateManager.getTasks(sessionId);
+}
+
+// ============================================
+// SCOUT AGENT FUNCTIONS
+// ============================================
+
+/**
+ * Spawn SCOUT agent for exploration or web search
+ */
+export async function spawnScout(
+  sessionId: string,
+  query: string,
+  options: {
+    scope?: ScoutScope;
+    context?: string;
+    sendEvent?: SendEventFn;
+  } = {}
+): Promise<ScoutResult> {
+  const { scope = 'both', context, sendEvent } = options;
+
+  console.info('[agents] Spawning SCOUT', { sessionId, query, scope });
+
+  sendEvent?.({ type: 'scout_start', query, scope });
+
+  const scout = getAgent('scout');
+  const tools = getToolsForLLM().filter((t) => scout.tools.includes(t.name));
+
+  // Build focused prompt based on scope
+  let prompt = `EXPLORE: ${query}`;
+
+  if (scope === 'codebase') {
+    prompt += '\n\nFOKUS: Nur Codebase-Exploration. Nutze KEINE Web-Tools (web_search, web_fetch).';
+  } else if (scope === 'web') {
+    prompt += '\n\nFOKUS: Nur Web-Recherche. Nutze KEINE Dateisystem-Tools.';
+  } else {
+    prompt += '\n\nFOKUS: Kombiniere Codebase-Exploration und Web-Recherche für beste Ergebnisse.';
+  }
+
+  if (context) {
+    prompt += `\n\nZUSÄTZLICHER KONTEXT: ${context}`;
+  }
+
+  const messages: LLMMessage[] = [{ role: 'user', content: prompt }];
+
+  // Run SCOUT with limited turns
+  let turn = 0;
+  const MAX_TURNS = 5;
+  let finalContent = '';
+
+  while (turn < MAX_TURNS) {
+    turn++;
+
+    const response = await llmRouter.generate('anthropic', {
+      model: scout.model,
+      messages,
+      systemPrompt: scout.systemPrompt,
+      tools,
+      toolsEnabled: true,
+    });
+
+    if (response.content) {
+      finalContent = response.content;
+    }
+
+    if (!response.toolCalls || response.toolCalls.length === 0) {
+      break;
+    }
+
+    messages.push({
+      role: 'assistant',
+      content: response.content || '',
+      toolCalls: response.toolCalls,
+    });
+
+    const toolResults: { toolUseId: string; result: string; isError: boolean }[] = [];
+
+    for (const toolCall of response.toolCalls) {
+      // Emit scout_tool event
+      sendEvent?.({ type: 'scout_tool', tool: toolCall.name });
+
+      // Check for escalation
+      if (toolCall.name === 'escalateToChapo') {
+        // SCOUT is escalating - return partial results
+        const result = parseScoutResult(finalContent);
+        result.recommendations.push('SCOUT eskalierte zu CHAPO - weitere Analyse erforderlich');
+        sendEvent?.({ type: 'scout_complete', summary: result });
+        return result;
+      }
+
+      const result = await executeTool(toolCall.name, toolCall.arguments);
+
+      const toolResult = buildToolResultContent(result);
+      toolResults.push({
+        toolUseId: toolCall.id,
+        result: toolResult.content,
+        isError: toolResult.isError,
+      });
+    }
+
+    messages.push({
+      role: 'user',
+      content: '',
+      toolResults,
+    });
+  }
+
+  // Parse SCOUT's JSON response
+  const result = parseScoutResult(finalContent);
+
+  sendEvent?.({ type: 'scout_complete', summary: result });
+
+  console.info('[agents] SCOUT complete', {
+    sessionId,
+    filesFound: result.relevantFiles.length,
+    confidence: result.confidence,
+  });
+
+  return result;
+}
+
+/**
+ * Parse SCOUT's response into a ScoutResult
+ */
+function parseScoutResult(response: string): ScoutResult {
+  // Try to extract JSON from response
+  const jsonMatch = response.match(/```json\n([\s\S]*?)\n```/) ||
+                    response.match(/\{[\s\S]*"summary"[\s\S]*\}/);
+
+  if (jsonMatch) {
+    try {
+      const jsonStr = jsonMatch[1] || jsonMatch[0];
+      const parsed = JSON.parse(jsonStr);
+
+      return {
+        summary: parsed.summary || 'Keine Zusammenfassung verfügbar',
+        relevantFiles: parsed.relevantFiles || [],
+        codePatterns: parsed.codePatterns || {},
+        webFindings: (parsed.webFindings || []).map((f: { title?: string; url?: string; relevance?: string }) => ({
+          title: f.title || 'Unbekannt',
+          url: f.url || '',
+          relevance: f.relevance || '',
+        })),
+        recommendations: parsed.recommendations || [],
+        confidence: parsed.confidence || 'medium',
+      };
+    } catch (e) {
+      console.warn('[agents] Failed to parse SCOUT JSON response:', e);
+    }
+  }
+
+  // Fallback: return raw response as summary
+  return {
+    summary: response,
+    relevantFiles: [],
+    codePatterns: {},
+    webFindings: [],
+    recommendations: [],
+    confidence: 'low',
+  };
+}
+
+/**
+ * Export spawnScout for use by other modules
+ */
+export { spawnScout as delegateToScout };

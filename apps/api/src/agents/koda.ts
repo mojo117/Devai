@@ -17,6 +17,7 @@ export const KODA_AGENT: AgentDefinition = {
     canEditFiles: true,
     canDeleteFiles: true,
     canCreateDirectories: true,
+    canDelegateToScout: true,
     canEscalate: true,
   },
 
@@ -32,6 +33,8 @@ export const KODA_AGENT: AgentDefinition = {
     'fs_readFile',
     'fs_glob',
     'fs_grep',
+    // Exploration (spawn SCOUT for searches)
+    'delegateToScout',
     // Escalation
     'escalateToChapo',
   ],
@@ -48,6 +51,7 @@ Du bist der Code-Experte. Deine Aufgabe ist es, Code zu schreiben, zu bearbeiten
 - Dateien verschieben/umbenennen (fs.move)
 - Dateien löschen (fs.delete)
 - Dateien lesen und durchsuchen (fs.readFile, fs.glob, fs.grep)
+- SCOUT für Exploration/Web-Suche spawnen (delegateToScout)
 
 ## WORKFLOW
 

@@ -13,11 +13,19 @@ import { readFile } from '../tools/fs.js';
 import { logToolExecution } from '../audit/logger.js';
 import { config } from '../config.js';
 import { getProjectContext } from '../scanner/projectScanner.js';
+import { loadClaudeMdContext, formatClaudeMdBlock } from '../scanner/claudeMdLoader.js';
+import { checkPermission } from '../permissions/checker.js';
 import { getSkillById, getSkillLoadState, refreshSkills } from '../skills/registry.js';
 import type { SkillManifest } from '@devai/shared';
 import { createSession, saveMessage, updateSessionTitleIfEmpty } from '../db/queries.js';
-import { processRequest as processMultiAgentRequest, handleUserApproval } from '../agents/router.js';
-import { getState, getOrCreateState } from '../agents/stateManager.js';
+import {
+  processRequest as processMultiAgentRequest,
+  handleUserApproval,
+  handlePlanApproval,
+  getCurrentPlan,
+  getTasks,
+} from '../agents/router.js';
+import { getState, getOrCreateState, getTaskProgress } from '../agents/stateManager.js';
 import type { AgentStreamEvent } from '../agents/types.js';
 
 const ChatRequestSchema = z.object({
@@ -42,6 +50,13 @@ const AgentApprovalSchema = z.object({
   sessionId: z.string(),
   approvalId: z.string(),
   approved: z.boolean(),
+});
+
+const PlanApprovalSchema = z.object({
+  sessionId: z.string(),
+  planId: z.string(),
+  approved: z.boolean(),
+  reason: z.string().optional(),
 });
 
 // System prompt for the AI assistant
@@ -165,6 +180,13 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         ? `\n\nProject Context:\nWorking Directory: ${validatedProjectRoot}\n${effectiveSummary}`
         : '';
 
+      // Load CLAUDE.md from project root and parent directories
+      let claudeMdBlock = '';
+      if (validatedProjectRoot) {
+        const claudeMdContext = await loadClaudeMdContext(validatedProjectRoot);
+        claudeMdBlock = formatClaudeMdBlock(claudeMdContext);
+      }
+
       const selectedSkills = await resolveSkills(skillIds);
       const { allowedToolNames, skillsPrompt } = summarizeSkills(selectedSkills);
       const pinnedFilesBlock = await buildPinnedFilesBlock(parseResult.data.pinnedFiles);
@@ -192,7 +214,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
       const llmResponse = await llmRouter.generate(provider, {
           messages: conversationMessages,
-          systemPrompt: SYSTEM_PROMPT + projectContextBlock + skillsPrompt + pinnedFilesBlock,
+          systemPrompt: SYSTEM_PROMPT + projectContextBlock + claudeMdBlock + skillsPrompt + pinnedFilesBlock,
           toolsEnabled: true,
           tools,
         });
@@ -504,6 +526,94 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       pendingQuestions: state.pendingQuestions,
     });
   });
+
+  // ============ Plan Mode Endpoints ============
+
+  // Handle plan approval/rejection
+  app.post('/chat/agents/plan/approval', {
+    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
+    app.log.info('[agents] plan approval endpoint hit');
+    reply.raw.setHeader('Content-Type', 'application/x-ndjson');
+
+    const parseResult = PlanApprovalSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: 'Invalid request',
+        details: parseResult.error.issues,
+      });
+    }
+
+    const { sessionId, planId, approved, reason } = parseResult.data;
+    app.log.info('[agents] plan decision', { sessionId, planId, approved, reason });
+
+    try {
+      const sendEvent = (event: AgentStreamEvent | Record<string, unknown>) => {
+        reply.raw.write(`${JSON.stringify(event)}\n`);
+      };
+
+      const result = await handlePlanApproval(sessionId, planId, approved, reason, sendEvent);
+
+      const responseMessage: ChatMessage = {
+        id: nanoid(),
+        role: 'assistant',
+        content: result,
+        timestamp: new Date().toISOString(),
+      };
+
+      const state = getState(sessionId);
+      if (state) {
+        await saveMessage(sessionId, responseMessage);
+      }
+
+      sendEvent({
+        type: 'response',
+        response: {
+          message: responseMessage,
+          pendingActions: getPendingActions(),
+          sessionId,
+          agentHistory: state?.agentHistory || [],
+        },
+      });
+
+      reply.raw.end();
+      return reply;
+    } catch (error) {
+      app.log.error(error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return reply.status(500).send({
+        error: 'Plan approval failed',
+        details: errorMessage,
+      });
+    }
+  });
+
+  // Get current plan for a session
+  app.get('/chat/agents/:sessionId/plan', async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const plan = getCurrentPlan(sessionId);
+
+    if (!plan) {
+      return reply.status(404).send({ error: 'No plan found for session' });
+    }
+
+    return reply.send({
+      plan,
+      progress: getTaskProgress(sessionId),
+    });
+  });
+
+  // Get tasks for a session
+  app.get('/chat/agents/:sessionId/tasks', async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const tasks = getTasks(sessionId);
+    const progress = getTaskProgress(sessionId);
+
+    return reply.send({
+      tasks,
+      progress,
+    });
+  });
 };
 
 export async function handleToolCall(
@@ -570,9 +680,27 @@ export async function handleToolCall(
     return `Action created: **${description}**\n\nThis action requires your approval before it can be executed.\n\nAction ID: \`${action.id}\``;
   }
 
-  // Enforce confirmation flow for restricted tools
+  // Check permission patterns before requiring confirmation
   if (toolRequiresConfirmation(toolName)) {
-    return `Error: Tool "${toolName}" requires confirmation. Use askForConfirmation first.`;
+    const permCheck = await checkPermission(toolName, toolArgs);
+
+    if (!permCheck.allowed) {
+      return `Error: Tool "${toolName}" is denied by permission pattern: ${permCheck.reason}`;
+    }
+
+    if (permCheck.requiresConfirmation) {
+      return `Error: Tool "${toolName}" requires confirmation. Use askForConfirmation first.`;
+    }
+
+    // Permission pattern grants this tool - execute directly
+    if (sendEvent) {
+      sendEvent({
+        type: 'permission_granted',
+        toolName,
+        pattern: permCheck.matchedPattern?.id,
+        reason: permCheck.reason,
+      });
+    }
   }
 
   // Execute the tool immediately

@@ -35,9 +35,13 @@ export type ToolName =
   | 'pm2_save'
   | 'npm_install'
   | 'npm_run'
+  // Web Tools (SCOUT agent)
+  | 'web_search'
+  | 'web_fetch'
   // Agent Meta-Tools
   | 'delegateToKoda'
   | 'delegateToDevo'
+  | 'delegateToScout'
   | 'escalateToChapo'
   | 'askUser'
   | 'requestApproval'
@@ -153,7 +157,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
   },
   {
     name: 'fs_edit',
-    description: 'Make targeted edits to a file (find and replace a unique string). This action requires user confirmation.',
+    description: 'Make targeted edits to a file. By default, old_string must be unique in the file. Set replace_all=true to replace all occurrences. This action requires user confirmation.',
     parameters: {
       type: 'object',
       properties: {
@@ -163,11 +167,15 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
         },
         old_string: {
           type: 'string',
-          description: 'Exact text to find (must be unique in the file)',
+          description: 'Exact text to find (must be unique unless replace_all=true)',
         },
         new_string: {
           type: 'string',
           description: 'Replacement text',
+        },
+        replace_all: {
+          type: 'boolean',
+          description: 'If true, replace all occurrences of old_string. Default: false (requires unique match)',
         },
       },
       required: ['path', 'old_string', 'new_string'],
@@ -394,6 +402,50 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
         },
       },
       required: ['toolName', 'toolArgs'],
+    },
+    requiresConfirmation: false,
+  },
+
+  // Web Tools (SCOUT agent)
+  {
+    name: 'web_search',
+    description: 'Search the web for documentation, examples, or solutions using Brave Search API',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search query string',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of results (1-10, default: 5)',
+        },
+        freshness: {
+          type: 'string',
+          description: 'Limit results to recent content: "day", "week", or "month"',
+        },
+      },
+      required: ['query'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'web_fetch',
+    description: 'Fetch and extract content from a URL. Returns text content with HTML stripped.',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          description: 'URL to fetch (must be http or https)',
+        },
+        timeout: {
+          type: 'number',
+          description: 'Request timeout in milliseconds (default: 10000)',
+        },
+      },
+      required: ['url'],
     },
     requiresConfirmation: false,
   },
@@ -651,6 +703,29 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
         },
       },
       required: ['task'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'delegateToScout',
+    description: 'Delegate exploration or research task to SCOUT. Available to CHAPO, KODA, and DEVO.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'What to explore or search for',
+        },
+        scope: {
+          type: 'string',
+          description: 'Where to search: "codebase", "web", or "both" (default: "both")',
+        },
+        context: {
+          type: 'string',
+          description: 'Additional context to help SCOUT understand the task',
+        },
+      },
+      required: ['query'],
     },
     requiresConfirmation: false,
   },
