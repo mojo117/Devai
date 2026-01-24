@@ -14,6 +14,22 @@ export type RiskLevel = 'low' | 'medium' | 'high';
 
 export type TaskComplexity = 'simple' | 'moderate' | 'complex';
 
+// Smart model selection - for performance optimization
+export type TaskComplexityLevel = 'trivial' | 'simple' | 'moderate' | 'complex';
+
+export type LLMProviderName = 'anthropic' | 'openai' | 'gemini';
+
+export interface ModelSelection {
+  provider: LLMProviderName;
+  model: string;
+  reason: string;
+}
+
+export interface ModelTier {
+  provider: LLMProviderName;
+  model: string;
+}
+
 export type AgentPhase =
   | 'qualification'
   | 'planning'              // Multi-perspective planning phase

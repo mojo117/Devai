@@ -48,6 +48,14 @@ import { KODA_AGENT } from './koda.js';
 import { DEVO_AGENT } from './devo.js';
 import { SCOUT_AGENT } from './scout.js';
 import { loadClaudeMdContext, formatClaudeMdBlock } from '../scanner/claudeMdLoader.js';
+import {
+  classifyTaskComplexity,
+  selectModel,
+  detectTargetAgent,
+  shouldSkipQualification,
+  shouldSkipReview,
+} from '../llm/modelSelector.js';
+import type { TaskComplexityLevel, ModelSelection } from './types.js';
 
 export type SendEventFn = (event: AgentStreamEvent) => void;
 
@@ -91,17 +99,23 @@ export async function processRequest(
   projectRoot: string | null,
   sendEvent: SendEventFn
 ): Promise<string> {
+  // FAST PATH: Early task classification (no LLM call!)
+  const taskComplexity = classifyTaskComplexity(userMessage);
+  const modelSelection = selectModel(taskComplexity);
+
   console.info('[agents] processRequest start', {
     sessionId,
     projectRoot: projectRoot || null,
     messageLength: userMessage.length,
+    taskComplexity,
+    selectedModel: `${modelSelection.provider}/${modelSelection.model}`,
   });
 
   // Initialize or get state
   const state = stateManager.getOrCreateState(sessionId);
   stateManager.setOriginalRequest(sessionId, userMessage);
-  stateManager.setPhase(sessionId, 'qualification');
-  stateManager.setActiveAgent(sessionId, 'chapo');
+  stateManager.setGatheredInfo(sessionId, 'taskComplexity', taskComplexity);
+  stateManager.setGatheredInfo(sessionId, 'modelSelection', modelSelection);
 
   // Load CLAUDE.md project instructions and store in state
   if (projectRoot) {
@@ -111,15 +125,25 @@ export async function processRequest(
     stateManager.setGatheredInfo(sessionId, 'projectRoot', projectRoot);
   }
 
-  sendEvent({ type: 'agent_start', agent: 'chapo', phase: 'qualification' });
-
   try {
-    // Phase 1: CHAPO qualifies the task
+    // FAST PATH: Skip qualification for trivial/simple tasks
+    if (shouldSkipQualification(taskComplexity)) {
+      console.info('[agents] FAST PATH: Skipping qualification', { taskComplexity });
+      return executeSimpleTask(sessionId, userMessage, projectRoot, taskComplexity, modelSelection, sendEvent);
+    }
+
+    // STANDARD PATH: Full qualification for moderate/complex tasks
+    stateManager.setPhase(sessionId, 'qualification');
+    stateManager.setActiveAgent(sessionId, 'chapo');
+    sendEvent({ type: 'agent_start', agent: 'chapo', phase: 'qualification' });
+
+    // Phase 1: CHAPO qualifies the task (with smart model selection)
     const qualification = await runChapoQualification(
       sessionId,
       userMessage,
       projectRoot,
-      sendEvent
+      sendEvent,
+      modelSelection
     );
 
     stateManager.setQualificationResult(sessionId, qualification);
@@ -214,17 +238,25 @@ export async function processRequest(
       result = qualification.reasoning || 'Task verarbeitet.';
     }
 
-    // Phase 3: Review
-    stateManager.setPhase(sessionId, 'review');
-    sendEvent({ type: 'agent_start', agent: 'chapo', phase: 'review' });
+    // Phase 3: Review (conditional - skip for simple low-risk tasks)
+    const skipReview = shouldSkipReview(taskComplexity, qualification.riskLevel, result);
 
-    // CHAPO reviews the result
-    const reviewedResult = await runChapoReview(
-      sessionId,
-      userMessage,
-      result,
-      sendEvent
-    );
+    let finalResult: string;
+    if (skipReview) {
+      console.info('[agents] Skipping review phase', { taskComplexity, riskLevel: qualification.riskLevel });
+      finalResult = result;
+    } else {
+      stateManager.setPhase(sessionId, 'review');
+      sendEvent({ type: 'agent_start', agent: 'chapo', phase: 'review' });
+
+      // CHAPO reviews the result
+      finalResult = await runChapoReview(
+        sessionId,
+        userMessage,
+        result,
+        sendEvent
+      );
+    }
 
     // Send history
     sendEvent({
@@ -232,9 +264,9 @@ export async function processRequest(
       entries: stateManager.getHistory(sessionId),
     });
 
-    sendEvent({ type: 'agent_complete', agent: 'chapo', result: reviewedResult });
+    sendEvent({ type: 'agent_complete', agent: 'chapo', result: finalResult });
 
-    return reviewedResult;
+    return finalResult;
   } catch (error) {
     stateManager.setPhase(sessionId, 'error');
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -255,18 +287,116 @@ export async function processRequest(
 }
 
 /**
+ * FAST PATH: Execute simple tasks without qualification
+ */
+async function executeSimpleTask(
+  sessionId: string,
+  userMessage: string,
+  projectRoot: string | null,
+  taskComplexity: TaskComplexityLevel,
+  modelSelection: ModelSelection,
+  sendEvent: SendEventFn
+): Promise<string> {
+  const targetAgent = detectTargetAgent(userMessage);
+
+  console.info('[agents] executeSimpleTask', {
+    sessionId,
+    taskComplexity,
+    targetAgent,
+    model: `${modelSelection.provider}/${modelSelection.model}`,
+  });
+
+  stateManager.setPhase(sessionId, 'execution');
+  stateManager.setActiveAgent(sessionId, targetAgent);
+  sendEvent({ type: 'agent_start', agent: targetAgent, phase: 'execution' });
+
+  const agent = getAgent(targetAgent);
+  const tools = getToolsForLLM().filter((t) => agent.tools.includes(t.name));
+
+  // Get CLAUDE.md project instructions from state
+  const state = stateManager.getState(sessionId);
+  const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
+
+  const systemPrompt = `${agent.systemPrompt}
+${claudeMdBlock}
+${projectRoot ? `Working Directory: ${projectRoot}` : ''}
+
+WICHTIG: Dies ist eine einfache Anfrage. Führe sie DIREKT aus ohne zu fragen.`;
+
+  const messages: LLMMessage[] = [
+    { role: 'user', content: userMessage },
+  ];
+
+  // Single turn execution for simple tasks
+  const response = await llmRouter.generateWithFallback(
+    modelSelection.provider as 'anthropic' | 'openai' | 'gemini',
+    {
+      model: modelSelection.model,
+      messages,
+      systemPrompt,
+      tools,
+      toolsEnabled: true,
+    }
+  );
+
+  let result = response.content || '';
+
+  // Execute any tool calls
+  if (response.toolCalls && response.toolCalls.length > 0) {
+    for (const toolCall of response.toolCalls) {
+      sendEvent({
+        type: 'tool_call',
+        agent: targetAgent,
+        toolName: toolCall.name,
+        args: toolCall.arguments,
+      });
+
+      const toolResult = await executeTool(toolCall.name, toolCall.arguments);
+
+      sendEvent({
+        type: 'tool_result',
+        agent: targetAgent,
+        toolName: toolCall.name,
+        result: toolResult.result,
+        success: toolResult.success,
+      });
+
+      // Append tool result to response
+      if (toolResult.success) {
+        result += `\n\n${JSON.stringify(toolResult.result, null, 2)}`;
+      } else {
+        result += `\n\nFehler: ${toolResult.error}`;
+      }
+    }
+  }
+
+  sendEvent({ type: 'agent_complete', agent: targetAgent, result });
+  sendEvent({
+    type: 'agent_history',
+    entries: stateManager.getHistory(sessionId),
+  });
+
+  return result;
+}
+
+/**
  * CHAPO: Task Qualification Phase
  */
 async function runChapoQualification(
   sessionId: string,
   userMessage: string,
   projectRoot: string | null,
-  sendEvent: SendEventFn
+  sendEvent: SendEventFn,
+  modelSelection?: ModelSelection
 ): Promise<QualificationResult> {
   sendEvent({ type: 'agent_thinking', agent: 'chapo', status: 'Analysiere Task...' });
 
   const chapo = getAgent('chapo');
   const tools = getToolsForLLM().filter((t) => chapo.tools.includes(t.name));
+
+  // Use provided model or default to agent's model
+  const provider = (modelSelection?.provider || 'anthropic') as 'anthropic' | 'openai' | 'gemini';
+  const model = modelSelection?.model || chapo.model;
 
   // Get CLAUDE.md project instructions from state (loaded in processRequest)
   const state = stateManager.getState(sessionId);
@@ -308,8 +438,8 @@ Falls Delegation nötig:
   while (turn < MAX_TURNS) {
     turn++;
 
-    const response = await llmRouter.generate('anthropic', {
-      model: chapo.model,
+    const response = await llmRouter.generateWithFallback(provider, {
+      model,
       messages,
       systemPrompt,
       tools,

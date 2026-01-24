@@ -245,6 +245,96 @@ export async function executeTools(
   return results;
 }
 
+// Read-only tools that can be safely executed in parallel
+const READ_ONLY_TOOLS = new Set([
+  'fs_listFiles',
+  'fs_readFile',
+  'fs_glob',
+  'fs_grep',
+  'git_status',
+  'git_diff',
+  'github_getWorkflowRunStatus',
+  'logs_getStagingLogs',
+  'pm2_status',
+  'pm2_logs',
+  'web_search',
+  'web_fetch',
+]);
+
+/**
+ * Check if a tool is read-only (safe for parallel execution)
+ */
+export function isReadOnlyTool(toolName: string): boolean {
+  return READ_ONLY_TOOLS.has(toolName);
+}
+
+/**
+ * Interface for parallel tool execution results
+ */
+export interface ParallelToolExecution {
+  tools: Array<{ name: string; args: ToolArgs }>;
+  results: ToolExecutionResult[];
+  totalDuration: number;
+  parallelCount: number;
+  sequentialCount: number;
+}
+
+/**
+ * Execute tools in parallel where safe, sequential otherwise
+ *
+ * Read-only tools are executed in parallel for performance.
+ * Write tools are executed sequentially for safety.
+ */
+export async function executeToolsParallel(
+  tools: Array<{ name: string; args: ToolArgs }>
+): Promise<ParallelToolExecution> {
+  const start = Date.now();
+
+  // Separate read-only and write tools
+  const readOnlyTools: Array<{ name: string; args: ToolArgs; index: number }> = [];
+  const writeTools: Array<{ name: string; args: ToolArgs; index: number }> = [];
+
+  tools.forEach((tool, index) => {
+    const toolDef = getToolDefinition(tool.name);
+
+    // Skip tools that require confirmation
+    if (toolDef?.requiresConfirmation) {
+      writeTools.push({ ...tool, index });
+    } else if (isReadOnlyTool(tool.name)) {
+      readOnlyTools.push({ ...tool, index });
+    } else {
+      writeTools.push({ ...tool, index });
+    }
+  });
+
+  // Execute read-only tools in parallel
+  const readOnlyPromises = readOnlyTools.map(async (tool) => ({
+    index: tool.index,
+    result: await executeTool(tool.name, tool.args),
+  }));
+
+  const readOnlyResults = await Promise.all(readOnlyPromises);
+
+  // Execute write tools sequentially
+  const writeResults: Array<{ index: number; result: ToolExecutionResult }> = [];
+  for (const tool of writeTools) {
+    const result = await executeTool(tool.name, tool.args);
+    writeResults.push({ index: tool.index, result });
+  }
+
+  // Combine results in original order
+  const allResults = [...readOnlyResults, ...writeResults];
+  allResults.sort((a, b) => a.index - b.index);
+
+  return {
+    tools,
+    results: allResults.map((r) => r.result),
+    totalDuration: Date.now() - start,
+    parallelCount: readOnlyTools.length,
+    sequentialCount: writeTools.length,
+  };
+}
+
 async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
