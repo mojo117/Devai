@@ -1,10 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ChatUI, type ToolEvent } from './components/ChatUI';
 import { ProjectInfo } from './components/ProjectInfo';
-import { ActionCard } from './components/ActionCard';
-import { ToolsPanel } from './components/ToolsPanel';
-import { HistoryPanel } from './components/HistoryPanel';
-import { PromptsPanel } from './components/PromptsPanel';
+import { LeftSidebar, LEFT_SIDEBAR_WIDTH } from './components/LeftSidebar';
 import { ActionsPage } from './components/ActionsPage';
 import { SystemFeed, type FeedEvent, toolEventToFeedEvent } from './components/SystemFeed';
 import { ResizableDivider } from './components/ResizableDivider';
@@ -68,11 +65,18 @@ function App() {
   const [feedEvents, setFeedEvents] = useState<FeedEvent[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [feedWidth, setFeedWidth] = useState(384); // Default 384px (w-96)
+  const [clearFeedTrigger, setClearFeedTrigger] = useState(0);
 
   // Convert tool events to feed events
   const handleToolEvents = useCallback((toolEvents: ToolEvent[]) => {
     const newFeedEvents = toolEvents.map(toolEventToFeedEvent);
     setFeedEvents(newFeedEvents);
+  }, []);
+
+  // Clear feed events
+  const handleClearFeed = useCallback(() => {
+    setFeedEvents([]);
+    setClearFeedTrigger((prev) => prev + 1);
   }, []);
 
   // Handle resize of the system feed panel
@@ -430,8 +434,8 @@ function App() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Tools Panel (collapsible) */}
-      <ToolsPanel
+      {/* Left Sidebar with Toolbar and Panels */}
+      <LeftSidebar
         allowedRoots={health?.allowedRoots}
         skills={skills}
         selectedSkillIds={selectedSkillIds}
@@ -454,14 +458,8 @@ function App() {
         contextStats={contextStats}
       />
 
-      {/* History Panel (collapsible, right side) */}
-      <HistoryPanel />
-
-      {/* Prompts Panel (collapsible, left side) */}
-      <PromptsPanel />
-
-      {/* Header */}
-      <header className="bg-gray-800 border-b border-gray-700 px-6 py-4">
+      {/* Header - with left margin for sidebar */}
+      <header className="bg-gray-800 border-b border-gray-700 px-6 py-4" style={{ marginLeft: LEFT_SIDEBAR_WIDTH }}>
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4">
             <h1 className="text-xl font-bold text-blue-400">DevAI</h1>
@@ -496,7 +494,7 @@ function App() {
 
       {/* Error Banner */}
       {error && (
-        <div className="bg-red-900/50 border-b border-red-700 px-6 py-2 text-red-200 text-sm">
+        <div className="bg-red-900/50 border-b border-red-700 px-6 py-2 text-red-200 text-sm" style={{ marginLeft: LEFT_SIDEBAR_WIDTH }}>
           {error}
           <button
             onClick={() => setError(null)}
@@ -508,7 +506,7 @@ function App() {
       )}
 
       {/* Main Content */}
-      <div className="flex-1 flex w-full overflow-hidden min-h-0">
+      <div className="flex-1 flex w-full overflow-hidden min-h-0" style={{ marginLeft: LEFT_SIDEBAR_WIDTH }}>
         {view === 'chat' ? (
           <>
             {/* Chat Area - Left Side */}
@@ -525,6 +523,7 @@ function App() {
                 onContextUpdate={(stats) => setContextStats(stats)}
                 onToolEvent={handleToolEvents}
                 onLoadingChange={setChatLoading}
+                clearFeedTrigger={clearFeedTrigger}
               />
             </div>
 
@@ -533,7 +532,7 @@ function App() {
 
             {/* System Feed - Right Side */}
             <aside className="flex-shrink-0 min-h-0 overflow-hidden" style={{ width: feedWidth }}>
-              <SystemFeed events={feedEvents} isLoading={chatLoading} />
+              <SystemFeed events={feedEvents} isLoading={chatLoading} onClear={handleClearFeed} />
             </aside>
           </>
         ) : (
@@ -551,7 +550,7 @@ function App() {
       </div>
 
       {/* Status Bar */}
-      <footer className="bg-gray-800 border-t border-gray-700 px-6 py-2 text-xs text-gray-500">
+      <footer className="bg-gray-800 border-t border-gray-700 px-6 py-2 text-xs text-gray-500" style={{ marginLeft: LEFT_SIDEBAR_WIDTH }}>
         <div className="max-w-6xl mx-auto flex justify-between">
           <span>
             Status: {health ? (

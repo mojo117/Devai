@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import { sendMessage, sendMultiAgentMessage, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction, globProjectFiles, fetchPendingActions, batchApproveActions, batchRejectActions } from '../api';
+import { sendMessage, sendMultiAgentMessage, sendAgentApproval, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction, globProjectFiles, fetchPendingActions, batchApproveActions, batchRejectActions, fetchAgentState } from '../api';
 import type { ChatStreamEvent } from '../api';
 import type { ChatMessage, ContextStats, LLMProvider, SessionSummary, Action } from '../types';
 import type { AgentHistoryEntry } from '../api';
 import { InlineAction, type PendingAction } from './InlineAction';
+import { InlineApproval, type PendingApproval } from './InlineApproval';
 import { AgentStatus, type AgentName, type AgentPhase } from './AgentStatus';
 import { AgentHistory, AgentTimeline } from './AgentHistory';
 import { useActionWebSocket } from '../hooks/useActionWebSocket';
@@ -59,11 +60,15 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
 
   // Debug: log pendingActions changes
   useEffect(() => {
     console.log('[ChatUI] pendingActions changed:', pendingActions.length, pendingActions);
   }, [pendingActions]);
+  useEffect(() => {
+    console.log('[ChatUI] pendingApprovals changed:', pendingApprovals.length, pendingApprovals);
+  }, [pendingApprovals]);
 
   const [fileHints, setFileHints] = useState<string[]>([]);
   const [fileHintsLoading, setFileHintsLoading] = useState(false);
@@ -76,7 +81,7 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
   }>(null);
 
   // Multi-agent mode state
-  const [multiAgentMode, setMultiAgentMode] = useState(false);
+  const [multiAgentMode] = useState(true);
   const [activeAgent, setActiveAgent] = useState<AgentName | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>('idle');
   const [agentHistory, setAgentHistory] = useState<AgentHistoryEntry[]>([]);
@@ -124,6 +129,64 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    if (!sessionId || !multiAgentMode) {
+      setPendingApprovals([]);
+      return;
+    }
+    try {
+      const stored = localStorage.getItem(`devai_pending_approvals_${sessionId}`);
+      if (stored) {
+        const parsed = JSON.parse(stored) as PendingApproval[];
+        if (Array.isArray(parsed)) {
+          setPendingApprovals(parsed);
+          return;
+        }
+      }
+    } catch {
+      // Ignore localStorage errors.
+    }
+    setPendingApprovals([]);
+  }, [sessionId, multiAgentMode]);
+
+  useEffect(() => {
+    if (!sessionId || !multiAgentMode) return;
+    try {
+      const key = `devai_pending_approvals_${sessionId}`;
+      if (pendingApprovals.length === 0) {
+        localStorage.removeItem(key);
+      } else {
+        localStorage.setItem(key, JSON.stringify(pendingApprovals));
+      }
+    } catch {
+      // Ignore localStorage errors.
+    }
+  }, [pendingApprovals, sessionId, multiAgentMode]);
+
+  useEffect(() => {
+    if (!multiAgentMode || !sessionId) return;
+    let cancelled = false;
+    const loadApprovals = async () => {
+      try {
+        const state = await fetchAgentState(sessionId);
+        if (cancelled) return;
+        if (Array.isArray(state.pendingApprovals)) {
+          const approvals = (state.pendingApprovals as PendingApproval[]).map((approval) => ({
+            ...approval,
+            sessionId,
+          }));
+          setPendingApprovals(approvals);
+        }
+      } catch {
+        // Ignore state load errors for now.
+      }
+    };
+    loadApprovals();
+    return () => {
+      cancelled = true;
+    };
+  }, [multiAgentMode, sessionId]);
 
   // Emit tool events to parent
   useEffect(() => {
@@ -352,6 +415,92 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
     }
   };
 
+  const handleStreamEvent = (event: ChatStreamEvent) => {
+    // Handle agent-specific events in multi-agent mode
+    if (multiAgentMode) {
+      handleAgentEvent(event);
+    }
+
+    // Handle common events
+    // Get agent from event if available (multi-agent mode)
+    const eventAgent = event.agent as AgentName | undefined;
+
+    if (event.type === 'status') {
+      setToolEvents((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          type: 'status',
+          result: event.status,
+          agent: eventAgent || activeAgent || undefined,
+        },
+      ]);
+    }
+    if (event.type === 'tool_call') {
+      const id = String(event.id || crypto.randomUUID());
+      upsertToolEvent(setToolEvents, id, {
+        type: 'tool_call',
+        name: event.name as string | undefined,
+        arguments: event.arguments,
+        agent: eventAgent || activeAgent || undefined,
+      });
+    }
+    if (event.type === 'tool_result_chunk') {
+      const id = String(event.id || crypto.randomUUID());
+      const chunk = typeof event.chunk === 'string' ? event.chunk : '';
+      upsertToolEvent(setToolEvents, id, {
+        type: 'tool_result',
+        name: event.name as string | undefined,
+        chunk,
+        agent: eventAgent || activeAgent || undefined,
+      });
+    }
+    if (event.type === 'tool_result') {
+      const id = String(event.id || crypto.randomUUID());
+      upsertToolEvent(setToolEvents, id, {
+        type: 'tool_result',
+        name: event.name as string | undefined,
+        result: event.result,
+        completed: Boolean(event.completed),
+        agent: eventAgent || activeAgent || undefined,
+      });
+    }
+    if (event.type === 'action_pending') {
+      console.log('[ChatUI] Stream action_pending event:', event);
+      const pendingAction: PendingAction = {
+        actionId: event.actionId as string,
+        toolName: event.toolName as string,
+        toolArgs: event.toolArgs as Record<string, unknown>,
+        description: event.description as string,
+        preview: event.preview as PendingAction['preview'],
+      };
+      // Check for duplicates (action might also come via WebSocket)
+      setPendingActions((prev) => {
+        if (prev.some((a) => a.actionId === pendingAction.actionId)) {
+          return prev;
+        }
+        return [...prev, pendingAction];
+      });
+    }
+        if (event.type === 'approval_request') {
+          const request = event.request as PendingApproval | undefined;
+          if (!request?.approvalId) return;
+          const requestSessionId = typeof event.sessionId === 'string' ? event.sessionId : sessionId || undefined;
+          setPendingApprovals((prev) => {
+            if (prev.some((a) => a.approvalId === request.approvalId)) {
+              return prev;
+            }
+            return [...prev, { ...request, sessionId: requestSessionId }];
+          });
+        }
+    if (event.type === 'context_stats' && onContextUpdate) {
+      const stats = event.stats as ContextStats | undefined;
+      if (stats) {
+        onContextUpdate(stats);
+      }
+    }
+  };
+
   const sendChatMessage = async (content: string) => {
     if (isLoading) return;
 
@@ -376,89 +525,13 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
     }
 
     const runRequest = async (): Promise<{ message: ChatMessage; sessionId?: string } | null> => {
-      // Event handler for both single and multi-agent modes
-      const handleEvent = (event: ChatStreamEvent) => {
-        // Handle agent-specific events in multi-agent mode
-        if (multiAgentMode) {
-          handleAgentEvent(event);
-        }
-
-        // Handle common events
-        // Get agent from event if available (multi-agent mode)
-        const eventAgent = event.agent as AgentName | undefined;
-
-        if (event.type === 'status') {
-          setToolEvents((prev) => [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              type: 'status',
-              result: event.status,
-              agent: eventAgent || activeAgent || undefined,
-            },
-          ]);
-        }
-        if (event.type === 'tool_call') {
-          const id = String(event.id || crypto.randomUUID());
-          upsertToolEvent(setToolEvents, id, {
-            type: 'tool_call',
-            name: event.name as string | undefined,
-            arguments: event.arguments,
-            agent: eventAgent || activeAgent || undefined,
-          });
-        }
-        if (event.type === 'tool_result_chunk') {
-          const id = String(event.id || crypto.randomUUID());
-          const chunk = typeof event.chunk === 'string' ? event.chunk : '';
-          upsertToolEvent(setToolEvents, id, {
-            type: 'tool_result',
-            name: event.name as string | undefined,
-            chunk,
-            agent: eventAgent || activeAgent || undefined,
-          });
-        }
-        if (event.type === 'tool_result') {
-          const id = String(event.id || crypto.randomUUID());
-          upsertToolEvent(setToolEvents, id, {
-            type: 'tool_result',
-            name: event.name as string | undefined,
-            result: event.result,
-            completed: Boolean(event.completed),
-            agent: eventAgent || activeAgent || undefined,
-          });
-        }
-        if (event.type === 'action_pending') {
-          console.log('[ChatUI] Stream action_pending event:', event);
-          const pendingAction: PendingAction = {
-            actionId: event.actionId as string,
-            toolName: event.toolName as string,
-            toolArgs: event.toolArgs as Record<string, unknown>,
-            description: event.description as string,
-            preview: event.preview as PendingAction['preview'],
-          };
-          // Check for duplicates (action might also come via WebSocket)
-          setPendingActions((prev) => {
-            if (prev.some((a) => a.actionId === pendingAction.actionId)) {
-              return prev;
-            }
-            return [...prev, pendingAction];
-          });
-        }
-        if (event.type === 'context_stats' && onContextUpdate) {
-          const stats = event.stats as ContextStats | undefined;
-          if (stats) {
-            onContextUpdate(stats);
-          }
-        }
-      };
-
       // Use multi-agent or single-agent endpoint based on mode
       if (multiAgentMode) {
         const response = await sendMultiAgentMessage(
           content,
           projectRoot || undefined,
           sessionId || undefined,
-          handleEvent
+          handleStreamEvent
         );
 
         if (response.agentHistory) {
@@ -480,7 +553,7 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
           pinnedFiles,
           projectContextOverride,
           sessionId || undefined,
-          handleEvent
+          handleStreamEvent
         );
         if (response.contextStats && onContextUpdate) {
           onContextUpdate(response.contextStats);
@@ -650,6 +723,50 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
     }, 1000);
   };
 
+  const handleApproveApproval = async (approvalId: string) => {
+    const approval = pendingApprovals.find((item) => item.approvalId === approvalId);
+    const approvalSessionId = approval?.sessionId || sessionId;
+    if (!approvalSessionId) {
+      throw new Error('Missing session for approval');
+    }
+    const response = await sendAgentApproval(approvalSessionId, approvalId, true, handleStreamEvent);
+
+    if (response.message) {
+      setMessages((prev) => [...prev, response.message]);
+    }
+    if (response.sessionId) {
+      setSessionId(response.sessionId);
+      await saveSetting('lastSessionId', response.sessionId);
+    }
+    await refreshSessions(response.sessionId || approvalSessionId);
+
+    setTimeout(() => {
+      setPendingApprovals((prev) => prev.filter((a) => a.approvalId !== approvalId));
+    }, 1000);
+  };
+
+  const handleRejectApproval = async (approvalId: string) => {
+    const approval = pendingApprovals.find((item) => item.approvalId === approvalId);
+    const approvalSessionId = approval?.sessionId || sessionId;
+    if (!approvalSessionId) {
+      throw new Error('Missing session for approval');
+    }
+    const response = await sendAgentApproval(approvalSessionId, approvalId, false, handleStreamEvent);
+
+    if (response.message) {
+      setMessages((prev) => [...prev, response.message]);
+    }
+    if (response.sessionId) {
+      setSessionId(response.sessionId);
+      await saveSetting('lastSessionId', response.sessionId);
+    }
+    await refreshSessions(response.sessionId || approvalSessionId);
+
+    setTimeout(() => {
+      setPendingApprovals((prev) => prev.filter((a) => a.approvalId !== approvalId));
+    }, 1000);
+  };
+
   const handleBatchApprove = async () => {
     if (pendingActions.length === 0) return;
 
@@ -789,16 +906,6 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
             </select>
           </div>
           <div className="flex items-center gap-3">
-            {/* Multi-Agent Mode Toggle */}
-            <label className="flex items-center gap-1 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={multiAgentMode}
-                onChange={(e) => setMultiAgentMode(e.target.checked)}
-                className="w-3 h-3 rounded bg-gray-700 border-gray-600 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-800"
-              />
-              <span className="text-[11px] text-gray-400">Multi-Agent</span>
-            </label>
             <button
               onClick={handleRestartChat}
               disabled={sessionsLoading || messages.length === 0}
@@ -886,6 +993,20 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Pending Approvals - Fixed above input, always visible */}
+      {pendingApprovals.length > 0 && (
+        <div className="border-t border-gray-700 px-4 py-2 space-y-2">
+          {pendingApprovals.map((approval) => (
+            <InlineApproval
+              key={approval.approvalId}
+              approval={approval}
+              onApprove={handleApproveApproval}
+              onReject={handleRejectApproval}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Pending Actions - Fixed above input, always visible */}
       {pendingActions.length > 0 && (

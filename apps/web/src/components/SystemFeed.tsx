@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
 
+export type AgentName = 'chapo' | 'koda' | 'devo';
+
 export interface FeedEvent {
   id: string;
   timestamp: string;
@@ -8,14 +10,16 @@ export interface FeedEvent {
   content?: string;
   metadata?: Record<string, unknown>;
   status?: 'pending' | 'running' | 'success' | 'error';
+  agent?: AgentName;
 }
 
 interface SystemFeedProps {
   events: FeedEvent[];
   isLoading?: boolean;
+  onClear?: () => void;
 }
 
-export function SystemFeed({ events, isLoading }: SystemFeedProps) {
+export function SystemFeed({ events, isLoading, onClear }: SystemFeedProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new events arrive
@@ -31,12 +35,22 @@ export function SystemFeed({ events, isLoading }: SystemFeedProps) {
       <div className="px-4 py-3 border-b border-gray-700 bg-gray-800 flex-shrink-0">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-gray-200">System Feed</h2>
-          {isLoading && (
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
-              <span className="text-xs text-gray-400">Running...</span>
-            </div>
-          )}
+          <div className="flex items-center gap-3">
+            {isLoading && (
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                <span className="text-xs text-gray-400">Running...</span>
+              </div>
+            )}
+            {onClear && events.length > 0 && (
+              <button
+                onClick={onClear}
+                className="text-[10px] text-gray-500 hover:text-gray-300 transition-colors"
+              >
+                Clear
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -118,6 +132,25 @@ function FeedEventCard({ event }: { event: FeedEvent }) {
     );
   };
 
+  const getAgentBadge = () => {
+    if (!event.agent) return null;
+    const agentColors: Record<AgentName, string> = {
+      chapo: 'bg-blue-600/30 text-blue-300 border-blue-500/50',
+      koda: 'bg-green-600/30 text-green-300 border-green-500/50',
+      devo: 'bg-purple-600/30 text-purple-300 border-purple-500/50',
+    };
+    const agentLabels: Record<AgentName, string> = {
+      chapo: 'Chapo',
+      koda: 'Koda',
+      devo: 'Devo',
+    };
+    return (
+      <span className={`px-1.5 py-0.5 rounded border text-[10px] font-medium ${agentColors[event.agent]}`}>
+        {agentLabels[event.agent]}
+      </span>
+    );
+  };
+
   return (
     <div className={`rounded border ${getTypeColor()} overflow-hidden`}>
       {/* Header */}
@@ -126,7 +159,8 @@ function FeedEventCard({ event }: { event: FeedEvent }) {
           <span className="w-5 h-5 flex items-center justify-center rounded bg-gray-800 text-[10px] font-mono text-gray-400">
             {getTypeIcon()}
           </span>
-          <span className="text-xs font-medium text-gray-200 truncate max-w-[180px]">
+          {getAgentBadge()}
+          <span className="text-xs font-medium text-gray-200 truncate max-w-[150px]">
             {event.title}
           </span>
         </div>
@@ -158,6 +192,7 @@ export function toolEventToFeedEvent(toolEvent: {
   arguments?: unknown;
   result?: unknown;
   completed?: boolean;
+  agent?: AgentName;
 }): FeedEvent {
   const timestamp = new Date().toISOString();
 
@@ -168,6 +203,7 @@ export function toolEventToFeedEvent(toolEvent: {
       type: 'status',
       title: String(toolEvent.result || 'Status update'),
       status: 'success',
+      agent: toolEvent.agent,
     };
   }
 
@@ -179,6 +215,7 @@ export function toolEventToFeedEvent(toolEvent: {
       title: toolEvent.name || 'Tool Call',
       content: toolEvent.arguments ? formatPayload(toolEvent.arguments) : undefined,
       status: 'running',
+      agent: toolEvent.agent,
     };
   }
 
@@ -191,6 +228,7 @@ export function toolEventToFeedEvent(toolEvent: {
     title: toolEvent.name || 'Tool Result',
     content: toolEvent.result ? formatPayload(toolEvent.result) : undefined,
     status: isError ? 'error' : 'success',
+    agent: toolEvent.agent,
   };
 }
 

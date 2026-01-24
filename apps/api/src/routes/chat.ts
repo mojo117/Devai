@@ -16,7 +16,7 @@ import { getProjectContext } from '../scanner/projectScanner.js';
 import { getSkillById, getSkillLoadState, refreshSkills } from '../skills/registry.js';
 import type { SkillManifest } from '@devai/shared';
 import { createSession, saveMessage, updateSessionTitleIfEmpty } from '../db/queries.js';
-import { processRequest as processMultiAgentRequest } from '../agents/router.js';
+import { processRequest as processMultiAgentRequest, handleUserApproval } from '../agents/router.js';
 import { getState, getOrCreateState } from '../agents/stateManager.js';
 import type { AgentStreamEvent } from '../agents/types.js';
 
@@ -36,6 +36,12 @@ const ChatRequestSchema = z.object({
     enabled: z.boolean().optional(),
     summary: z.string().optional(),
   }).optional(),
+});
+
+const AgentApprovalSchema = z.object({
+  sessionId: z.string(),
+  approvalId: z.string(),
+  approved: z.boolean(),
 });
 
 // System prompt for the AI assistant
@@ -215,14 +221,17 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
           const result = await handleToolCall(toolCall, allowedToolNames, sendEvent);
           const isError = result.startsWith('Error');
+          const safeResult = isError && !result.trim()
+            ? 'Error: Tool failed without a message.'
+            : result;
 
           toolResultsForLLM.push({
             toolUseId: toolCall.id,
-            result,
+            result: safeResult,
             isError,
           });
 
-          streamToolResult(sendEvent, toolCall.id, toolCall.name, result);
+          streamToolResult(sendEvent, toolCall.id, toolCall.name, safeResult);
         }
 
         // Add assistant message with tool calls to conversation
@@ -413,6 +422,65 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return reply.status(500).send({
         error: 'Multi-agent processing failed',
+        details: errorMessage,
+      });
+    }
+  });
+
+  // Handle multi-agent approval decisions
+  app.post('/chat/agents/approval', {
+    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
+    app.log.info('[agents] approval endpoint hit');
+    reply.raw.setHeader('Content-Type', 'application/x-ndjson');
+
+    const parseResult = AgentApprovalSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: 'Invalid request',
+        details: parseResult.error.issues,
+      });
+    }
+
+    const { sessionId, approvalId, approved } = parseResult.data;
+    app.log.info('[agents] approval decision', { sessionId, approvalId, approved });
+
+    try {
+      const sendEvent = (event: AgentStreamEvent | Record<string, unknown>) => {
+        reply.raw.write(`${JSON.stringify(event)}\n`);
+      };
+
+      const result = await handleUserApproval(sessionId, approvalId, approved, sendEvent);
+
+      const responseMessage: ChatMessage = {
+        id: nanoid(),
+        role: 'assistant',
+        content: result,
+        timestamp: new Date().toISOString(),
+      };
+
+      const state = getState(sessionId);
+      if (state) {
+        await saveMessage(sessionId, responseMessage);
+      }
+
+      sendEvent({
+        type: 'response',
+        response: {
+          message: responseMessage,
+          pendingActions: getPendingActions(),
+          sessionId,
+          agentHistory: state?.agentHistory || [],
+        },
+      });
+
+      reply.raw.end();
+      return reply;
+    } catch (error) {
+      app.log.error(error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return reply.status(500).send({
+        error: 'Multi-agent approval failed',
         details: errorMessage,
       });
     }

@@ -1,6 +1,7 @@
 # Devai - KLYDE SERVER (46.224.197.7)
 
 > **REMOTE SERVER** - You are on Klyde server (46.224.197.7), NOT a local machine.
+> **Zentrale Deployment-Dokumentation:** [DEPLOYMENT-PIPELINE.md](./DEPLOYMENT-PIPELINE.md) (Symlink)
 > This is a production server accessed via SSH. Edits sync via Mutagen to Baso for live preview.
 
 ## Quick Reference

@@ -1,4 +1,5 @@
 # AGENTS
+> **Zentrale Deployment-Dokumentation:** [DEPLOYMENT-PIPELINE.md](./DEPLOYMENT-PIPELINE.md)
 
 ## Overview
 - Devai runs on Klyde server with Mutagen sync to Baso.

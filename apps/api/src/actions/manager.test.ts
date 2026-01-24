@@ -16,6 +16,21 @@ vi.mock('../audit/logger.js', () => ({
   auditLog: vi.fn(),
 }));
 
+// Mock database queries
+vi.mock('../db/queries.js', () => ({
+  saveAction: vi.fn().mockResolvedValue(undefined),
+  getActionById: vi.fn().mockResolvedValue(null),
+  getAllActionsFromDb: vi.fn().mockResolvedValue([]),
+  getPendingActionsFromDb: vi.fn().mockResolvedValue([]),
+  updateActionInDb: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Mock WebSocket broadcaster
+vi.mock('../websocket/actionBroadcaster.js', () => ({
+  notifyActionPending: vi.fn(),
+  notifyActionUpdated: vi.fn(),
+}));
+
 describe('actions manager', () => {
   beforeEach(() => {
     clearActionsForTests();
@@ -28,7 +43,7 @@ describe('actions manager', () => {
       result: { ok: true },
     });
 
-    const action = createAction({
+    const action = await createAction({
       id: 'action-1',
       toolName: 'fs_listFiles',
       toolArgs: { path: '.' },
@@ -36,7 +51,7 @@ describe('actions manager', () => {
     });
 
     const executed = await approveAndExecuteAction(action.id);
-    const stored = getAction(action.id);
+    const stored = await getAction(action.id);
 
     expect(executed.status).toBe('done');
     expect(executed.result).toEqual({ ok: true });
@@ -49,7 +64,7 @@ describe('actions manager', () => {
       error: 'boom',
     });
 
-    const action = createAction({
+    const action = await createAction({
       id: 'action-2',
       toolName: 'fs_readFile',
       toolArgs: { path: 'README.md' },
@@ -63,7 +78,7 @@ describe('actions manager', () => {
   });
 
   it('rejects pending actions', async () => {
-    const action = createAction({
+    const action = await createAction({
       id: 'action-3',
       toolName: 'git_status',
       toolArgs: {},

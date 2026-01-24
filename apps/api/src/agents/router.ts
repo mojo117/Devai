@@ -44,6 +44,15 @@ const AGENTS: Record<AgentName, AgentDefinition> = {
   devo: DEVO_AGENT,
 };
 
+function buildToolResultContent(result: { success: boolean; result?: unknown; error?: string }): { content: string; isError: boolean } {
+  if (result.success) {
+    const value = result.result === undefined ? '' : JSON.stringify(result.result);
+    return { content: value || 'OK', isError: false };
+  }
+  const content = result.error ? `Error: ${result.error}` : 'Error: Tool failed without a message.';
+  return { content, isError: true };
+}
+
 // Get agent definition
 export function getAgent(name: AgentName): AgentDefinition {
   return AGENTS[name];
@@ -68,6 +77,12 @@ export async function processRequest(
   projectRoot: string | null,
   sendEvent: SendEventFn
 ): Promise<string> {
+  console.info('[agents] processRequest start', {
+    sessionId,
+    projectRoot: projectRoot || null,
+    messageLength: userMessage.length,
+  });
+
   // Initialize or get state
   const state = stateManager.getOrCreateState(sessionId);
   stateManager.setOriginalRequest(sessionId, userMessage);
@@ -104,6 +119,11 @@ export async function processRequest(
 
     // Check if approval needed (risky task)
     if (qualification.requiresApproval && !stateManager.isApprovalGranted(sessionId)) {
+      console.info('[agents] approval required', {
+        sessionId,
+        riskLevel: qualification.riskLevel,
+        targetAgent: qualification.targetAgent,
+      });
       const approval: ApprovalRequest = {
         approvalId: nanoid(),
         description: `Task: ${userMessage}\n\nRisiko: ${qualification.riskLevel}\nZiel-Agent: ${qualification.targetAgent}`,
@@ -114,7 +134,7 @@ export async function processRequest(
       };
       stateManager.addPendingApproval(sessionId, approval);
       stateManager.setPhase(sessionId, 'waiting_user');
-      sendEvent({ type: 'approval_request', request: approval });
+      sendEvent({ type: 'approval_request', request: approval, sessionId });
 
       return `Dieser Task erfordert deine Freigabe:\n\n**${userMessage}**\n\nRisiko-Level: ${qualification.riskLevel}\n\nBitte bestätige, dass ich fortfahren soll.`;
     }
@@ -260,6 +280,15 @@ Antworte am Ende mit einem JSON-Block im Format:
       break;
     }
 
+    // Add assistant message with tool calls once
+    messages.push({
+      role: 'assistant',
+      content: response.content || '',
+      toolCalls: response.toolCalls,
+    });
+
+    const toolResults: { toolUseId: string; result: string; isError: boolean }[] = [];
+
     // Execute tools (read-only for CHAPO)
     for (const toolCall of response.toolCalls) {
       sendEvent({
@@ -291,22 +320,20 @@ Antworte am Ende mit einem JSON-Block im Format:
         gatheredContext.gitStatus = result.result as GatheredContext['gitStatus'];
       }
 
-      // Add tool result to messages
-      messages.push({
-        role: 'assistant',
-        content: response.content || '',
-        toolCalls: response.toolCalls,
-      });
-      messages.push({
-        role: 'user',
-        content: '',
-        toolResults: [{
-          toolUseId: toolCall.id,
-          result: JSON.stringify(result.result),
-          isError: !result.success,
-        }],
+      const toolResult = buildToolResultContent(result);
+      toolResults.push({
+        toolUseId: toolCall.id,
+        result: toolResult.content,
+        isError: toolResult.isError,
       });
     }
+
+    // Add tool results as a single user message
+    messages.push({
+      role: 'user',
+      content: '',
+      toolResults,
+    });
   }
 
   // Parse qualification result from response
@@ -412,6 +439,15 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
       break;
     }
 
+    // Add assistant message with tool calls once
+    messages.push({
+      role: 'assistant',
+      content: response.content || '',
+      toolCalls: response.toolCalls,
+    });
+
+    const toolResults: { toolUseId: string; result: string; isError: boolean }[] = [];
+
     // Execute tools
     for (const toolCall of response.toolCalls) {
       // Check for escalation
@@ -443,15 +479,10 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
           return `Task abgebrochen: ${escalation.instructions}`;
         }
 
-        // Add escalation result to messages
-        messages.push({
-          role: 'assistant',
-          content: response.content || '',
-          toolCalls: [toolCall],
-        });
-        messages.push({
-          role: 'user',
-          content: `CHAPO Antwort: ${escalation.instructions || escalation.alternativeApproach}`,
+        toolResults.push({
+          toolUseId: toolCall.id,
+          result: `CHAPO Antwort: ${escalation.instructions || escalation.alternativeApproach}`,
+          isError: false,
         });
         continue;
       }
@@ -466,19 +497,10 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
           success: false,
         });
 
-        messages.push({
-          role: 'assistant',
-          content: response.content || '',
-          toolCalls: response.toolCalls,
-        });
-        messages.push({
-          role: 'user',
-          content: '',
-          toolResults: [{
-            toolUseId: toolCall.id,
-            result: `Error: Tool "${toolCall.name}" is not available to ${targetAgent}`,
-            isError: true,
-          }],
+        toolResults.push({
+          toolUseId: toolCall.id,
+          result: `Error: Tool "${toolCall.name}" is not available to ${targetAgent}`,
+          isError: true,
         });
         continue;
       }
@@ -495,7 +517,7 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
         const preview = await buildActionPreview(toolCall.name, toolCall.arguments);
         const description = generateToolDescription(toolCall.name, toolCall.arguments);
 
-        const action = createAction({
+        const action = await createAction({
           id: nanoid(),
           toolName: toolCall.name,
           toolArgs: toolCall.arguments,
@@ -513,20 +535,10 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
           preview: action.preview,
         });
 
-        // Add tool result to messages indicating action is pending
-        messages.push({
-          role: 'assistant',
-          content: response.content || '',
-          toolCalls: response.toolCalls,
-        });
-        messages.push({
-          role: 'user',
-          content: '',
-          toolResults: [{
-            toolUseId: toolCall.id,
-            result: `Action created for approval: ${description} (Action ID: ${action.id})`,
-            isError: false,
-          }],
+        toolResults.push({
+          toolUseId: toolCall.id,
+          result: `Action created for approval: ${description} (Action ID: ${action.id})`,
+          isError: false,
         });
         continue;
       }
@@ -552,22 +564,20 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
         success: result.success,
       });
 
-      // Add to messages
-      messages.push({
-        role: 'assistant',
-        content: response.content || '',
-        toolCalls: response.toolCalls,
-      });
-      messages.push({
-        role: 'user',
-        content: '',
-        toolResults: [{
-          toolUseId: toolCall.id,
-          result: result.success ? JSON.stringify(result.result) : `Error: ${result.error}`,
-          isError: !result.success,
-        }],
+      const toolResult = buildToolResultContent(result);
+      toolResults.push({
+        toolUseId: toolCall.id,
+        result: toolResult.content,
+        isError: toolResult.isError,
       });
     }
+
+    // Add tool results as a single user message
+    messages.push({
+      role: 'user',
+      content: '',
+      toolResults,
+    });
   }
 
   // Helper function to generate tool descriptions
@@ -910,8 +920,10 @@ export async function handleUserApproval(
   approved: boolean,
   sendEvent: SendEventFn
 ): Promise<string> {
+  console.info('[agents] handleUserApproval', { sessionId, approvalId, approved });
   const approval = stateManager.removePendingApproval(sessionId, approvalId);
   if (!approval) {
+    console.warn('[agents] approval not found', { sessionId, approvalId });
     return 'Freigabe-Anfrage nicht gefunden.';
   }
 
