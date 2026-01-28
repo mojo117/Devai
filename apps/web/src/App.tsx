@@ -6,6 +6,7 @@ import { LeftSidebar, LEFT_SIDEBAR_WIDTH } from './components/LeftSidebar';
 import { ActionsPage } from './components/ActionsPage';
 import { SystemFeed, type FeedEvent, toolEventToFeedEvent } from './components/SystemFeed';
 import { ResizableDivider } from './components/ResizableDivider';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   fetchHealth,
   fetchActions,
@@ -452,6 +453,7 @@ function App() {
   const completedActions = sortedActions.filter((a) => a.status === 'done' || a.status === 'failed' || a.status === 'rejected');
 
   return (
+    <ErrorBoundary>
     <div className="min-h-screen flex flex-col">
       {/* Left Sidebar with Toolbar and Panels - hidden on mobile */}
       {!isMobile && <LeftSidebar
@@ -701,6 +703,7 @@ function App() {
         </footer>
       )}
     </div>
+    </ErrorBoundary>
   );
 }
 

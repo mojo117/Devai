@@ -81,12 +81,14 @@ export async function sendMessage(
   pinnedFiles?: string[],
   projectContextOverride?: { enabled: boolean; summary: string },
   sessionId?: string,
-  onEvent?: (event: ChatStreamEvent) => void
+  onEvent?: (event: ChatStreamEvent) => void,
+  abortSignal?: AbortSignal
 ): Promise<{ message: ChatMessage; pendingActions: Action[]; sessionId?: string; contextStats?: { tokensUsed: number; tokenBudget: number; note?: string } }> {
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ messages, provider, projectRoot, skillIds, pinnedFiles, projectContextOverride, sessionId }),
+    signal: abortSignal,
   });
 
   if (!res.ok) {

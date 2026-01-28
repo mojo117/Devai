@@ -82,12 +82,12 @@ function sanitize(obj: unknown, depth: number = 0): unknown {
   return sanitized;
 }
 
-export async function auditLog(data: Record<string, unknown>): Promise<void> {
+export async function auditLog(data: Record<string, unknown>, userId?: string): Promise<void> {
   await ensureDir();
 
   const entry: AuditEntry = {
     timestamp: new Date().toISOString(),
-    user: 'anonymous', // TODO: Add user authentication
+    user: userId || 'anonymous',
     action: data.action as string || 'unknown',
     ...sanitize(data) as Record<string, unknown>,
   };
@@ -108,7 +108,8 @@ export async function auditLog(data: Record<string, unknown>): Promise<void> {
 export async function logToolExecution(
   toolName: string,
   args: Record<string, unknown>,
-  result: { success: boolean; result?: unknown; error?: string }
+  result: { success: boolean; result?: unknown; error?: string },
+  userId?: string
 ): Promise<void> {
   await auditLog({
     action: 'tool.executed',
@@ -117,7 +118,7 @@ export async function logToolExecution(
     success: result.success,
     error: result.error,
     resultSummary: result.result ? summarizeResult(result.result) : undefined,
-  });
+  }, userId);
 }
 
 function summarizeResult(result: unknown): string {

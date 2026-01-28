@@ -120,7 +120,7 @@ export function useActionWebSocket({
         }
 
         // Schedule reconnect with exponential backoff
-        if (enabled && reconnectAttempts.current < 10) {
+        if (enabled && reconnectAttempts.current < 100) {
           const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
           reconnectAttempts.current++;
           console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current})`);

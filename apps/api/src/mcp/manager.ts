@@ -21,8 +21,11 @@ interface McpToolMapping {
   serverName: string;
 }
 
+const MCP_TOOL_TIMEOUT_MS = 30000; // 30 second timeout for MCP tool calls
+
 class McpManager {
   private clients: Map<string, McpClient> = new Map();
+  private serverConfigs: Map<string, McpServerConfig> = new Map();
   private toolMappings: Map<string, McpToolMapping> = new Map();
   private toolDefinitions: ToolDefinition[] = [];
   private agentToolAccess: Map<string, string[]> = new Map(); // agent -> prefixed tool names
@@ -62,6 +65,7 @@ class McpManager {
     await client.connect();
 
     this.clients.set(serverConfig.name, client);
+    this.serverConfigs.set(serverConfig.name, serverConfig);
 
     // Discover tools
     const tools = await client.listTools();
@@ -144,7 +148,7 @@ class McpManager {
   }
 
   /**
-   * Execute an MCP tool
+   * Execute an MCP tool with timeout and auto-reconnect
    */
   async executeTool(
     prefixedName: string,
@@ -158,18 +162,46 @@ class McpManager {
       };
     }
 
-    const client = this.clients.get(mapping.serverName);
+    let client = this.clients.get(mapping.serverName);
+
+    // Auto-reconnect if not connected
     if (!client || !client.isConnected()) {
-      return {
-        success: false,
-        error: `MCP server "${mapping.serverName}" is not connected`,
-      };
+      const serverConfig = this.serverConfigs.get(mapping.serverName);
+      if (serverConfig) {
+        console.info(`[mcp:${mapping.serverName}] Attempting auto-reconnect...`);
+        try {
+          const newClient = new McpClient(serverConfig);
+          await newClient.connect();
+          this.clients.set(mapping.serverName, newClient);
+          client = newClient;
+          console.info(`[mcp:${mapping.serverName}] Auto-reconnect successful`);
+        } catch (reconnectError) {
+          console.error(`[mcp:${mapping.serverName}] Auto-reconnect failed:`, reconnectError);
+          return {
+            success: false,
+            error: `MCP server "${mapping.serverName}" is not connected and reconnect failed`,
+          };
+        }
+      } else {
+        return {
+          success: false,
+          error: `MCP server "${mapping.serverName}" is not connected`,
+        };
+      }
     }
 
     const start = Date.now();
 
     try {
-      const result = await client.callTool(mapping.originalName, args);
+      // Execute with timeout
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error(`MCP tool call timed out after ${MCP_TOOL_TIMEOUT_MS}ms`)), MCP_TOOL_TIMEOUT_MS);
+      });
+
+      const result = await Promise.race([
+        client.callTool(mapping.originalName, args),
+        timeoutPromise,
+      ]);
 
       return {
         success: !result.isError,
@@ -178,12 +210,32 @@ class McpManager {
         durationMs: Date.now() - start,
       };
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'MCP tool execution failed';
+      console.error(`[mcp:${mapping.serverName}] Tool "${mapping.originalName}" failed:`, errorMessage);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'MCP tool execution failed',
+        error: errorMessage,
         durationMs: Date.now() - start,
       };
     }
+  }
+
+  /**
+   * Get connection status for all MCP servers
+   */
+  getServerStatus(): Record<string, { connected: boolean; toolCount: number }> {
+    const status: Record<string, { connected: boolean; toolCount: number }> = {};
+
+    for (const [name, client] of this.clients.entries()) {
+      const toolCount = Array.from(this.toolMappings.values())
+        .filter((m) => m.serverName === name).length;
+      status[name] = {
+        connected: client.isConnected(),
+        toolCount,
+      };
+    }
+
+    return status;
   }
 
   /**
@@ -199,6 +251,7 @@ class McpManager {
     await Promise.allSettled(disconnects);
 
     this.clients.clear();
+    this.serverConfigs.clear();
     this.toolMappings.clear();
     this.toolDefinitions = [];
     this.agentToolAccess.clear();
