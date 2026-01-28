@@ -13,6 +13,8 @@ import { settingsRoutes } from './routes/settings.js';
 import { authMiddleware, registerAuthRoutes } from './routes/auth.js';
 import { initDb } from './db/index.js';
 import { websocketRoutes } from './websocket/routes.js';
+import { mcpManager } from './mcp/index.js';
+import { registerMcpTools } from './tools/registry.js';
 
 await initDb();
 
@@ -71,6 +73,13 @@ await app.register(websocketRoutes, { prefix: '/api' });
 // Start server
 const start = async () => {
   try {
+    // Initialize MCP servers and register their tools
+    await mcpManager.initialize();
+    const mcpTools = mcpManager.getToolDefinitions();
+    if (mcpTools.length > 0) {
+      registerMcpTools(mcpTools);
+    }
+
     await app.listen({ port: config.port, host: '0.0.0.0' });
     console.log(`DevAI API running on http://localhost:${config.port}`);
     console.log(`Environment: ${config.nodeEnv}`);
@@ -81,10 +90,22 @@ const start = async () => {
     if (config.openaiApiKey) providers.push('OpenAI');
     if (config.geminiApiKey) providers.push('Gemini');
     console.log(`Configured LLM providers: ${providers.length > 0 ? providers.join(', ') : 'None'}`);
+    console.log(`MCP tools: ${mcpTools.length > 0 ? mcpTools.map((t) => t.name).join(', ') : 'None'}`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);
   }
 };
+
+// Graceful shutdown
+const shutdown = async () => {
+  console.log('Shutting down...');
+  await mcpManager.shutdown();
+  await app.close();
+  process.exit(0);
+};
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 start();

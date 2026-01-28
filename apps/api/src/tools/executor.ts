@@ -8,6 +8,7 @@ import * as sshTools from './ssh.js';
 import * as pm2Tools from './pm2.js';
 import * as webTools from './web.js';
 import { config } from '../config.js';
+import { mcpManager } from '../mcp/index.js';
 
 export interface ToolExecutionResult {
   success: boolean;
@@ -200,6 +201,10 @@ export async function executeTool(
           );
 
         default:
+          // Route MCP tools to the MCP manager
+          if (mcpManager.isMcpTool(toolName)) {
+            return mcpManager.executeTool(toolName, args).then((r) => r.result);
+          }
           throw new Error(`Unknown tool: ${toolName}`);
       }
     })();

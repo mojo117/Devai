@@ -1,0 +1,12 @@
+{
+  "mcpServers": [
+    {
+      "name": "serena",
+      "command": "/root/.local/bin/uvx",
+      "args": ["--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server", "--project", "/opt/Klyde/projects"],
+      "requiresConfirmation": true,
+      "toolPrefix": "serena",
+      "enabledForAgents": ["chapo", "koda"]
+    }
+  ]
+}

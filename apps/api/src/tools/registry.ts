@@ -802,14 +802,33 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
   },
 ];
 
+// Dynamic MCP tools (registered at runtime by McpManager)
+let MCP_TOOLS: ToolDefinition[] = [];
+
+/**
+ * Register MCP tools discovered from MCP servers.
+ * Called by McpManager during initialization.
+ */
+export function registerMcpTools(tools: ToolDefinition[]): void {
+  MCP_TOOLS = tools;
+  console.info(`[registry] Registered ${tools.length} MCP tool(s)`);
+}
+
+/**
+ * Get all tool definitions (native + MCP)
+ */
+function getAllTools(): ToolDefinition[] {
+  return [...TOOL_REGISTRY, ...MCP_TOOLS];
+}
+
 // Get tool definition by name
 export function getToolDefinition(name: string): ToolDefinition | undefined {
-  return TOOL_REGISTRY.find((t) => t.name === name);
+  return getAllTools().find((t) => t.name === name);
 }
 
 // Check if a tool is whitelisted
 export function isToolWhitelisted(name: string): boolean {
-  return TOOL_REGISTRY.some((t) => t.name === name);
+  return getAllTools().some((t) => t.name === name);
 }
 
 // Check if a tool requires confirmation
@@ -820,7 +839,7 @@ export function toolRequiresConfirmation(name: string): boolean {
 
 // Convert to LLM tool format
 export function getToolsForLLM(): LLMToolDefinition[] {
-  return TOOL_REGISTRY.map((tool) => ({
+  return getAllTools().map((tool) => ({
     name: tool.name,
     description: tool.description,
     parameters: tool.parameters,

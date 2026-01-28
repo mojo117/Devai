@@ -38,6 +38,7 @@ import * as stateManager from './stateManager.js';
 import { llmRouter } from '../llm/router.js';
 import { executeTool } from '../tools/executor.js';
 import { getToolsForLLM, toolRequiresConfirmation } from '../tools/registry.js';
+import { mcpManager } from '../mcp/index.js';
 import { createAction } from '../actions/manager.js';
 import { buildActionPreview } from '../actions/preview.js';
 import type { LLMMessage, ToolCall } from '../llm/types.js';
@@ -80,14 +81,16 @@ export function getAgent(name: AgentName): AgentDefinition {
   return AGENTS[name];
 }
 
-// Get tools for a specific agent
+// Get tools for a specific agent (native + MCP)
 export function getToolsForAgent(agent: AgentName): string[] {
-  return AGENTS[agent].tools;
+  const nativeTools = AGENTS[agent].tools;
+  const mcpTools = mcpManager.getToolsForAgent(agent);
+  return [...nativeTools, ...mcpTools];
 }
 
 // Check if an agent can use a specific tool
 export function canAgentUseTool(agent: AgentName, toolName: string): boolean {
-  return AGENTS[agent].tools.includes(toolName);
+  return getToolsForAgent(agent).includes(toolName);
 }
 
 /**
@@ -311,7 +314,8 @@ async function executeSimpleTask(
   sendEvent({ type: 'agent_start', agent: targetAgent, phase: 'execution' });
 
   const agent = getAgent(targetAgent);
-  const tools = getToolsForLLM().filter((t) => agent.tools.includes(t.name));
+  const agentToolNames = getToolsForAgent(targetAgent);
+  const tools = getToolsForLLM().filter((t) => agentToolNames.includes(t.name));
 
   // Get CLAUDE.md project instructions from state
   const state = stateManager.getState(sessionId);
@@ -392,7 +396,8 @@ async function runChapoQualification(
   sendEvent({ type: 'agent_thinking', agent: 'chapo', status: 'Analysiere Task...' });
 
   const chapo = getAgent('chapo');
-  const tools = getToolsForLLM().filter((t) => chapo.tools.includes(t.name));
+  const chapoToolNames = getToolsForAgent('chapo');
+  const tools = getToolsForLLM().filter((t) => chapoToolNames.includes(t.name));
 
   // Use provided model or default to agent's model
   const provider = (modelSelection?.provider || 'anthropic') as 'anthropic' | 'openai' | 'gemini';
@@ -566,7 +571,8 @@ async function delegateToAgent(
   sendEvent({ type: 'delegation', from: 'chapo', to: targetAgent, task });
 
   const agent = getAgent(targetAgent);
-  const tools = getToolsForLLM().filter((t) => agent.tools.includes(t.name));
+  const agentToolNames = getToolsForAgent(targetAgent);
+  const tools = getToolsForLLM().filter((t) => agentToolNames.includes(t.name));
 
   // Get CLAUDE.md project instructions from state
   const state = stateManager.getState(sessionId);
@@ -1950,7 +1956,8 @@ export async function spawnScout(
   sendEvent?.({ type: 'scout_start', query, scope });
 
   const scout = getAgent('scout');
-  const tools = getToolsForLLM().filter((t) => scout.tools.includes(t.name));
+  const scoutToolNames = getToolsForAgent('scout');
+  const tools = getToolsForLLM().filter((t) => scoutToolNames.includes(t.name));
 
   // Build focused prompt based on scope
   let prompt = `EXPLORE: ${query}`;
