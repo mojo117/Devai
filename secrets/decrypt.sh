@@ -41,12 +41,12 @@ if [ ! -f "/root/.config/sops/age/keys.txt" ]; then
     exit 1
 fi
 
-# Decrypt
-echo "Decrypting to $TARGET"
-sops --decrypt "$ENCRYPTED" > "$TARGET"
+# Decrypt with proper input/output type for dotenv format
+echo "Decrypting $ENCRYPTED to $TARGET"
+sops --input-type=dotenv --output-type=dotenv --decrypt "$ENCRYPTED" > "$TARGET"
 chmod 600 "$TARGET"
 
-echo "Done."
+echo "Done. Decrypted to: $TARGET"
 
 # Restart PM2 if applicable
 if [ -n "$PM2_APP" ]; then

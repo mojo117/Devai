@@ -4,10 +4,19 @@ node_modules/
 # Build output
 dist/
 
-# Environment files (keep .env.example)
+# Environment files - NEVER commit unencrypted .env files
 .env
 .env.local
 .env.*.local
+.env.production
+.env.development
+
+# DO commit encrypted versions:
+# .env.enc
+# secrets/*.env.enc
+
+# BUT NOT unencrypted templates with real secrets:
+secrets/templates/*.env
 
 # Logs
 *.log

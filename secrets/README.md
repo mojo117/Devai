@@ -2,19 +2,33 @@
 
 DevAI uses **SOPS + age** for encrypting secrets. This allows secrets to be stored safely in git while only being decryptable on authorized machines.
 
+## 🔑 Keys
+
+The following Age public keys are authorized for decryption:
+
+| Location | Public Key |
+|----------|------------|
+| **Klyde** (dev/preview) | `age16t54dlj0u9jxafdywcy82h9q0xwakzfeqtj20tkpy9zaz5gpd5kqa6n4wp` |
+| **Baso** (deployment) | `age1d5554vm5qq9ge8377hez7hfncajr7e99qyzer6p3840q0aga353sn987l4` |
+
 ## Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Local Development                                               │
+│  Local Development (Klyde)                                       │
 │  ┌─────────────────┐     encrypt.sh      ┌─────────────────┐   │
 │  │ templates/      │ ──────────────────► │ devai.env.enc   │   │
 │  │ devai.env       │                     │ (encrypted)     │   │
 │  │ (plaintext)     │                     │ safe for git    │   │
 │  └─────────────────┘                     └────────┬────────┘   │
-└───────────────────────────────────────────────────┼─────────────┘
-                                                    │ scp
-                                                    ▼
+│         ▲                                         │            │
+│         │              ┌─────────────┐            │            │
+│         └──────────────│   .env.enc  │◄───────────┘            │
+│              decrypt   │  (committed)│    encrypt               │
+│                        └─────────────┘                         │
+└────────────────────────────────────────────────────────────────┘
+                           │ scp
+                           ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  Baso Server (77.42.90.193)                                     │
 │  ┌─────────────────┐     decrypt.sh      ┌─────────────────┐   │
@@ -49,23 +63,15 @@ brew install sops age
 
 **Linux (Ubuntu/Debian):**
 ```bash
-# age
-apt install age
-
-# sops (download from releases)
-wget https://github.com/getsops/sops/releases/download/v3.8.1/sops-v3.8.1.linux.amd64
-sudo mv sops-v3.8.1.linux.amd64 /usr/local/bin/sops
-sudo chmod +x /usr/local/bin/sops
+apt install sops age
 ```
 
-**Windows (via scoop):**
-```powershell
-scoop install sops age
-```
-
-### 2. Generate age Key Pair
+### 2. Generate age Key Pair (if needed)
 
 ```bash
+# Create config directory
+mkdir -p ~/.config/sops/age
+
 # Generate key pair
 age-keygen -o ~/.config/sops/age/keys.txt
 
@@ -73,121 +79,127 @@ age-keygen -o ~/.config/sops/age/keys.txt
 # Public key: age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-Save the public key - you'll need it for encryption.
-
-### 3. Configure Recipients
-
-Create `.age-recipients` file with public keys of everyone who should be able to encrypt:
-
-```bash
-# secrets/.age-recipients
-age1abc123...  # Your key
-age1def456...  # Baso server key
-age1ghi789...  # Team member key
-```
-
-### 4. Set Up Baso Server
-
-```bash
-# On Baso, generate a key if not exists
-ssh root@77.42.90.193
-age-keygen -o /root/.config/sops/age/keys.txt
-cat /root/.config/sops/age/keys.txt  # Get public key
-
-# Create secrets directory
-mkdir -p /root/secrets
-```
-
-Add Baso's public key to your local `.age-recipients` file.
-
 ## Usage
 
-### Editing Secrets
+### Quick Start
 
-1. Edit the plaintext template:
+**Encrypt root .env:**
+```bash
+cd /opt/Klyde/projects/Devai
+./encrypt-env.sh
+```
+
+**Decrypt root .env:**
+```bash
+cd /opt/Klyde/projects/Devai
+./decrypt-env.sh
+```
+
+**Encrypt template:**
+```bash
+cd /opt/Klyde/projects/Devai/secrets
+./encrypt.sh
+```
+
+**Decrypt on Baso:**
+```bash
+ssh root@77.42.90.193
+cd /opt/Klyde/projects/Devai/secrets
+./decrypt.sh dev      # For dev environment
+./decrypt.sh staging  # For staging
+```
+
+### Detailed Workflow
+
+1. **Edit secrets:**
    ```bash
-   vim secrets/templates/devai.env
+   # Edit root .env or secrets/templates/devai.env
+   vim .env
    ```
 
-2. Encrypt:
+2. **Encrypt:**
    ```bash
+   # For root .env
+   ./encrypt-env.sh
+   
+   # For template
    ./secrets/encrypt.sh
    ```
 
-3. Deploy to Baso:
+3. **Commit:**
    ```bash
+   git add .env.enc secrets/devai.env.enc
+   git commit -m "Update encrypted secrets"
+   git push
+   ```
+
+4. **Deploy to Baso:**
+   ```bash
+   scp .env.enc root@77.42.90.193:/opt/Klyde/projects/Devai/
    scp secrets/devai.env.enc root@77.42.90.193:/root/secrets/
    ```
 
-4. Decrypt on Baso:
+5. **Decrypt and restart on Baso:**
    ```bash
    ssh root@77.42.90.193
    cd /opt/Klyde/projects/Devai
-   ./secrets/decrypt.sh dev      # For dev environment
-   ./secrets/decrypt.sh staging  # For staging
+   ./decrypt-env.sh
+   pm2 restart devai-api-dev --update-env
    ```
-
-### Quick Commands
-
-**Encrypt and deploy:**
-```bash
-./secrets/encrypt.sh && scp secrets/devai.env.enc root@77.42.90.193:/root/secrets/
-```
-
-**Decrypt on Baso (one-liner from local):**
-```bash
-ssh root@77.42.90.193 'sops -d /root/secrets/devai.env.enc > /opt/Klyde/projects/Devai/.env && pm2 restart devai-api-dev --update-env'
-```
-
-### Viewing Encrypted File
-
-SOPS keeps the structure visible:
-```bash
-cat secrets/devai.env.enc
-# Shows:
-# ANTHROPIC_API_KEY=ENC[AES256_GCM,data:...,type:str]
-# OPENAI_API_KEY=ENC[AES256_GCM,data:...,type:str]
-```
-
-### Editing Encrypted File Directly
-
-SOPS can edit in-place:
-```bash
-sops secrets/devai.env.enc
-# Opens in $EDITOR, decrypted
-# Saves re-encrypted automatically
-```
 
 ## File Structure
 
 ```
-secrets/
-├── README.md           # This file
-├── .age-recipients     # Public keys for encryption (DO NOT COMMIT)
-├── .gitignore          # Ignores sensitive files
-├── encrypt.sh          # Encryption script
-├── decrypt.sh          # Decryption script (for Baso)
-├── templates/
-│   └── devai.env       # Plaintext template (DO NOT COMMIT)
-└── devai.env.enc       # Encrypted secrets (safe to commit)
+Devai/
+├── .env                          # Plaintext (DO NOT COMMIT - in .gitignore)
+├── .env.enc                      # Encrypted (COMMIT THIS)
+├── .env.example                  # Template without real values (COMMIT)
+├── .sops.yaml                    # SOPS configuration (COMMIT)
+├── encrypt-env.sh                # Root encryption script
+├── decrypt-env.sh                # Root decryption script
+├── SECRETS-SOPS.md               # Quick reference
+└── secrets/
+    ├── README.md                 # This file
+    ├── .gitignore                # Ignores unencrypted templates
+    ├── encrypt.sh                # Template encryption script
+    ├── decrypt.sh                # Server decryption script
+    ├── templates/
+    │   └── devai.env             # Plaintext (DO NOT COMMIT)
+    └── devai.env.enc             # Encrypted (COMMIT THIS)
 ```
 
-## Security Notes
+## 🚨 Security Notes
 
-1. **Never commit plaintext secrets** - templates/devai.env is in .gitignore
-2. **Keep private keys secure** - Never share ~/.config/sops/age/keys.txt
-3. **Rotate keys periodically** - Generate new age keys and re-encrypt
-4. **Limit recipients** - Only add keys for people/machines that need access
+1. **NEVER commit plaintext secrets:**
+   - `.env` (root)
+   - `secrets/templates/*.env`
+   - Any file containing real API keys
+
+2. **DO commit:**
+   - `.env.enc`
+   - `secrets/devai.env.enc`
+   - `.env.example` (template without real values)
+
+3. **Keep private keys secure:**
+   - Never share `~/.config/sops/age/keys.txt`
+   - Never commit private keys
+
+4. **Rotate keys periodically:**
+   - Generate new age keys and re-encrypt
 
 ## Troubleshooting
 
 **"could not decrypt data key"**
 - Your age private key isn't in the recipients list
-- Re-encrypt with your public key added to .age-recipients
+- Check the public key in `.sops.yaml` matches your private key
 
 **"no matching keys found"**
-- Check /root/.config/sops/age/keys.txt exists on Baso
-- Verify the public key is in .age-recipients
+- Check `~/.config/sops/age/keys.txt` exists
+- Verify the public key is in `.sops.yaml`
+
+**SOPS tries to parse as JSON:**
+- Use `--input-type=dotenv --output-type=dotenv` flags
+- This is now handled automatically in scripts
 
 **PM2 not picking up new env:**
 ```bash
