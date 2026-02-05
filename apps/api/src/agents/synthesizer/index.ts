@@ -11,15 +11,33 @@ export interface SynthesizerInput {
 }
 
 /**
+ * Check if a string looks like structured JSON that needs formatting
+ */
+function looksLikeStructuredJson(data: string): boolean {
+  if (!data.startsWith('{') && !data.startsWith('[')) return false;
+  try {
+    const parsed = JSON.parse(data);
+    // If it has SCOUT-like structure (summary, webFindings, etc), needs synthesis
+    if (typeof parsed === 'object' && parsed !== null) {
+      return 'summary' in parsed || 'webFindings' in parsed || 'recommendations' in parsed;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Synthesize agent results into a user-facing response
  */
 export async function synthesizeResponse(input: SynthesizerInput): Promise<string> {
   const { originalRequest, tasks, results } = input;
 
-  // If only one successful result with simple data, return directly
+  // If only one successful result with simple plain text, return directly
+  // But NOT if it's structured JSON that needs formatting
   if (tasks.length === 1 && results.size === 1) {
     const result = results.get(0);
-    if (result?.success && typeof result.data === 'string') {
+    if (result?.success && typeof result.data === 'string' && !looksLikeStructuredJson(result.data)) {
       return result.data;
     }
   }
