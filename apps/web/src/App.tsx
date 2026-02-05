@@ -264,6 +264,30 @@ function App() {
 
   useEffect(() => {
     if (!isAuthed) return;
+    let isMounted = true;
+
+    const loadSelectedProvider = async () => {
+      try {
+        const stored = await fetchSetting('selectedProvider');
+        if (!isMounted) return;
+        const saved = stored.value as string | null;
+        if (saved && ['anthropic', 'openai', 'gemini'].includes(saved)) {
+          setSelectedProvider(saved as LLMProvider);
+        }
+      } catch {
+        // Keep default provider on error
+      }
+    };
+
+    loadSelectedProvider();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthed]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
     saveSetting('selectedSkills', selectedSkillIds).catch(() => {
       // Non-blocking persistence; ignore errors here.
     });
@@ -289,6 +313,13 @@ function App() {
       // Non-blocking persistence; ignore errors here.
     });
   }, [isAuthed, projectContextOverride]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
+    saveSetting('selectedProvider', selectedProvider).catch(() => {
+      // Non-blocking persistence; ignore errors here.
+    });
+  }, [isAuthed, selectedProvider]);
 
   useEffect(() => {
     if (!isAuthed) return;
