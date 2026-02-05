@@ -17,6 +17,7 @@ export interface ExecuteTaskOptions {
   sessionId: string;
   projectRoot: string | null;
   sendEvent: SendEventFn;
+  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
 }
 
 /**
@@ -27,7 +28,7 @@ export async function executeAgentTask(
   dependencyData: unknown,
   options: ExecuteTaskOptions
 ): Promise<AgentExecutionResult> {
-  const { sessionId, projectRoot, sendEvent } = options;
+  const { sessionId, projectRoot, sendEvent, conversationHistory = [] } = options;
   const agent = getAgent(task.agent);
   const agentToolNames = getToolsForAgent(task.agent);
   const tools = getToolsForLLM().filter(t => agentToolNames.includes(t.name));
@@ -35,7 +36,12 @@ export async function executeAgentTask(
   // Build focused prompt for this specific task
   const taskPrompt = buildTaskPrompt(task, dependencyData, projectRoot);
 
+  // Include conversation history for context, then the task prompt
   const messages: LLMMessage[] = [
+    ...conversationHistory.map(m => ({
+      role: m.role,
+      content: m.content,
+    })),
     { role: 'user', content: taskPrompt },
   ];
 

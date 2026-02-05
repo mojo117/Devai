@@ -110,7 +110,7 @@ export async function processRequest(
   // New capability-based router (feature-flagged)
   if (config.useNewAgentRouter) {
     console.info('[agents] Using NEW capability-based router');
-    return processRequestNew({ sessionId, userMessage, projectRoot, sendEvent });
+    return processRequestNew({ sessionId, userMessage, projectRoot, sendEvent, conversationHistory: history });
   }
 
   // FAST PATH: Early task classification (no LLM call!)

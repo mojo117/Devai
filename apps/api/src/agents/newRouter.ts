@@ -17,13 +17,22 @@ export interface NewProcessRequestOptions {
   userMessage: string;
   projectRoot: string | null;
   sendEvent: SendEventFn;
+  conversationHistory?: Array<{ role: string; content: string }>;
 }
 
 /**
  * Process a user request through the new capability-based system
  */
 export async function processRequestNew(options: NewProcessRequestOptions): Promise<string> {
-  const { sessionId, userMessage, projectRoot, sendEvent } = options;
+  const { sessionId, userMessage, projectRoot, sendEvent, conversationHistory = [] } = options;
+
+  // Filter history to only valid roles (user/assistant) like legacy router
+  const filteredHistory = conversationHistory
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .map(m => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content
+    }));
 
   console.info('[newRouter] Processing request', { sessionId, messageLength: userMessage.length });
 
@@ -96,6 +105,7 @@ export async function processRequestNew(options: NewProcessRequestOptions): Prom
         sessionId,
         projectRoot,
         sendEvent,
+        conversationHistory: filteredHistory,
       });
 
       results.set(task.index, result);
