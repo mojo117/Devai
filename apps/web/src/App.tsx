@@ -511,6 +511,7 @@ function App() {
         projectContextOverride={projectContextOverride}
         onUpdateProjectContextOverride={setProjectContextOverride}
         contextStats={contextStats}
+        mcpServers={health?.mcp}
       />}
 
       {/* Header - with left margin for sidebar on desktop */}

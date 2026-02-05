@@ -70,6 +70,13 @@ export interface Action {
   error?: string;
 }
 
+export interface McpServerStatus {
+  name: string;
+  status: 'connected' | 'disconnected' | 'error';
+  toolCount: number;
+  error?: string;
+}
+
 export interface HealthResponse {
   status: string;
   timestamp: string;
@@ -79,6 +86,7 @@ export interface HealthResponse {
     openai: boolean;
     gemini: boolean;
   };
+  mcp?: McpServerStatus[];
   projectRoot: string | null;
   allowedRoots: string[];
 }

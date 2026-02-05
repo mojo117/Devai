@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type {
   ProjectContext,
   SkillSummary,
+  McpServerStatus,
 } from '../types';
 
 // Import the panel content components
@@ -37,6 +38,7 @@ interface LeftSidebarProps {
     tokenBudget: number;
     note?: string;
   } | null;
+  mcpServers?: McpServerStatus[];
 }
 
 export function LeftSidebar(props: LeftSidebarProps) {
@@ -106,6 +108,7 @@ export function LeftSidebar(props: LeftSidebarProps) {
               projectContextOverride={props.projectContextOverride}
               onUpdateProjectContextOverride={props.onUpdateProjectContextOverride}
               contextStats={props.contextStats}
+              mcpServers={props.mcpServers}
             />
           )}
           {activePanel === 'history' && <HistoryPanelContent />}

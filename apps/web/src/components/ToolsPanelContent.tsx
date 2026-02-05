@@ -4,8 +4,10 @@ import type {
   ProjectFileEntry,
   ProjectSearchMatch,
   SkillSummary,
+  McpServerStatus,
 } from '../types';
 import { listProjectFiles, readProjectFile, searchProjectFiles } from '../api';
+import { McpStatus } from './McpStatus';
 
 interface Tool {
   name: string;
@@ -51,6 +53,7 @@ interface ToolsPanelContentProps {
     tokenBudget: number;
     note?: string;
   } | null;
+  mcpServers?: McpServerStatus[];
 }
 
 export function ToolsPanelContent({
@@ -74,6 +77,7 @@ export function ToolsPanelContent({
   projectContextOverride,
   onUpdateProjectContextOverride,
   contextStats,
+  mcpServers,
 }: ToolsPanelContentProps) {
   const [filesPath, setFilesPath] = useState('.');
   const [files, setFiles] = useState<ProjectFileEntry[]>([]);
@@ -434,6 +438,11 @@ export function ToolsPanelContent({
             No skills loaded. Add manifests under the skills folder.
           </p>
         )}
+      </div>
+
+      {/* MCP Servers Section */}
+      <div className="border-t border-gray-700 pt-4 mt-4 mb-5">
+        <McpStatus servers={mcpServers ?? []} />
       </div>
 
       <div className="mb-5">
