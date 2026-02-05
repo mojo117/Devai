@@ -465,7 +465,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { sessionId, approvalId, approved } = parseResult.data;
-    app.log.info('[agents] approval decision', { sessionId, approvalId, approved });
+    app.log.info(`[agents] approval decision sessionId=${sessionId} approvalId=${approvalId} approved=${approved}`);
 
     try {
       const sendEvent = (event: AgentStreamEvent | Record<string, unknown>) => {
@@ -545,7 +545,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { sessionId, planId, approved, reason } = parseResult.data;
-    app.log.info('[agents] plan decision', { sessionId, planId, approved, reason });
+    app.log.info(`[agents] plan decision sessionId=${sessionId} planId=${planId} approved=${approved} reason=${reason}`);
 
     try {
       const sendEvent = (event: AgentStreamEvent | Record<string, unknown>) => {

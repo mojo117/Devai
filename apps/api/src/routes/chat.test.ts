@@ -18,7 +18,7 @@ describe('chat plan gate', () => {
       },
     };
 
-    const result = await handleToolCall(toolCall, null, undefined, false);
+    const result = await handleToolCall(toolCall, null, undefined);
     expect(result).toMatch(/Plan not approved/i);
   });
 });

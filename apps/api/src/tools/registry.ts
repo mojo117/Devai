@@ -47,15 +47,20 @@ export type ToolName =
   | 'requestApproval'
   | 'askForConfirmation';
 
+export interface ToolPropertyDefinition {
+  type: string;
+  description: string;
+  items?: { type: string };  // For array types
+  enum?: string[];           // For enum types
+  default?: unknown;         // For default values
+}
+
 export interface ToolDefinition {
   name: ToolName;
   description: string;
   parameters: {
     type: 'object';
-    properties: Record<string, {
-      type: string;
-      description: string;
-    }>;
+    properties: Record<string, ToolPropertyDefinition>;
     required?: string[];
   };
   requiresConfirmation: boolean;

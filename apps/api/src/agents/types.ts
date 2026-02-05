@@ -4,6 +4,8 @@
  * Three agents: CHAPO (Coordinator), KODA (Developer), DEVO (DevOps)
  */
 
+import type { ActionPreview } from '../actions/types.js';
+
 export type AgentName = 'chapo' | 'koda' | 'devo' | 'scout';
 
 export type AgentRole = 'Task Coordinator' | 'Senior Developer' | 'DevOps Engineer' | 'Exploration Specialist';
@@ -68,6 +70,7 @@ export interface AgentCapabilities {
   canManagePM2?: boolean;
   canDelegateToKoda?: boolean;
   canDelegateToDevo?: boolean;
+  canDelegateToScout?: boolean;
   canAskUser?: boolean;
   canRequestApproval?: boolean;
   canEscalate?: boolean;
@@ -96,6 +99,10 @@ export interface GatheredContext {
     untracked: string[];
   };
   projectInfo?: Record<string, unknown>;
+  // Delegation context (when CHAPO delegates to another agent)
+  delegationTask?: string;
+  delegationContext?: unknown;
+  delegationFiles?: string[];
 }
 
 // Delegation
@@ -270,7 +277,8 @@ export type AgentStreamEvent =
   | { type: 'tool_call'; agent: AgentName; toolName: string; args: Record<string, unknown> }
   | { type: 'tool_result'; agent: AgentName; toolName: string; result: unknown; success: boolean }
   | { type: 'user_question'; question: UserQuestion }
-  | { type: 'approval_request'; request: ApprovalRequest }
+  | { type: 'approval_request'; request: ApprovalRequest; sessionId?: string }
+  | { type: 'action_pending'; actionId: string; toolName: string; toolArgs: Record<string, unknown>; description: string; preview?: ActionPreview }
   | { type: 'agent_history'; entries: AgentHistoryEntry[] }
   | { type: 'parallel_start'; agents: AgentName[]; tasks: string[] }
   | { type: 'parallel_progress'; agent: AgentName; progress: string }

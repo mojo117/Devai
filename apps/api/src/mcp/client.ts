@@ -69,7 +69,8 @@ export class McpClient {
 
     const response = await this.client.listTools();
 
-    return (response.tools || []).map((tool) => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (response.tools || []).map((tool: any) => ({
       name: tool.name,
       description: tool.description || '',
       inputSchema: (tool.inputSchema as McpToolInfo['inputSchema']) || {
