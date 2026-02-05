@@ -22,15 +22,21 @@ const FILTERS: Array<{ key: 'all' | ActionStatus; label: string }> = [
 
 export function ActionsPage({ actions, onApprove, onReject, onRetry, onRefresh }: ActionsPageProps) {
   const [filter, setFilter] = useState<'all' | ActionStatus>('all');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const sortedActions = useMemo(() => (
     [...actions].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   ), [actions]);
 
   const filtered = useMemo(() => {
-    if (filter === 'all') return sortedActions;
-    return sortedActions.filter((a) => a.status === filter);
-  }, [filter, sortedActions]);
+    return sortedActions.filter((a) => {
+      const matchesStatus = filter === 'all' || a.status === filter;
+      const matchesSearch = searchQuery === '' ||
+        a.toolName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        a.description.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesStatus && matchesSearch;
+    });
+  }, [filter, searchQuery, sortedActions]);
 
   return (
     <div className="flex-1 flex flex-col px-6 py-6 max-w-6xl mx-auto w-full">
@@ -62,6 +68,14 @@ export function ActionsPage({ actions, onApprove, onReject, onRetry, onRefresh }
           </button>
         ))}
       </div>
+
+      <input
+        type="text"
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        placeholder="Search actions by tool name or description..."
+        className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 mb-4"
+      />
 
       {filtered.length === 0 ? (
         <div className="text-sm text-gray-500">No actions found.</div>
