@@ -101,9 +101,12 @@ export function canAgentUseTool(agent: AgentName, toolName: string): boolean {
 export async function processRequest(
   sessionId: string,
   userMessage: string,
+  conversationHistory: Array<{ role: string; content: string }> | undefined,
   projectRoot: string | null,
   sendEvent: SendEventFn
 ): Promise<string> {
+  // Default to empty array if not provided
+  const history = conversationHistory ?? [];
   // New capability-based router (feature-flagged)
   if (config.useNewAgentRouter) {
     console.info('[agents] Using NEW capability-based router');
@@ -140,7 +143,7 @@ export async function processRequest(
     // FAST PATH: Skip qualification for trivial/simple tasks
     if (shouldSkipQualification(taskComplexity)) {
       console.info('[agents] FAST PATH: Skipping qualification', { taskComplexity });
-      return executeSimpleTask(sessionId, userMessage, projectRoot, taskComplexity, modelSelection, sendEvent);
+      return executeSimpleTask(sessionId, userMessage, history, projectRoot, taskComplexity, modelSelection, sendEvent);
     }
 
     // STANDARD PATH: Full qualification for moderate/complex tasks
@@ -152,6 +155,7 @@ export async function processRequest(
     const qualification = await runChapoQualification(
       sessionId,
       userMessage,
+      history,
       projectRoot,
       sendEvent,
       modelSelection
@@ -303,6 +307,7 @@ export async function processRequest(
 async function executeSimpleTask(
   sessionId: string,
   userMessage: string,
+  conversationHistory: Array<{ role: string; content: string }>,
   projectRoot: string | null,
   taskComplexity: TaskComplexityLevel,
   modelSelection: ModelSelection,
@@ -336,6 +341,10 @@ ${projectRoot ? `Working Directory: ${projectRoot}` : ''}
 WICHTIG: Dies ist eine einfache Anfrage. Führe sie DIREKT aus ohne zu fragen.`;
 
   const messages: LLMMessage[] = [
+    ...conversationHistory.map(m => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content
+    })),
     { role: 'user', content: userMessage },
   ];
 
@@ -397,6 +406,7 @@ WICHTIG: Dies ist eine einfache Anfrage. Führe sie DIREKT aus ohne zu fragen.`;
 async function runChapoQualification(
   sessionId: string,
   userMessage: string,
+  conversationHistory: Array<{ role: string; content: string }>,
   projectRoot: string | null,
   sendEvent: SendEventFn,
   modelSelection?: ModelSelection
@@ -435,6 +445,10 @@ Falls Delegation nötig:
 \`\`\``;
 
   const messages: LLMMessage[] = [
+    ...conversationHistory.map(m => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content
+    })),
     { role: 'user', content: userMessage },
   ];
 
@@ -1192,6 +1206,7 @@ export async function handleUserResponse(
     return processRequest(
       sessionId,
       `${state.taskContext.originalRequest}\n\nZusätzliche Info: ${answer}`,
+      [],
       null,
       sendEvent
     );
@@ -1229,6 +1244,7 @@ export async function handleUserApproval(
     return processRequest(
       sessionId,
       state.taskContext.originalRequest,
+      [],
       null,
       sendEvent
     );
