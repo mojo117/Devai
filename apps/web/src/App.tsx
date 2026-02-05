@@ -7,6 +7,7 @@ import { ActionsPage } from './components/ActionsPage';
 import { SystemFeed, type FeedEvent, toolEventToFeedEvent } from './components/SystemFeed';
 import { ResizableDivider } from './components/ResizableDivider';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { ProviderSelector } from './components/ProviderSelector';
 import {
   fetchHealth,
   fetchActions,
@@ -511,6 +512,12 @@ function App() {
                 Actions
               </button>
             </div>
+            <ProviderSelector
+              selectedProvider={selectedProvider}
+              onProviderChange={setSelectedProvider}
+              availableProviders={health?.providers ?? { anthropic: false, openai: false, gemini: false }}
+              disabled={chatLoading}
+            />
           </div>
 
           {/* Agent Workflow Visualization */}
