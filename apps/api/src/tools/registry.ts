@@ -409,21 +409,21 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
   // Web Tools (SCOUT agent)
   {
     name: 'web_search',
-    description: 'Search the web for documentation, examples, or solutions using Brave Search API',
+    description: 'Search the web for current information using Perplexity AI. Use for: weather, news, documentation, best practices, tutorials, comparisons.',
     parameters: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'Search query string',
+          description: 'Search query string (e.g., "Wetter Berlin", "React 19 new features")',
         },
-        limit: {
-          type: 'number',
-          description: 'Maximum number of results (1-10, default: 5)',
-        },
-        freshness: {
+        complexity: {
           type: 'string',
-          description: 'Limit results to recent content: "day", "week", or "month"',
+          description: 'Search depth: "simple" for quick facts, "detailed" for explanations, "deep" for thorough analysis',
+        },
+        recency: {
+          type: 'string',
+          description: 'Limit to recent content: "day", "week", "month", or "year"',
         },
       },
       required: ['query'],

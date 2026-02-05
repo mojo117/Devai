@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { sendMessage, sendMultiAgentMessage, sendAgentApproval, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction, globProjectFiles, fetchPendingActions, batchApproveActions, batchRejectActions, fetchAgentState } from '../api';
 import type { ChatStreamEvent } from '../api';
-import type { ChatMessage, ContextStats, LLMProvider, SessionSummary, Action } from '../types';
+import type { ChatMessage, ContextStats, SessionSummary, Action } from '../types';
 import type { AgentHistoryEntry } from '../api';
 import { InlineAction, type PendingAction } from './InlineAction';
 import { InlineApproval, type PendingApproval } from './InlineApproval';
@@ -31,7 +32,6 @@ interface ToolEventUpdate {
 }
 
 interface ChatUIProps {
-  provider: LLMProvider;
   projectRoot?: string | null;
   skillIds?: string[];
   allowedRoots?: string[];
@@ -46,7 +46,7 @@ interface ChatUIProps {
   clearFeedTrigger?: number; // Increment to trigger feed clear
 }
 
-export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFiles, ignorePatterns, projectContextOverride, onPinFile, onContextUpdate, onToolEvent, onLoadingChange, onAgentChange, clearFeedTrigger }: ChatUIProps) {
+export function ChatUI({ projectRoot, skillIds, allowedRoots, pinnedFiles, ignorePatterns, projectContextOverride, onPinFile, onContextUpdate, onToolEvent, onLoadingChange, onAgentChange, clearFeedTrigger }: ChatUIProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoadingInternal] = useState(false);
@@ -553,7 +553,7 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
       } else {
         const response = await sendMessage(
           currentMessages,
-          provider,
+          'anthropic', // Default provider for legacy single-agent mode
           projectRoot || undefined,
           skillIds,
           pinnedFiles,
@@ -1116,46 +1116,40 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
 }
 
 function renderMessageContent(content: string) {
-  if (!content.includes('```')) {
-    return <p className="whitespace-pre-wrap">{content}</p>;
-  }
-
-  const segments = content.split('```');
-
   return (
-    <div className="space-y-2">
-      {segments.map((segment, index) => {
-        if (index % 2 === 1) {
-          const lines = segment.split('\n');
-          let language = '';
-          if (lines.length > 1 && /^[a-zA-Z0-9+-]+$/.test(lines[0].trim())) {
-            language = lines.shift() || '';
-          }
-          const code = lines.join('\n');
-          return (
-            <div key={`code-${index}`} className="bg-gray-900 rounded">
-              {language && (
-                <div className="px-2 py-1 text-[10px] text-gray-400 border-b border-gray-700 uppercase tracking-wide">
-                  {language}
-                </div>
-              )}
-              <pre className="text-xs p-2 overflow-x-auto font-mono text-gray-200 whitespace-pre-wrap">
-                {code}
-              </pre>
-            </div>
-          );
-        }
-
-        if (!segment.trim()) {
-          return null;
-        }
-
-        return (
-          <p key={`text-${index}`} className="whitespace-pre-wrap">
-            {segment}
-          </p>
-        );
-      })}
+    <div className="prose prose-invert prose-sm max-w-none">
+      <ReactMarkdown
+        components={{
+          // Style code blocks
+          pre: ({ children }) => (
+            <pre className="bg-gray-900 rounded p-2 overflow-x-auto text-xs my-2">
+              {children}
+            </pre>
+          ),
+          code: ({ className, children }) => {
+            const isBlock = className?.includes('language-');
+            return isBlock ? (
+              <code className="font-mono text-gray-200">{children}</code>
+            ) : (
+              <code className="bg-gray-800 px-1 rounded text-sm">{children}</code>
+            );
+          },
+          // Ensure proper text styling
+          p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+          ul: ({ children }) => <ul className="list-disc pl-4 mb-2">{children}</ul>,
+          ol: ({ children }) => <ol className="list-decimal pl-4 mb-2">{children}</ol>,
+          li: ({ children }) => <li className="mb-1">{children}</li>,
+          strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+          em: ({ children }) => <em className="italic">{children}</em>,
+          a: ({ href, children }) => (
+            <a href={href} className="text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }

@@ -7,7 +7,6 @@ import { ActionsPage } from './components/ActionsPage';
 import { SystemFeed, type FeedEvent, toolEventToFeedEvent } from './components/SystemFeed';
 import { ResizableDivider } from './components/ResizableDivider';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { ProviderSelector } from './components/ProviderSelector';
 import {
   fetchHealth,
   fetchActions,
@@ -33,7 +32,6 @@ import type {
   PinnedFilesSetting,
   IgnorePatternsSetting,
   ProjectContextOverrideSetting,
-  LLMProvider,
 } from './types';
 
 function App() {
@@ -74,7 +72,6 @@ function App() {
   const [isMobile, setIsMobile] = useState(false);
   const [activeAgent, setActiveAgent] = useState<AgentName | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>('idle');
-  const [selectedProvider, setSelectedProvider] = useState<LLMProvider>('anthropic');
 
   // Handle agent state changes from ChatUI
   const handleAgentChange = useCallback((agent: AgentName | null, phase: AgentPhase) => {
@@ -264,30 +261,6 @@ function App() {
 
   useEffect(() => {
     if (!isAuthed) return;
-    let isMounted = true;
-
-    const loadSelectedProvider = async () => {
-      try {
-        const stored = await fetchSetting('selectedProvider');
-        if (!isMounted) return;
-        const saved = stored.value as string | null;
-        if (saved && ['anthropic', 'openai', 'gemini'].includes(saved)) {
-          setSelectedProvider(saved as LLMProvider);
-        }
-      } catch {
-        // Keep default provider on error
-      }
-    };
-
-    loadSelectedProvider();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [isAuthed]);
-
-  useEffect(() => {
-    if (!isAuthed) return;
     saveSetting('selectedSkills', selectedSkillIds).catch(() => {
       // Non-blocking persistence; ignore errors here.
     });
@@ -313,13 +286,6 @@ function App() {
       // Non-blocking persistence; ignore errors here.
     });
   }, [isAuthed, projectContextOverride]);
-
-  useEffect(() => {
-    if (!isAuthed) return;
-    saveSetting('selectedProvider', selectedProvider).catch(() => {
-      // Non-blocking persistence; ignore errors here.
-    });
-  }, [isAuthed, selectedProvider]);
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -544,12 +510,6 @@ function App() {
                 Actions
               </button>
             </div>
-            <ProviderSelector
-              selectedProvider={selectedProvider}
-              onProviderChange={setSelectedProvider}
-              availableProviders={health?.providers ?? { anthropic: false, openai: false, gemini: false }}
-              disabled={chatLoading}
-            />
           </div>
 
           {/* Agent Workflow Visualization */}
@@ -655,9 +615,9 @@ function App() {
         {view === 'chat' ? (
           <>
             {/* Chat Area - shown on desktop always, on mobile only when mobilePanel is 'chat' */}
-            <div className={`flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden ${isMobile && mobilePanel !== 'chat' ? 'hidden' : ''}`}>
+            {/* Desktop: 2/3 width, Mobile: full width */}
+            <div className={`flex flex-col min-w-0 min-h-0 overflow-hidden ${isMobile ? (mobilePanel === 'chat' ? 'flex-1' : 'hidden') : 'w-2/3'}`}>
               <ChatUI
-                provider={selectedProvider}
                 projectRoot={health?.projectRoot}
                 skillIds={selectedSkillIds}
                 allowedRoots={health?.allowedRoots}
@@ -677,9 +637,9 @@ function App() {
             {!isMobile && <ResizableDivider onResize={handleFeedResize} />}
 
             {/* System Feed - shown on desktop always, on mobile only when mobilePanel is 'feed' */}
+            {/* Desktop: 1/3 width, Mobile: full width */}
             <aside
-              className={`min-h-0 overflow-hidden ${isMobile ? (mobilePanel === 'feed' ? 'flex-1' : 'hidden') : 'flex-shrink-0'}`}
-              style={{ width: isMobile ? '100%' : feedWidth }}
+              className={`min-h-0 overflow-hidden ${isMobile ? (mobilePanel === 'feed' ? 'flex-1' : 'hidden') : 'w-1/3 flex-shrink-0'}`}
             >
               <SystemFeed events={feedEvents} isLoading={chatLoading} onClear={handleClearFeed} />
             </aside>

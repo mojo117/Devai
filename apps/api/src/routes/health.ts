@@ -1,13 +1,15 @@
 import { FastifyPluginAsync } from 'fastify';
 import { config } from '../config.js';
 import { mcpManager } from '../mcp/index.js';
+import { isPerplexityConfigured } from '../llm/perplexity.js';
 
 export const healthRoutes: FastifyPluginAsync = async (app) => {
   app.get('/health', async () => {
-    const providers = {
+    const apis = {
       anthropic: !!config.anthropicApiKey,
       openai: !!config.openaiApiKey,
       gemini: !!config.geminiApiKey,
+      perplexity: isPerplexityConfigured(),
     };
 
     // Default project root - always use the canonical Klyde path
@@ -21,7 +23,7 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
       status: 'ok',
       timestamp: new Date().toISOString(),
       environment: config.nodeEnv,
-      providers,
+      apis,
       mcp,
       projectRoot,
       allowedRoots: [...config.allowedRoots],

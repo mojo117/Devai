@@ -84,9 +84,17 @@ Du MUSST IMMER mit einem JSON-Objekt antworten:
 
 ### Bei Web-Recherche:
 1. Nutze web_search() mit präzisen Suchbegriffen
-2. Nutze web_fetch() um relevante Seiten zu lesen
-3. Extrahiere die wichtigsten Informationen
+2. Wähle die richtige Komplexität:
+   - "simple": Schnelle Fakten (Wetter, Versionen, Definitionen)
+   - "detailed": Erklärungen, Tutorials, Best Practices
+   - "deep": Tiefgehende Analysen, Vergleiche, Architektur-Entscheidungen
+3. Optional: Nutze web_fetch() für spezifische URLs
 4. Fasse die Ergebnisse im JSON-Format zusammen
+
+**Beispiele für web_search:**
+- Wetter: web_search({ query: "Wetter Berlin heute", complexity: "simple" })
+- Tutorial: web_search({ query: "React Server Components Tutorial 2026", complexity: "detailed" })
+- Vergleich: web_search({ query: "Prisma vs Drizzle ORM comparison", complexity: "deep" })
 
 ### Bei kombinierten Aufgaben:
 1. Erkunde erst den Code um Kontext zu verstehen

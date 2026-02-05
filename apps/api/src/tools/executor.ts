@@ -126,11 +126,14 @@ export async function executeTool(
           return logsTools.getStagingLogs(args.lines as number | undefined);
 
         // Web Tools (SCOUT agent)
-        case 'web_search':
-          return webTools.webSearch(args.query as string, {
-            limit: args.limit as number | undefined,
-            freshness: args.freshness as 'day' | 'week' | 'month' | undefined,
+        case 'web_search': {
+          const result = await webTools.webSearch(args.query as string, {
+            complexity: args.complexity as 'simple' | 'detailed' | 'deep' | undefined,
+            recency: args.recency as 'day' | 'week' | 'month' | 'year' | undefined,
           });
+          // Format the result with citations for display
+          return webTools.formatWebSearchResult(result);
+        }
 
         case 'web_fetch':
           return webTools.webFetch(args.url as string, {

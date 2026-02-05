@@ -81,10 +81,11 @@ export interface HealthResponse {
   status: string;
   timestamp: string;
   environment: string;
-  providers: {
+  apis: {
     anthropic: boolean;
     openai: boolean;
     gemini: boolean;
+    perplexity: boolean;
   };
   mcp?: McpServerStatus[];
   projectRoot: string | null;
