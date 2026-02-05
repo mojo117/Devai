@@ -13,7 +13,7 @@ import { useActionWebSocket } from '../hooks/useActionWebSocket';
 
 export interface ToolEvent {
   id: string;
-  type: 'status' | 'tool_call' | 'tool_result';
+  type: 'status' | 'tool_call' | 'tool_result' | 'thinking';
   name?: string;
   arguments?: unknown;
   result?: unknown;
@@ -50,6 +50,7 @@ export function ChatUI({ projectRoot, skillIds, allowedRoots, pinnedFiles, ignor
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoadingInternal] = useState(false);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   // Wrapper to emit loading changes
   const setIsLoading = (loading: boolean) => {
@@ -399,6 +400,16 @@ export function ChatUI({ projectRoot, skillIds, allowedRoots, pinnedFiles, ignor
         break;
       case 'agent_thinking':
         setAgentPhase('thinking');
+        // Add thinking event to feed for debugging
+        setToolEvents((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            type: 'thinking',
+            result: event.status,
+            agent: event.agent as AgentName | undefined,
+          },
+        ]);
         break;
       case 'agent_complete':
         setAgentPhase('idle');
@@ -859,6 +870,24 @@ export function ChatUI({ projectRoot, skillIds, allowedRoots, pinnedFiles, ignor
     }
   };
 
+  const handleCopyMessage = async (messageId: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedMessageId(messageId);
+      setTimeout(() => setCopiedMessageId(null), 2000);
+    } catch {
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = content;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setCopiedMessageId(messageId);
+      setTimeout(() => setCopiedMessageId(null), 2000);
+    }
+  };
+
   const handleRestartChat = async () => {
     if (messages.length === 0) {
       // No messages to save, just create new session
@@ -971,13 +1000,34 @@ export function ChatUI({ projectRoot, skillIds, allowedRoots, pinnedFiles, ignor
             }`}
           >
             <div
-              className={`max-w-[80%] rounded-lg px-4 py-2 ${
+              className={`group relative max-w-[80%] rounded-lg px-4 py-2 ${
                 message.role === 'user'
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-700 text-gray-100'
               }`}
             >
-              {renderMessageContent(message.content)}
+              <button
+                onClick={() => handleCopyMessage(message.id, message.content)}
+                className={`absolute top-2 right-2 p-1 rounded transition-all ${
+                  copiedMessageId === message.id
+                    ? 'opacity-100 text-green-400'
+                    : 'opacity-0 group-hover:opacity-100 text-gray-400 hover:text-white'
+                }`}
+                title={copiedMessageId === message.id ? 'Copied!' : 'Copy message'}
+              >
+                {copiedMessageId === message.id ? (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                )}
+              </button>
+              <div className="pr-6">
+                {renderMessageContent(message.content)}
+              </div>
               <p className="text-xs opacity-50 mt-1">
                 {new Date(message.timestamp).toLocaleTimeString()}
               </p>
