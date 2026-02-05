@@ -32,6 +32,7 @@ import type {
   PinnedFilesSetting,
   IgnorePatternsSetting,
   ProjectContextOverrideSetting,
+  LLMProvider,
 } from './types';
 
 function App() {
@@ -72,6 +73,7 @@ function App() {
   const [isMobile, setIsMobile] = useState(false);
   const [activeAgent, setActiveAgent] = useState<AgentName | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>('idle');
+  const [selectedProvider, setSelectedProvider] = useState<LLMProvider>('anthropic');
 
   // Handle agent state changes from ChatUI
   const handleAgentChange = useCallback((agent: AgentName | null, phase: AgentPhase) => {
@@ -616,7 +618,7 @@ function App() {
             {/* Chat Area - shown on desktop always, on mobile only when mobilePanel is 'chat' */}
             <div className={`flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden ${isMobile && mobilePanel !== 'chat' ? 'hidden' : ''}`}>
               <ChatUI
-                provider="anthropic"
+                provider={selectedProvider}
                 projectRoot={health?.projectRoot}
                 skillIds={selectedSkillIds}
                 allowedRoots={health?.allowedRoots}
