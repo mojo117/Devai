@@ -24,6 +24,16 @@ export function ActionsPage({ actions, onApprove, onReject, onRetry, onRefresh }
   const [filter, setFilter] = useState<'all' | ActionStatus>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
+  const counts = useMemo(() => ({
+    all: actions.length,
+    pending: actions.filter((a) => a.status === 'pending').length,
+    approved: actions.filter((a) => a.status === 'approved').length,
+    executing: actions.filter((a) => a.status === 'executing').length,
+    done: actions.filter((a) => a.status === 'done').length,
+    failed: actions.filter((a) => a.status === 'failed').length,
+    rejected: actions.filter((a) => a.status === 'rejected').length,
+  }), [actions]);
+
   const sortedActions = useMemo(() => (
     [...actions].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   ), [actions]);
@@ -65,6 +75,7 @@ export function ActionsPage({ actions, onApprove, onReject, onRetry, onRefresh }
             }`}
           >
             {item.label}
+            <span className="ml-1 opacity-60">({counts[item.key]})</span>
           </button>
         ))}
       </div>
