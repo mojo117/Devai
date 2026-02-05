@@ -34,6 +34,24 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = resolve(__dirname, '../../mcp-servers.json');
 
 /**
+ * Expand environment variable references in env config
+ * Supports syntax: ${ENV_VAR_NAME}
+ */
+function expandEnvVars(env: Record<string, string> | undefined): Record<string, string> {
+  if (!env) return {};
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value === 'string' && value.startsWith('${') && value.endsWith('}')) {
+      const envVar = value.slice(2, -1);
+      result[key] = process.env[envVar] || '';
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+/**
  * Load MCP server configuration from mcp-servers.json
  */
 export function loadMcpConfig(): McpConfig {
@@ -51,8 +69,16 @@ export function loadMcpConfig(): McpConfig {
       return { mcpServers: [] };
     }
 
-    console.info(`[mcp] Loaded ${config.mcpServers.length} MCP server config(s)`);
-    return config;
+    // Expand environment variables in each server config
+    const expandedConfig: McpConfig = {
+      mcpServers: config.mcpServers.map((server) => ({
+        ...server,
+        env: expandEnvVars(server.env),
+      })),
+    };
+
+    console.info(`[mcp] Loaded ${expandedConfig.mcpServers.length} MCP server config(s)`);
+    return expandedConfig;
   } catch (error) {
     console.error('[mcp] Failed to load mcp-servers.json:', error);
     return { mcpServers: [] };
