@@ -239,6 +239,42 @@ class McpManager {
   }
 
   /**
+   * Get status of all configured MCP servers for health endpoint
+   */
+  getStatus(): Array<{ name: string; status: string; toolCount: number; error?: string }> {
+    const result: Array<{ name: string; status: string; toolCount: number; error?: string }> = [];
+
+    for (const [name, serverConfig] of this.serverConfigs.entries()) {
+      const client = this.clients.get(name);
+      const toolCount = Array.from(this.toolMappings.values())
+        .filter((m) => m.serverName === name).length;
+
+      if (!client) {
+        result.push({
+          name,
+          status: 'error',
+          toolCount: 0,
+          error: 'Client not initialized',
+        });
+      } else if (client.isConnected()) {
+        result.push({
+          name,
+          status: 'connected',
+          toolCount,
+        });
+      } else {
+        result.push({
+          name,
+          status: 'disconnected',
+          toolCount,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  /**
    * Gracefully disconnect all MCP servers
    */
   async shutdown(): Promise<void> {
