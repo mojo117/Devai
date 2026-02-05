@@ -22,27 +22,20 @@ export interface AssignedTask extends TaskBreakdown {
 }
 
 /**
- * Full routing result
+ * Routing result - discriminated union for type safety
  */
-export interface RoutingResult {
-  type: 'execute' | 'question' | 'error';
-  // For execute
-  tasks?: AssignedTask[];
-  // For question
-  question?: string;
-  // For error
-  error?: string;
-}
+export type RoutingResult =
+  | { type: 'execute'; tasks: AssignedTask[]; question?: never; error?: never }
+  | { type: 'question'; question: string; tasks?: never; error?: never }
+  | { type: 'error'; error: string; tasks?: never; question?: never };
 
 /**
- * Result after executing all tasks
+ * Execution result - discriminated union for type safety
  */
-export interface ExecutionResult {
-  type: 'success' | 'question' | 'error';
-  results?: Map<number, AgentExecutionResult>;
-  question?: string;
-  error?: string;
-}
+export type ExecutionResult =
+  | { type: 'success'; results: Map<number, AgentExecutionResult>; question?: never; error?: never }
+  | { type: 'question'; question: string; results?: never; error?: never }
+  | { type: 'error'; error: string; results?: never; question?: never };
 
 /**
  * Capability to agent mapping

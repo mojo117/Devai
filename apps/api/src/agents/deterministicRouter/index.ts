@@ -23,13 +23,43 @@ export function routeAnalysis(analysis: CapabilityAnalysis): RoutingResult {
     agent: CAPABILITY_AGENT_MAP[task.capability] || 'koda', // Default to koda
   }));
 
-  // 3. Sort by dependencies
-  const sortedTasks = topologicalSort(assignedTasks);
+  // 3. Validate dependencies before sorting
+  const validationError = validateDependencies(assignedTasks);
+  if (validationError) {
+    return {
+      type: 'error',
+      error: validationError,
+    };
+  }
 
-  return {
-    type: 'execute',
-    tasks: sortedTasks,
-  };
+  // 4. Sort by dependencies (catch circular dependency errors)
+  try {
+    const sortedTasks = topologicalSort(assignedTasks);
+    return {
+      type: 'execute',
+      tasks: sortedTasks,
+    };
+  } catch (error) {
+    return {
+      type: 'error',
+      error: error instanceof Error ? error.message : 'Failed to sort tasks by dependencies',
+    };
+  }
+}
+
+/**
+ * Validate that all depends_on references point to valid task indices
+ */
+function validateDependencies(tasks: AssignedTask[]): string | null {
+  const validIndices = new Set(tasks.map(t => t.index));
+
+  for (const task of tasks) {
+    if (task.depends_on !== undefined && !validIndices.has(task.depends_on)) {
+      return `Task "${task.description}" depends on non-existent task index ${task.depends_on}`;
+    }
+  }
+
+  return null;
 }
 
 /**

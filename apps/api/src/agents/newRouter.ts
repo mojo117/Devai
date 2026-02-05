@@ -45,26 +45,33 @@ export async function processRequestNew(options: NewProcessRequestOptions): Prom
 
   // Handle clarification
   if (routing.type === 'question') {
+    const question = routing.question ?? 'Kannst du deine Anfrage genauer beschreiben?';
     sendEvent({
       type: 'user_question',
       question: {
         questionId: sessionId,
-        question: routing.question!,
+        question,
         fromAgent: 'chapo',
         timestamp: new Date().toISOString(),
       },
     });
-    return routing.question!;
+    return question;
   }
 
   // Handle error
   if (routing.type === 'error') {
-    sendEvent({ type: 'error', agent: 'chapo', error: routing.error! });
-    return `Fehler: ${routing.error}`;
+    const errorMsg = routing.error ?? 'Unknown routing error';
+    sendEvent({ type: 'error', agent: 'chapo', error: errorMsg });
+    return `Fehler: ${errorMsg}`;
   }
 
   // Phase 3: Execute tasks
-  const tasks = routing.tasks!;
+  const tasks = routing.tasks ?? [];
+  if (tasks.length === 0) {
+    const fallbackMsg = 'Keine Aufgaben zu bearbeiten.';
+    sendEvent({ type: 'error', agent: 'chapo', error: fallbackMsg });
+    return fallbackMsg;
+  }
   const results = new Map<number, AgentExecutionResult>();
 
   for (const task of tasks) {
@@ -95,16 +102,17 @@ export async function processRequestNew(options: NewProcessRequestOptions): Prom
 
       // If agent signals uncertainty, ask user
       if (result.uncertain) {
+        const uncertainQuestion = result.uncertaintyReason ?? 'Ich bin unsicher, wie ich fortfahren soll. Kannst du mir mehr Kontext geben?';
         sendEvent({
           type: 'user_question',
           question: {
             questionId: `${sessionId}-${task.index}`,
-            question: result.uncertaintyReason!,
+            question: uncertainQuestion,
             fromAgent: task.agent,
             timestamp: new Date().toISOString(),
           },
         });
-        return result.uncertaintyReason!;
+        return uncertainQuestion;
       }
 
       sendEvent({ type: 'agent_complete', agent: task.agent, result: 'done' });

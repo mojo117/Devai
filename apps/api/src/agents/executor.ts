@@ -43,6 +43,10 @@ export async function executeAgentTask(
   let turn = 0;
   const MAX_TURNS = 5;
   let finalResult: unknown = null;
+  let completedNormally = false;
+  let lastError: string | undefined;
+  let successfulToolCalls = 0;
+  let failedToolCalls = 0;
 
   while (turn < MAX_TURNS) {
     turn++;
@@ -58,6 +62,7 @@ export async function executeAgentTask(
     // No more tool calls - we're done
     if (!response.toolCalls || response.toolCalls.length === 0) {
       finalResult = response.content;
+      completedNormally = true;
       break;
     }
 
@@ -89,16 +94,20 @@ export async function executeAgentTask(
         success: result.success,
       });
 
+      // Track success/failure
+      if (result.success) {
+        successfulToolCalls++;
+        finalResult = result.result;
+      } else {
+        failedToolCalls++;
+        lastError = result.error;
+      }
+
       toolResults.push({
         toolUseId: toolCall.id,
         result: result.success ? JSON.stringify(result.result) : `Error: ${result.error}`,
         isError: !result.success,
       });
-
-      // Store successful result
-      if (result.success) {
-        finalResult = result.result;
-      }
     }
 
     // Add tool results
@@ -107,6 +116,27 @@ export async function executeAgentTask(
       content: '',
       toolResults,
     });
+  }
+
+  // Determine actual success based on execution
+  const hitMaxTurns = turn >= MAX_TURNS && !completedNormally;
+  const allToolsFailed = failedToolCalls > 0 && successfulToolCalls === 0;
+
+  if (hitMaxTurns) {
+    return {
+      success: false,
+      data: finalResult,
+      error: `Task did not complete within ${MAX_TURNS} turns`,
+      uncertain: true,
+      uncertaintyReason: 'The task required more steps than allowed. Should I continue?',
+    };
+  }
+
+  if (allToolsFailed) {
+    return {
+      success: false,
+      error: lastError || 'All tool executions failed',
+    };
   }
 
   return {
