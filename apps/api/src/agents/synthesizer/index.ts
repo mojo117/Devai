@@ -11,12 +11,32 @@ export interface SynthesizerInput {
 }
 
 /**
+ * Extract JSON from markdown code blocks or raw JSON
+ */
+function extractJson(data: string): string | null {
+  // Try direct JSON first
+  if (data.startsWith('{') || data.startsWith('[')) {
+    return data;
+  }
+
+  // Try extracting from markdown code block
+  const codeBlockMatch = data.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeBlockMatch) {
+    return codeBlockMatch[1].trim();
+  }
+
+  return null;
+}
+
+/**
  * Check if a string looks like structured JSON that needs formatting
  */
 function looksLikeStructuredJson(data: string): boolean {
-  if (!data.startsWith('{') && !data.startsWith('[')) return false;
+  const jsonStr = extractJson(data);
+  if (!jsonStr) return false;
+
   try {
-    const parsed = JSON.parse(data);
+    const parsed = JSON.parse(jsonStr);
     // If it has SCOUT-like structure (summary, webFindings, etc), needs synthesis
     if (typeof parsed === 'object' && parsed !== null) {
       return 'summary' in parsed || 'webFindings' in parsed || 'recommendations' in parsed;
