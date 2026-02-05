@@ -43,6 +43,9 @@ export interface Config {
   // Supabase
   supabaseUrl: string;
   supabaseServiceKey: string;
+
+  // Feature flags
+  useNewAgentRouter: boolean;
 }
 
 export function loadConfig(): Config {
@@ -76,6 +79,9 @@ export function loadConfig(): Config {
 
     supabaseUrl: process.env.DEVAI_SUPABASE_URL || process.env.SUPABASE_URL || '',
     supabaseServiceKey: process.env.DEVAI_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || '',
+
+    // Feature flags
+    useNewAgentRouter: process.env.USE_NEW_AGENT_ROUTER === 'true',
   };
 }
 

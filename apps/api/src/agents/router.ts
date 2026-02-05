@@ -49,6 +49,8 @@ import { KODA_AGENT } from './koda.js';
 import { DEVO_AGENT } from './devo.js';
 import { SCOUT_AGENT } from './scout.js';
 import { loadClaudeMdContext, formatClaudeMdBlock } from '../scanner/claudeMdLoader.js';
+import { processRequestNew } from './newRouter.js';
+import { config } from '../config.js';
 import {
   classifyTaskComplexity,
   selectModel,
@@ -102,6 +104,12 @@ export async function processRequest(
   projectRoot: string | null,
   sendEvent: SendEventFn
 ): Promise<string> {
+  // New capability-based router (feature-flagged)
+  if (config.useNewAgentRouter) {
+    console.info('[agents] Using NEW capability-based router');
+    return processRequestNew({ sessionId, userMessage, projectRoot, sendEvent });
+  }
+
   // FAST PATH: Early task classification (no LLM call!)
   const taskComplexity = classifyTaskComplexity(userMessage);
   const modelSelection = selectModel(taskComplexity);
@@ -469,6 +477,7 @@ Falls Delegation nötig:
     const toolResults: { toolUseId: string; result: string; isError: boolean }[] = [];
 
     // Execute tools (read-only for CHAPO)
+    // Meta-tools (delegation) are handled specially
     for (const toolCall of response.toolCalls) {
       sendEvent({
         type: 'tool_call',
@@ -477,6 +486,101 @@ Falls Delegation nötig:
         args: toolCall.arguments,
       });
 
+      // Handle delegation meta-tools specially
+      if (toolCall.name === 'delegateToScout') {
+        // CHAPO wants to spawn SCOUT for exploration/web search
+        const query = toolCall.arguments.query as string;
+        const scope = (toolCall.arguments.scope as ScoutScope) || 'both';
+        const context = toolCall.arguments.context as string | undefined;
+
+        sendEvent({
+          type: 'agent_thinking',
+          agent: 'chapo',
+          status: `Spawne SCOUT für: ${query}`,
+        });
+
+        try {
+          const scoutResult = await spawnScout(sessionId, query, { scope, context, sendEvent });
+          sendEvent({
+            type: 'tool_result',
+            agent: 'chapo',
+            toolName: toolCall.name,
+            result: scoutResult,
+            success: true,
+          });
+          toolResults.push({
+            toolUseId: toolCall.id,
+            result: JSON.stringify(scoutResult, null, 2),
+            isError: false,
+          });
+        } catch (error) {
+          const errMsg = error instanceof Error ? error.message : 'SCOUT spawn failed';
+          sendEvent({
+            type: 'tool_result',
+            agent: 'chapo',
+            toolName: toolCall.name,
+            result: { error: errMsg },
+            success: false,
+          });
+          toolResults.push({
+            toolUseId: toolCall.id,
+            result: `Error: ${errMsg}`,
+            isError: true,
+          });
+        }
+        continue;
+      }
+
+      if (toolCall.name === 'delegateToKoda' || toolCall.name === 'delegateToDevo') {
+        // These require proper delegation via the main flow - return qualification result
+        const targetAgent = toolCall.name === 'delegateToKoda' ? 'koda' : 'devo';
+        const taskDesc = toolCall.arguments.task as string;
+
+        sendEvent({
+          type: 'tool_result',
+          agent: 'chapo',
+          toolName: toolCall.name,
+          result: { delegating: true, targetAgent, task: taskDesc },
+          success: true,
+        });
+
+        // Return early with delegation result
+        return {
+          taskType: targetAgent === 'koda' ? 'code_change' : 'devops',
+          riskLevel: 'medium',
+          complexity: 'moderate',
+          targetAgent,
+          requiresApproval: false,
+          requiresClarification: false,
+          gatheredContext: {
+            ...gatheredContext,
+            delegationTask: taskDesc,
+            delegationContext: toolCall.arguments.context,
+            delegationFiles: toolCall.arguments.files as string[] | undefined,
+          },
+          reasoning: `CHAPO delegiert an ${targetAgent.toUpperCase()}: ${taskDesc}`,
+        };
+      }
+
+      if (toolCall.name === 'askUser' || toolCall.name === 'requestApproval') {
+        // Handle user questions and approval requests
+        const question = toolCall.arguments.question || toolCall.arguments.description;
+        toolResults.push({
+          toolUseId: toolCall.id,
+          result: `Frage an User: ${question}`,
+          isError: false,
+        });
+        sendEvent({
+          type: 'tool_result',
+          agent: 'chapo',
+          toolName: toolCall.name,
+          result: { question },
+          success: true,
+        });
+        continue;
+      }
+
+      // Regular tool execution
       const result = await executeTool(toolCall.name, toolCall.arguments);
 
       sendEvent({
