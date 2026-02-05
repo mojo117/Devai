@@ -341,10 +341,12 @@ ${projectRoot ? `Working Directory: ${projectRoot}` : ''}
 WICHTIG: Dies ist eine einfache Anfrage. Führe sie DIREKT aus ohne zu fragen.`;
 
   const messages: LLMMessage[] = [
-    ...conversationHistory.map(m => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content
-    })),
+    ...conversationHistory
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content
+      })),
     { role: 'user', content: userMessage },
   ];
 
@@ -445,10 +447,12 @@ Falls Delegation nötig:
 \`\`\``;
 
   const messages: LLMMessage[] = [
-    ...conversationHistory.map(m => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content
-    })),
+    ...conversationHistory
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content
+      })),
     { role: 'user', content: userMessage },
   ];
 
