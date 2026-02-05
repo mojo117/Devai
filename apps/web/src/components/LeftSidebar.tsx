@@ -9,6 +9,7 @@ import type {
 import { PromptsPanelContent } from './PromptsPanelContent';
 import { ToolsPanelContent } from './ToolsPanelContent';
 import { HistoryPanelContent } from './HistoryPanelContent';
+import { GlobalContext } from './GlobalContext';
 
 type PanelType = 'prompts' | 'tools' | 'history' | null;
 
@@ -43,6 +44,7 @@ interface LeftSidebarProps {
 
 export function LeftSidebar(props: LeftSidebarProps) {
   const [activePanel, setActivePanel] = useState<PanelType>(null);
+  const [isGlobalContextOpen, setIsGlobalContextOpen] = useState(false);
 
   const togglePanel = (panel: PanelType) => {
     setActivePanel((prev) => (prev === panel ? null : panel));
@@ -74,6 +76,15 @@ export function LeftSidebar(props: LeftSidebarProps) {
             {btn.label}
           </button>
         ))}
+        {/* Global Context Button - Opens Modal */}
+        <button
+          onClick={() => setIsGlobalContextOpen(true)}
+          className="w-8 py-4 rounded text-gray-200 text-xs font-medium transition-all shadow-md bg-gray-800 hover:bg-green-600"
+          style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
+          title="Global Context"
+        >
+          Context
+        </button>
       </div>
 
       {/* Expandable Panel Area */}
@@ -114,6 +125,9 @@ export function LeftSidebar(props: LeftSidebarProps) {
           {activePanel === 'history' && <HistoryPanelContent />}
         </div>
       </div>
+
+      {/* Global Context Modal */}
+      <GlobalContext isOpen={isGlobalContextOpen} onClose={() => setIsGlobalContextOpen(false)} />
     </div>
   );
 }

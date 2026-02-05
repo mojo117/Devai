@@ -14,6 +14,12 @@ const UpdateSettingSchema = z.object({
   value: z.unknown(),
 });
 
+// Global Context schema
+const GlobalContextSchema = z.object({
+  content: z.string(),
+  enabled: z.boolean().default(true),
+});
+
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
   app.get('/settings/:key', async (request) => {
     const { key } = request.params as { key: string };
@@ -102,5 +108,43 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
   app.delete('/settings/permissions', async () => {
     await clearPermissionPatterns();
     return { success: true };
+  });
+
+  // ============ Global Context Endpoints ============
+
+  // Get global context
+  app.get('/settings/global-context', async () => {
+    const value = await getSetting('globalContext');
+    if (value === null) {
+      return { content: '', enabled: true };
+    }
+    try {
+      const parsed = JSON.parse(value);
+      return {
+        content: typeof parsed.content === 'string' ? parsed.content : '',
+        enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : true,
+      };
+    } catch {
+      return { content: '', enabled: true };
+    }
+  });
+
+  // Update global context
+  app.post('/settings/global-context', async (request, reply) => {
+    const parseResult = GlobalContextSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: 'Invalid request',
+        details: parseResult.error.issues,
+      });
+    }
+
+    try {
+      await setSetting('globalContext', JSON.stringify(parseResult.data));
+      return parseResult.data;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      return reply.status(500).send({ error: message });
+    }
   });
 };

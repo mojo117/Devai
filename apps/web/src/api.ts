@@ -623,3 +623,28 @@ export async function fetchAgentState(sessionId: string): Promise<{
   if (!res.ok) throw new Error('Failed to fetch agent state');
   return res.json();
 }
+
+// Global Context API
+
+export interface GlobalContext {
+  content: string;
+  enabled: boolean;
+}
+
+export async function fetchGlobalContext(): Promise<GlobalContext> {
+  const res = await fetch(`${API_BASE}/settings/global-context`, {
+    headers: withAuthHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to fetch global context');
+  return res.json();
+}
+
+export async function saveGlobalContext(context: GlobalContext): Promise<GlobalContext> {
+  const res = await fetch(`${API_BASE}/settings/global-context`, {
+    method: 'POST',
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(context),
+  });
+  if (!res.ok) throw new Error('Failed to save global context');
+  return res.json();
+}

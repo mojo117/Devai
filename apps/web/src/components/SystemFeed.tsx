@@ -1,16 +1,17 @@
 import { useEffect, useRef } from 'react';
 
-export type AgentName = 'chapo' | 'koda' | 'devo';
+export type AgentName = 'chapo' | 'koda' | 'devo' | 'scout';
 
 export interface FeedEvent {
   id: string;
   timestamp: string;
-  type: 'tool_call' | 'tool_result' | 'status' | 'action' | 'error' | 'agent';
+  type: 'tool_call' | 'tool_result' | 'status' | 'action' | 'error' | 'agent' | 'thinking';
   title: string;
   content?: string;
   metadata?: Record<string, unknown>;
   status?: 'pending' | 'running' | 'success' | 'error';
   agent?: AgentName;
+  toolName?: string; // Tool name for tool_call/tool_result
 }
 
 interface SystemFeedProps {
@@ -93,6 +94,8 @@ function FeedEventCard({ event }: { event: FeedEvent }) {
         return 'border-red-500/50 bg-red-500/5';
       case 'agent':
         return 'border-purple-500/50 bg-purple-500/5';
+      case 'thinking':
+        return 'border-cyan-500/50 bg-cyan-500/5';
       default:
         return 'border-gray-600 bg-gray-800';
     }
@@ -101,17 +104,19 @@ function FeedEventCard({ event }: { event: FeedEvent }) {
   const getTypeIcon = () => {
     switch (event.type) {
       case 'tool_call':
-        return '>';
+        return '▶';
       case 'tool_result':
-        return event.status === 'error' ? 'x' : '<';
+        return event.status === 'error' ? '✗' : '◀';
       case 'status':
         return 'i';
       case 'action':
         return '!';
       case 'error':
-        return 'x';
+        return '✗';
       case 'agent':
         return '@';
+      case 'thinking':
+        return '💭';
       default:
         return '-';
     }
@@ -135,14 +140,16 @@ function FeedEventCard({ event }: { event: FeedEvent }) {
   const getAgentBadge = () => {
     if (!event.agent) return null;
     const agentColors: Record<AgentName, string> = {
-      chapo: 'bg-blue-600/30 text-blue-300 border-blue-500/50',
-      koda: 'bg-green-600/30 text-green-300 border-green-500/50',
-      devo: 'bg-purple-600/30 text-purple-300 border-purple-500/50',
+      chapo: 'bg-purple-600/30 text-purple-300 border-purple-500/50',
+      koda: 'bg-blue-600/30 text-blue-300 border-blue-500/50',
+      devo: 'bg-green-600/30 text-green-300 border-green-500/50',
+      scout: 'bg-orange-600/30 text-orange-300 border-orange-500/50',
     };
     const agentLabels: Record<AgentName, string> = {
-      chapo: 'Chapo',
-      koda: 'Koda',
-      devo: 'Devo',
+      chapo: '🎯 CHAPO',
+      koda: '💻 KODA',
+      devo: '🔧 DEVO',
+      scout: '🔍 SCOUT',
     };
     return (
       <span className={`px-1.5 py-0.5 rounded border text-[10px] font-medium ${agentColors[event.agent]}`}>
@@ -151,18 +158,42 @@ function FeedEventCard({ event }: { event: FeedEvent }) {
     );
   };
 
+  // Format title based on event type
+  const getFormattedTitle = () => {
+    if (event.type === 'tool_call' && event.toolName) {
+      return (
+        <span className="flex items-center gap-1.5">
+          <span className="text-blue-300 font-mono text-[11px]">{event.toolName}</span>
+          <span className="text-gray-500 text-[10px]">→</span>
+        </span>
+      );
+    }
+    if (event.type === 'tool_result' && event.toolName) {
+      return (
+        <span className="flex items-center gap-1.5">
+          <span className="text-gray-500 text-[10px]">←</span>
+          <span className={`font-mono text-[11px] ${event.status === 'error' ? 'text-red-300' : 'text-green-300'}`}>{event.toolName}</span>
+        </span>
+      );
+    }
+    if (event.type === 'thinking') {
+      return (
+        <span className="text-cyan-300 text-xs italic">{event.title}</span>
+      );
+    }
+    return <span className="text-xs font-medium text-gray-200 truncate max-w-[150px]">{event.title}</span>;
+  };
+
   return (
     <div className={`rounded border ${getTypeColor()} overflow-hidden`}>
       {/* Header */}
       <div className="px-2 py-1.5 flex items-center justify-between border-b border-gray-700/50">
         <div className="flex items-center gap-2">
-          <span className="w-5 h-5 flex items-center justify-center rounded bg-gray-800 text-[10px] font-mono text-gray-400">
+          <span className="w-5 h-5 flex items-center justify-center rounded bg-gray-800 text-[10px] text-gray-400">
             {getTypeIcon()}
           </span>
           {getAgentBadge()}
-          <span className="text-xs font-medium text-gray-200 truncate max-w-[150px]">
-            {event.title}
-          </span>
+          {getFormattedTitle()}
         </div>
         <div className="flex items-center gap-2">
           {getStatusBadge()}
@@ -187,7 +218,7 @@ function FeedEventCard({ event }: { event: FeedEvent }) {
 // Helper to convert tool events to feed events
 export function toolEventToFeedEvent(toolEvent: {
   id: string;
-  type: 'status' | 'tool_call' | 'tool_result';
+  type: 'status' | 'tool_call' | 'tool_result' | 'thinking';
   name?: string;
   arguments?: unknown;
   result?: unknown;
@@ -207,13 +238,25 @@ export function toolEventToFeedEvent(toolEvent: {
     };
   }
 
+  if (toolEvent.type === 'thinking') {
+    return {
+      id: toolEvent.id,
+      timestamp,
+      type: 'thinking',
+      title: String(toolEvent.result || 'Thinking...'),
+      agent: toolEvent.agent,
+    };
+  }
+
   if (toolEvent.type === 'tool_call') {
+    const toolName = toolEvent.name || 'unknown';
     return {
       id: toolEvent.id,
       timestamp,
       type: 'tool_call',
-      title: toolEvent.name || 'Tool Call',
-      content: toolEvent.arguments ? formatPayload(toolEvent.arguments) : undefined,
+      title: `Calling ${toolName}`,
+      toolName,
+      content: toolEvent.arguments ? formatToolArgs(toolName, toolEvent.arguments) : undefined,
       status: 'running',
       agent: toolEvent.agent,
     };
@@ -221,15 +264,57 @@ export function toolEventToFeedEvent(toolEvent: {
 
   // tool_result
   const isError = typeof toolEvent.result === 'object' && toolEvent.result !== null && 'error' in toolEvent.result;
+  const toolName = toolEvent.name || 'unknown';
   return {
     id: `${toolEvent.id}-result`,
     timestamp,
     type: 'tool_result',
-    title: toolEvent.name || 'Tool Result',
+    title: isError ? `${toolName} failed` : `${toolName} completed`,
+    toolName,
     content: toolEvent.result ? formatPayload(toolEvent.result) : undefined,
     status: isError ? 'error' : 'success',
     agent: toolEvent.agent,
   };
+}
+
+// Format tool arguments in a human-readable way
+function formatToolArgs(toolName: string, args: unknown): string {
+  if (!args || typeof args !== 'object') return String(args);
+
+  const obj = args as Record<string, unknown>;
+
+  // Format based on common tool patterns
+  if (toolName.includes('read') || toolName.includes('Read')) {
+    return obj.path ? `📄 ${obj.path}` : formatPayload(args);
+  }
+  if (toolName.includes('write') || toolName.includes('Write') || toolName.includes('edit') || toolName.includes('Edit')) {
+    return obj.path ? `✏️ ${obj.path}` : formatPayload(args);
+  }
+  if (toolName.includes('search') || toolName.includes('grep') || toolName.includes('Grep')) {
+    const pattern = obj.pattern || obj.query || '';
+    const path = obj.path || obj.directory || '';
+    return `🔍 "${pattern}"${path ? ` in ${path}` : ''}`;
+  }
+  if (toolName.includes('glob') || toolName.includes('Glob') || toolName.includes('list')) {
+    return obj.pattern ? `📁 ${obj.pattern}` : formatPayload(args);
+  }
+  if (toolName.includes('diff') || toolName.includes('Diff')) {
+    return '📊 Checking changes...';
+  }
+  if (toolName.includes('status')) {
+    return '📋 Getting status...';
+  }
+  if (toolName.includes('web_search') || toolName.includes('WebSearch')) {
+    return obj.query ? `🌐 "${obj.query}"` : formatPayload(args);
+  }
+
+  // Default: show key-value pairs compactly
+  const pairs = Object.entries(obj)
+    .filter(([, v]) => v !== undefined && v !== null)
+    .slice(0, 3)
+    .map(([k, v]) => `${k}: ${typeof v === 'string' ? v.slice(0, 50) : JSON.stringify(v).slice(0, 50)}`);
+
+  return pairs.join('\n') || formatPayload(args);
 }
 
 function formatPayload(payload: unknown): string {

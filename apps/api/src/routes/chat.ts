@@ -17,7 +17,7 @@ import { loadClaudeMdContext, formatClaudeMdBlock } from '../scanner/claudeMdLoa
 import { checkPermission } from '../permissions/checker.js';
 import { getSkillById, getSkillLoadState, refreshSkills } from '../skills/registry.js';
 import type { SkillManifest } from '@devai/shared';
-import { createSession, saveMessage, updateSessionTitleIfEmpty, getMessages } from '../db/queries.js';
+import { createSession, saveMessage, updateSessionTitleIfEmpty, getMessages, getSetting } from '../db/queries.js';
 import {
   processRequest as processMultiAgentRequest,
   handleUserApproval,
@@ -187,6 +187,20 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         claudeMdBlock = formatClaudeMdBlock(claudeMdContext);
       }
 
+      // Load Global Context
+      let globalContextBlock = '';
+      try {
+        const globalContextValue = await getSetting('globalContext');
+        if (globalContextValue) {
+          const parsed = JSON.parse(globalContextValue);
+          if (parsed.enabled && parsed.content?.trim()) {
+            globalContextBlock = `\n\nGlobal Context:\n${parsed.content.trim()}`;
+          }
+        }
+      } catch {
+        // Ignore errors - global context is optional
+      }
+
       const selectedSkills = await resolveSkills(skillIds);
       const { allowedToolNames, skillsPrompt } = summarizeSkills(selectedSkills);
       const pinnedFilesBlock = await buildPinnedFilesBlock(parseResult.data.pinnedFiles);
@@ -214,7 +228,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
       const llmResponse = await llmRouter.generate(provider, {
           messages: conversationMessages,
-          systemPrompt: SYSTEM_PROMPT + projectContextBlock + claudeMdBlock + skillsPrompt + pinnedFilesBlock,
+          systemPrompt: SYSTEM_PROMPT + projectContextBlock + claudeMdBlock + globalContextBlock + skillsPrompt + pinnedFilesBlock,
           toolsEnabled: true,
           tools,
         });
@@ -300,6 +314,8 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       const contextStats = buildContextStats({
         systemPrompt: SYSTEM_PROMPT,
         projectContextBlock,
+        claudeMdBlock,
+        globalContextBlock,
         skillsPrompt,
         pinnedFilesBlock,
         messages: conversationMessages,
@@ -817,11 +833,13 @@ function buildSessionTitle(content: string): string | null {
 function buildContextStats(input: {
   systemPrompt: string;
   projectContextBlock: string;
+  claudeMdBlock: string;
+  globalContextBlock: string;
   skillsPrompt: string;
   pinnedFilesBlock: string;
   messages: LLMMessage[];
 }): { tokensUsed: number; tokenBudget: number; note: string } {
-  const combinedPrompt = input.systemPrompt + input.projectContextBlock + input.skillsPrompt + input.pinnedFilesBlock;
+  const combinedPrompt = input.systemPrompt + input.projectContextBlock + input.claudeMdBlock + input.globalContextBlock + input.skillsPrompt + input.pinnedFilesBlock;
   const messageText = input.messages.map((m) => m.content || '').join('\n');
   const tokensUsed = estimateTokens(combinedPrompt + messageText);
   const tokenBudget = 16000;
