@@ -7,6 +7,14 @@
       "requiresConfirmation": true,
       "toolPrefix": "serena",
       "enabledForAgents": ["chapo", "koda"]
+    },
+    {
+      "name": "filesystem",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/opt/Klyde/projects"],
+      "requiresConfirmation": true,
+      "toolPrefix": "fs_mcp",
+      "enabledForAgents": ["chapo", "koda", "devo"]
     }
   ]
 }
