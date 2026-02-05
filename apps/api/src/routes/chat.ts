@@ -17,7 +17,7 @@ import { loadClaudeMdContext, formatClaudeMdBlock } from '../scanner/claudeMdLoa
 import { checkPermission } from '../permissions/checker.js';
 import { getSkillById, getSkillLoadState, refreshSkills } from '../skills/registry.js';
 import type { SkillManifest } from '@devai/shared';
-import { createSession, saveMessage, updateSessionTitleIfEmpty } from '../db/queries.js';
+import { createSession, saveMessage, updateSessionTitleIfEmpty, getMessages } from '../db/queries.js';
 import {
   processRequest as processMultiAgentRequest,
   handleUserApproval,
@@ -374,6 +374,13 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     try {
       const activeSessionId = requestedSessionId || (await createSession()).id;
 
+      // Load conversation history (last 30 messages)
+      const historyMessages = await getMessages(activeSessionId);
+      const recentHistory = historyMessages.slice(-30).map(m => ({
+        role: m.role,
+        content: m.content
+      }));
+
       // Initialize or get state
       const state = getOrCreateState(activeSessionId);
       if (validatedProjectRoot) {
@@ -395,6 +402,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       const result = await processMultiAgentRequest(
         activeSessionId,
         message,
+        recentHistory,
         validatedProjectRoot || config.allowedRoots[0],
         sendEvent
       );
