@@ -11,7 +11,7 @@
     {
       "name": "filesystem",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/opt/Klyde/projects"],
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/opt/shared-repos"],
       "requiresConfirmation": true,
       "toolPrefix": "fs_mcp",
       "enabledForAgents": ["chapo", "koda", "devo"]
