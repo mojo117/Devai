@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Action, ActionStatus } from '../types';
 import { ActionCard } from './ActionCard';
+import { EmptyState } from './EmptyState';
 
 interface ActionsPageProps {
   actions: Action[];
@@ -89,7 +90,15 @@ export function ActionsPage({ actions, onApprove, onReject, onRetry, onRefresh }
       />
 
       {filtered.length === 0 ? (
-        <div className="text-sm text-gray-500">No actions found.</div>
+        <EmptyState
+          icon={searchQuery || filter !== 'all' ? '🔍' : '✨'}
+          title={searchQuery || filter !== 'all' ? 'No matching actions' : 'No actions yet'}
+          description={
+            searchQuery || filter !== 'all'
+              ? 'Try adjusting your search or filters'
+              : 'Actions will appear here when tools require approval'
+          }
+        />
       ) : (
         <div className="grid gap-3">
           {filtered.map((action) => (
