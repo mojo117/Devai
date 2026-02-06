@@ -7,6 +7,7 @@ import * as bashTools from './bash.js';
 import * as sshTools from './ssh.js';
 import * as pm2Tools from './pm2.js';
 import * as webTools from './web.js';
+import * as contextTools from './context.js';
 import { config } from '../config.js';
 import { mcpManager } from '../mcp/index.js';
 
@@ -203,6 +204,22 @@ export async function executeTool(
             args.cwd as string | undefined
           );
 
+        // Context Tools (read-only document access)
+        case 'context_listDocuments':
+          return contextTools.listDocuments(config.allowedRoots[0]);
+
+        case 'context_readDocument':
+          return contextTools.readDocument(
+            config.allowedRoots[0],
+            args.path as string
+          );
+
+        case 'context_searchDocuments':
+          return contextTools.searchDocuments(
+            config.allowedRoots[0],
+            args.query as string
+          );
+
         default:
           // Route MCP tools to the MCP manager
           if (mcpManager.isMcpTool(toolName)) {
@@ -267,6 +284,9 @@ const READ_ONLY_TOOLS = new Set([
   'pm2_logs',
   'web_search',
   'web_fetch',
+  'context_listDocuments',
+  'context_readDocument',
+  'context_searchDocuments',
 ]);
 
 /**
