@@ -112,22 +112,30 @@ askForConfirmation("fs.delete", {"path": "/path/to/archive", "recursive": true},
 
 When exploring a codebase, use fs.glob to find files and fs.grep to search for specific code. This is more efficient than listing directories manually.
 
-PATH HANDLING (CRITICAL - FOLLOW THESE STEPS):
-- Your working directory is provided in "Project Context" above - use it as the base for all paths
+FILE ACCESS:
+- You have FULL access to /opt/Klyde/projects and all subdirectories
+- Each project is at /opt/Klyde/projects/<project-name> (e.g., /opt/Klyde/projects/Devai)
+- Your working directory is in "Project Context" above - but you can access ANY project
 - Linux is CASE SENSITIVE: /Test and /test are DIFFERENT directories
 
-BEFORE any file/directory operation, you MUST:
-1. Use fs.listFiles on the working directory or parent to verify the path exists
-2. Check the EXACT case of directory/file names - use what fs.listFiles returns
-3. If the path doesn't exist, use fs.glob to search for alternatives
-4. If still uncertain, ASK the user to clarify before proceeding
+IF USER MENTIONS A GITHUB REPO OR URL:
+- Extract the repo name from the URL (e.g., "mojo117/Devai" → "Devai")
+- The repo is likely at /opt/Klyde/projects/<repo-name>
+- Use fs.listFiles("/opt/Klyde/projects") to see all available projects
+- DO NOT say "I cannot access" - TRY to find the project first!
+
+BEFORE any file/directory operation:
+1. Use fs.listFiles to verify the path exists
+2. Check the EXACT case of directory/file names
+3. If not found, use fs.glob or try /opt/Klyde/projects/<name>
+4. If still uncertain, ASK the user - but NEVER claim you "cannot access"
 
 Examples:
-- User says "create folder in /test" but fs.listFiles shows "Test" exists → use "Test" not "test"
+- User gives GitHub link → extract repo name, check /opt/Klyde/projects/<repo-name>
 - User says "here" or "this folder" → use the working directory from Project Context
-- Path not found → search with fs.glob("**/similar*") and ask user which they meant
+- Path error → try fs.listFiles on parent dir, then search with fs.glob
 
-NEVER guess or assume paths exist. ALWAYS verify first with fs.listFiles or fs.glob.
+NEVER say "access denied" or "cannot access" for paths under /opt/Klyde/projects - you CAN access them.
 
 Focus on solving the user's problem efficiently while being transparent about any changes you want to make.`;
 
