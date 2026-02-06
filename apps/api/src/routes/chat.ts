@@ -15,6 +15,8 @@ import { config } from '../config.js';
 import { getProjectContext } from '../scanner/projectScanner.js';
 import { loadClaudeMdContext, formatClaudeMdBlock } from '../scanner/claudeMdLoader.js';
 import { checkPermission } from '../permissions/checker.js';
+import { shouldRequireConfirmation } from '../config/trust.js';
+import { getTrustMode } from '../db/queries.js';
 import { getSkillById, getSkillLoadState, refreshSkills } from '../skills/registry.js';
 import type { SkillManifest } from '@devai/shared';
 import { createSession, saveMessage, updateSessionTitleIfEmpty, getMessages, getSetting } from '../db/queries.js';
@@ -230,6 +232,9 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       let finalContent = '';
       const conversationMessages: LLMMessage[] = [...llmMessages];
 
+      // Get trust mode setting
+      const trustMode = await getTrustMode();
+
       while (turn < MAX_TURNS) {
         turn++;
         sendEvent({ type: 'status', status: 'thinking', turn });
@@ -263,7 +268,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
             arguments: toolCall.arguments,
           });
 
-          const result = await handleToolCall(toolCall, allowedToolNames, sendEvent);
+          const result = await handleToolCall(toolCall, allowedToolNames, sendEvent, trustMode);
           const isError = result.startsWith('Error');
           const safeResult = isError && !result.trim()
             ? 'Error: Tool failed without a message.'
@@ -651,7 +656,8 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 export async function handleToolCall(
   toolCall: ToolCall,
   allowedToolNames: Set<string> | null,
-  sendEvent?: (event: Record<string, unknown>) => void
+  sendEvent?: (event: Record<string, unknown>) => void,
+  trustMode?: 'default' | 'trusted'
 ): Promise<string> {
   const toolName = toolCall.name;
   const toolArgs = toolCall.arguments;
@@ -720,12 +726,30 @@ export async function handleToolCall(
       return `Error: Tool "${toolName}" is denied by permission pattern: ${permCheck.reason}`;
     }
 
-    if (permCheck.requiresConfirmation) {
+    // Check trust mode for confirmation bypass
+    const effectiveTrustMode = trustMode || 'default';
+    const trustCheck = shouldRequireConfirmation(
+      toolName,
+      toolArgs,
+      effectiveTrustMode,
+      true
+    );
+
+    if (trustCheck.requiresConfirmation && permCheck.requiresConfirmation) {
       return `Error: Tool "${toolName}" requires confirmation. Use askForConfirmation first.`;
     }
 
+    // Log trusted mode execution
+    if (effectiveTrustMode === 'trusted' && sendEvent) {
+      sendEvent({
+        type: 'trusted_execution',
+        toolName,
+        reason: 'Trust mode enabled',
+      });
+    }
+
     // Permission pattern grants this tool - execute directly
-    if (sendEvent) {
+    if (sendEvent && !trustCheck.requiresConfirmation) {
       sendEvent({
         type: 'permission_granted',
         toolName,
