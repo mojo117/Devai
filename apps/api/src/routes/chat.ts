@@ -87,6 +87,14 @@ GITHUB:
 LOGS:
 - logs.getStagingLogs(lines): Get staging environment logs
 
+CONTEXT (Read-Only Document Access):
+- context.listDocuments(): List all documents in the context folder
+- context.readDocument(path): Read a specific document by filename
+- context.searchDocuments(query): Search for text across all documents
+
+The context folder contains reference materials you can use to inform your responses.
+When relevant to the user's question, check if there are helpful documents available.
+
 CONFIRMATION:
 - askForConfirmation(toolName, toolArgs, description): Request approval for a tool that requires confirmation
 
