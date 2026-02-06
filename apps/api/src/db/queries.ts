@@ -332,3 +332,21 @@ export async function deleteOldActions(maxAgeMs: number = 24 * 60 * 60 * 1000): 
 
   return data?.length || 0;
 }
+
+/**
+ * Get the current trust mode setting
+ */
+export async function getTrustMode(): Promise<'default' | 'trusted'> {
+  const value = await getSetting('trustMode');
+  if (value === 'trusted') {
+    return 'trusted';
+  }
+  return 'default';
+}
+
+/**
+ * Set the trust mode
+ */
+export async function setTrustMode(mode: 'default' | 'trusted'): Promise<void> {
+  await setSetting('trustMode', mode);
+}
