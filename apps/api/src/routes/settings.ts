@@ -1,6 +1,6 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { getSetting, setSetting } from '../db/queries.js';
+import { getSetting, setSetting, getTrustMode, setTrustMode } from '../db/queries.js';
 import {
   getPermissionPatterns,
   addPermissionPattern,
@@ -144,6 +144,36 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
       return parseResult.data;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
+      return reply.status(500).send({ error: message });
+    }
+  });
+
+  // ============ Trust Mode Endpoints ============
+
+  // Get trust mode
+  app.get('/settings/trust-mode', async (_request, reply) => {
+    try {
+      const mode = await getTrustMode();
+      return reply.send({ mode });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return reply.status(500).send({ error: message });
+    }
+  });
+
+  // Set trust mode
+  app.post('/settings/trust-mode', async (request, reply) => {
+    const body = request.body as { mode?: string };
+
+    if (body.mode !== 'default' && body.mode !== 'trusted') {
+      return reply.status(400).send({ error: 'Mode must be "default" or "trusted"' });
+    }
+
+    try {
+      await setTrustMode(body.mode);
+      return reply.send({ mode: body.mode, success: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
       return reply.status(500).send({ error: message });
     }
   });
