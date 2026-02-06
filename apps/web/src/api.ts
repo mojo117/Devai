@@ -648,3 +648,22 @@ export async function saveGlobalContext(context: GlobalContext): Promise<GlobalC
   if (!res.ok) throw new Error('Failed to save global context');
   return res.json();
 }
+
+export async function getTrustMode(): Promise<{ mode: 'default' | 'trusted' }> {
+  const response = await fetch(`${API_BASE}/settings/trust-mode`);
+  if (!response.ok) {
+    throw new Error('Failed to get trust mode');
+  }
+  return response.json();
+}
+
+export async function setTrustMode(mode: 'default' | 'trusted'): Promise<void> {
+  const response = await fetch(`${API_BASE}/settings/trust-mode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  });
+  if (!response.ok) {
+    throw new Error('Failed to set trust mode');
+  }
+}
