@@ -1,8 +1,24 @@
 import type { Action } from '../types';
 
+function formatRelativeTime(dateString: string): string {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return 'just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${diffDays}d ago`;
+}
+
 interface ActionCardProps {
   action: Action;
   onApprove: () => void;
+  onReject?: () => void;
+  onRetry?: () => void;
 }
 
 const statusColors: Record<string, string> = {
@@ -11,9 +27,10 @@ const statusColors: Record<string, string> = {
   executing: 'bg-purple-600',
   done: 'bg-green-600',
   failed: 'bg-red-600',
+  rejected: 'bg-gray-600',
 };
 
-export function ActionCard({ action, onApprove }: ActionCardProps) {
+export function ActionCard({ action, onApprove, onReject, onRetry }: ActionCardProps) {
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-lg p-3">
       {/* Header */}
@@ -33,6 +50,13 @@ export function ActionCard({ action, onApprove }: ActionCardProps) {
       {/* Description */}
       <p className="text-sm text-gray-300 mb-2">{action.description}</p>
 
+      {/* Timestamps */}
+      <div className="text-xs text-gray-500 mt-1">
+        Created: {formatRelativeTime(action.createdAt)}
+        {action.approvedAt && ` • Approved: ${formatRelativeTime(action.approvedAt)}`}
+        {action.executedAt && ` • Executed: ${formatRelativeTime(action.executedAt)}`}
+      </div>
+
       {/* Arguments */}
       <details className="mb-3">
         <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-400">
@@ -43,14 +67,46 @@ export function ActionCard({ action, onApprove }: ActionCardProps) {
         </pre>
       </details>
 
-      {/* Approve Button */}
+      {action.preview?.summary && (
+        <details className="mb-3">
+          <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-400">
+            View action summary
+          </summary>
+          <pre className="mt-2 text-xs bg-gray-950 p-2 rounded overflow-x-auto text-gray-300 whitespace-pre-wrap">
+            {action.preview.summary}
+          </pre>
+        </details>
+      )}
+
+      {action.preview?.diff && (
+        <details className="mb-3">
+          <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-400">
+            View patch preview
+          </summary>
+          <pre className="mt-2 text-xs bg-gray-950 p-2 rounded overflow-x-auto text-gray-300 whitespace-pre-wrap">
+            {action.preview.diff}
+          </pre>
+        </details>
+      )}
+
+      {/* Approve/Reject Buttons */}
       {action.status === 'pending' && (
-        <button
-          onClick={onApprove}
-          className="w-full bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 px-4 rounded transition-colors"
-        >
-          Approve Action
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onApprove}
+            className="flex-1 bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 px-4 rounded transition-colors"
+          >
+            Approve
+          </button>
+          {onReject && (
+            <button
+              onClick={onReject}
+              className="flex-1 border border-red-500 text-red-300 hover:text-white hover:bg-red-600 text-sm font-medium py-2 px-4 rounded transition-colors"
+            >
+              Reject
+            </button>
+          )}
+        </div>
       )}
 
       {/* Result/Error */}
@@ -63,6 +119,23 @@ export function ActionCard({ action, onApprove }: ActionCardProps) {
       {action.status === 'failed' && action.error && (
         <div className="mt-2 text-xs text-red-400">
           Error: {action.error}
+        </div>
+      )}
+
+      {action.status === 'failed' && onRetry && (
+        <div className="mt-3">
+          <button
+            onClick={onRetry}
+            className="w-full border border-red-500 text-red-300 hover:text-white hover:bg-red-600 text-sm font-medium py-2 px-4 rounded transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {action.status === 'rejected' && (
+        <div className="mt-2 text-xs text-gray-400">
+          Rejected by user.
         </div>
       )}
     </div>

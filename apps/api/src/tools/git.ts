@@ -28,32 +28,32 @@ async function findGitRoot(startDir: string): Promise<string | null> {
 }
 
 async function getGit(): Promise<SimpleGit> {
-  const projectRoot = config.projectRoot;
-  const baseDir = projectRoot || process.cwd();
+  // Use only the hardcoded allowed roots
+  const allowedRoots = [...config.allowedRoots];
+
+  if (allowedRoots.length === 0) {
+    throw new Error('No allowed roots configured for git operations');
+  }
+
+  // Try to find a git repo starting from the first allowed root
+  const baseDir = allowedRoots[0];
   const gitRoot = await findGitRoot(baseDir);
 
   if (!gitRoot) {
     throw new Error(
-      `No git repository found from ${baseDir}. Set PROJECT_ROOT to a git repo.`
+      `No git repository found from ${baseDir}. Ensure a git repo exists within allowed paths.`
     );
   }
 
-  const allowedRoots = [
-    ...(config.projectRoot ? [config.projectRoot] : []),
-    ...config.allowedRoots,
-  ];
+  // Verify git root is within allowed paths
+  const gitRootResolved = resolve(gitRoot);
+  const allowed = allowedRoots.some((root) => {
+    const absoluteRoot = resolve(root);
+    return gitRootResolved.startsWith(absoluteRoot + '/') || gitRootResolved === absoluteRoot;
+  });
 
-  if (allowedRoots.length > 0) {
-    const gitRootResolved = resolve(gitRoot);
-    const allowed = allowedRoots.some((root) => {
-      const absoluteRoot = resolve(root);
-      const relativePath = relative(absoluteRoot, gitRootResolved);
-      return !relativePath.startsWith('..');
-    });
-
-    if (!allowed) {
-      throw new Error('Access denied: Git repository is outside allowed roots');
-    }
+  if (!allowed) {
+    throw new Error(`Access denied: Git repository must be within ${allowedRoots.join(' or ')}`);
   }
 
   return simpleGit(gitRoot);
@@ -139,4 +139,116 @@ export async function gitCommit(message: string): Promise<GitCommitResult> {
     date: new Date().toISOString(),
     filesChanged: result.summary.changes,
   };
+}
+
+export interface GitPushResult {
+  remote: string;
+  branch: string;
+  success: boolean;
+  message: string;
+}
+
+export async function gitPush(
+  remote: string = 'origin',
+  branch?: string
+): Promise<GitPushResult> {
+  const git = await getGit();
+
+  // Get current branch if not specified
+  const status = await git.status();
+  const targetBranch = branch || status.current || 'dev';
+
+  // Safety check: never push to main/master directly
+  if (targetBranch === 'main' || targetBranch === 'master') {
+    throw new Error(
+      `Sicherheitsregel: Push zu ${targetBranch} ist nicht erlaubt. Nutze dev Branch.`
+    );
+  }
+
+  try {
+    await git.push(remote, targetBranch);
+    return {
+      remote,
+      branch: targetBranch,
+      success: true,
+      message: `Erfolgreich zu ${remote}/${targetBranch} gepusht`,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return {
+      remote,
+      branch: targetBranch,
+      success: false,
+      message: `Push fehlgeschlagen: ${errorMessage}`,
+    };
+  }
+}
+
+export interface GitPullResult {
+  remote: string;
+  branch: string;
+  success: boolean;
+  message: string;
+  changes: {
+    files: number;
+    insertions: number;
+    deletions: number;
+  };
+}
+
+export async function gitPull(
+  remote: string = 'origin',
+  branch?: string
+): Promise<GitPullResult> {
+  const git = await getGit();
+
+  // Get current branch if not specified
+  const status = await git.status();
+  const targetBranch = branch || status.current || 'dev';
+
+  try {
+    const result = await git.pull(remote, targetBranch);
+
+    return {
+      remote,
+      branch: targetBranch,
+      success: true,
+      message: result.summary.changes > 0
+        ? `${result.summary.changes} Dateien aktualisiert`
+        : 'Bereits auf dem neuesten Stand',
+      changes: {
+        files: result.summary.changes,
+        insertions: result.summary.insertions,
+        deletions: result.summary.deletions,
+      },
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return {
+      remote,
+      branch: targetBranch,
+      success: false,
+      message: `Pull fehlgeschlagen: ${errorMessage}`,
+      changes: { files: 0, insertions: 0, deletions: 0 },
+    };
+  }
+}
+
+export interface GitAddResult {
+  files: string[];
+  success: boolean;
+}
+
+export async function gitAdd(files: string[] = ['.']): Promise<GitAddResult> {
+  const git = await getGit();
+
+  try {
+    await git.add(files);
+    return {
+      files,
+      success: true,
+    };
+  } catch (error) {
+    throw new Error(`Git add fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }

@@ -1,4 +1,11 @@
-export type ActionStatus = 'pending' | 'approved' | 'executing' | 'done' | 'failed';
+export type ActionStatus = 'pending' | 'approved' | 'executing' | 'done' | 'failed' | 'rejected';
+
+export interface ActionPreview {
+  kind: 'diff' | 'summary';
+  path: string;
+  diff?: string;
+  summary?: string;
+}
 
 export interface Action {
   id: string;
@@ -7,7 +14,9 @@ export interface Action {
   description: string;
   status: ActionStatus;
   createdAt: string;
+  preview?: ActionPreview;
   approvedAt?: string;
+  rejectedAt?: string;
   executedAt?: string;
   result?: unknown;
   error?: string;
@@ -21,4 +30,21 @@ export interface ApproveResponse {
   action: Action;
   result?: unknown;
   error?: string;
+}
+
+export interface RejectRequest {
+  actionId: string;
+}
+
+export interface RejectResponse {
+  action: Action;
+}
+
+export interface RetryRequest {
+  actionId: string;
+}
+
+export interface RetryResponse {
+  action: Action;
+  originalActionId: string;
 }

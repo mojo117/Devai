@@ -24,10 +24,21 @@ export interface ChatRequest {
   projectRoot: string;
   skillIds?: string[];
   sessionId?: string;
+  pinnedFiles?: string[];
+  projectContextOverride?: {
+    enabled?: boolean;
+    summary?: string;
+  };
+  planApproved?: boolean;
 }
 
 export interface ChatResponse {
   message: ChatMessage;
   pendingActions: Action[];
   sessionId?: string;
+  contextStats?: {
+    tokensUsed: number;
+    tokenBudget: number;
+    note?: string;
+  };
 }

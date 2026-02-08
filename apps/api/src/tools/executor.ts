@@ -3,7 +3,13 @@ import * as fsTools from './fs.js';
 import * as gitTools from './git.js';
 import * as githubTools from './github.js';
 import * as logsTools from './logs.js';
+import * as bashTools from './bash.js';
+import * as sshTools from './ssh.js';
+import * as pm2Tools from './pm2.js';
+import * as webTools from './web.js';
+import * as contextTools from './context.js';
 import { config } from '../config.js';
+import { mcpManager } from '../mcp/index.js';
 
 export interface ToolExecutionResult {
   success: boolean;
@@ -32,44 +38,193 @@ export async function executeTool(
     const execution = (async () => {
       switch (toolName) {
         // File System Tools
-        case 'fs.listFiles':
+        case 'fs_listFiles':
           return fsTools.listFiles(args.path as string);
 
-        case 'fs.readFile':
+        case 'fs_readFile':
           return fsTools.readFile(args.path as string);
 
-        case 'fs.writeFile':
+        case 'fs_writeFile':
           return fsTools.writeFile(
             args.path as string,
             args.content as string
           );
 
+        case 'fs_glob':
+          return fsTools.globFiles(
+            args.pattern as string,
+            args.path as string | undefined
+          );
+
+        case 'fs_grep':
+          return fsTools.grepFiles(
+            args.pattern as string,
+            args.path as string,
+            args.glob as string | undefined
+          );
+
+        case 'fs_edit':
+          return fsTools.editFile(
+            args.path as string,
+            args.old_string as string,
+            args.new_string as string,
+            args.replace_all as boolean | undefined
+          );
+
+        case 'fs_mkdir':
+          return fsTools.makeDirectory(args.path as string);
+
+        case 'fs_move':
+          return fsTools.moveFile(
+            args.source as string,
+            args.destination as string
+          );
+
+        case 'fs_delete':
+          return fsTools.deleteFile(
+            args.path as string,
+            args.recursive as boolean | undefined
+          );
+
         // Git Tools
-        case 'git.status':
+        case 'git_status':
           return gitTools.gitStatus();
 
-        case 'git.diff':
+        case 'git_diff':
           return gitTools.gitDiff(args.staged as boolean | undefined);
 
-        case 'git.commit':
+        case 'git_commit':
           return gitTools.gitCommit(args.message as string);
 
+        case 'git_push':
+          return gitTools.gitPush(
+            args.remote as string | undefined,
+            args.branch as string | undefined
+          );
+
+        case 'git_pull':
+          return gitTools.gitPull(
+            args.remote as string | undefined,
+            args.branch as string | undefined
+          );
+
+        case 'git_add':
+          return gitTools.gitAdd(args.files as string[] | undefined);
+
         // GitHub Tools
-        case 'github.triggerWorkflow':
+        case 'github_triggerWorkflow':
           return githubTools.triggerWorkflow(
             args.workflow as string,
             args.ref as string,
             args.inputs as Record<string, string> | undefined
           );
 
-        case 'github.getWorkflowRunStatus':
+        case 'github_getWorkflowRunStatus':
           return githubTools.getWorkflowRunStatus(args.runId as number);
 
         // Logs Tools
-        case 'logs.getStagingLogs':
+        case 'logs_getStagingLogs':
           return logsTools.getStagingLogs(args.lines as number | undefined);
 
+        // Web Tools (SCOUT agent)
+        case 'web_search': {
+          const result = await webTools.webSearch(args.query as string, {
+            complexity: args.complexity as 'simple' | 'detailed' | 'deep' | undefined,
+            recency: args.recency as 'day' | 'week' | 'month' | 'year' | undefined,
+          });
+          // Format the result with citations for display
+          return webTools.formatWebSearchResult(result);
+        }
+
+        case 'web_fetch':
+          return webTools.webFetch(args.url as string, {
+            timeout: args.timeout as number | undefined,
+          });
+
+        // DevOps Tools - Bash
+        case 'bash_execute':
+          return bashTools.executeBash(args.command as string, {
+            cwd: args.cwd as string | undefined,
+            timeout: args.timeout as number | undefined,
+          });
+
+        // DevOps Tools - SSH
+        case 'ssh_execute':
+          return sshTools.executeSSH(
+            args.host as string,
+            args.command as string,
+            { timeout: args.timeout as number | undefined }
+          );
+
+        // DevOps Tools - PM2
+        case 'pm2_status':
+          return pm2Tools.pm2Status(args.host as string | undefined);
+
+        case 'pm2_restart':
+          return pm2Tools.pm2Restart(
+            args.processName as string,
+            args.host as string | undefined
+          );
+
+        case 'pm2_stop':
+          return pm2Tools.pm2Stop(
+            args.processName as string,
+            args.host as string | undefined
+          );
+
+        case 'pm2_start':
+          return pm2Tools.pm2Start(
+            args.processName as string,
+            args.host as string | undefined
+          );
+
+        case 'pm2_logs':
+          return pm2Tools.pm2Logs(
+            args.processName as string,
+            args.lines as number | undefined,
+            args.host as string | undefined
+          );
+
+        case 'pm2_reloadAll':
+          return pm2Tools.pm2ReloadAll(args.host as string | undefined);
+
+        case 'pm2_save':
+          return pm2Tools.pm2Save(args.host as string | undefined);
+
+        // DevOps Tools - NPM
+        case 'npm_install':
+          return bashTools.npmInstall(
+            args.packageName as string | undefined,
+            args.cwd as string | undefined
+          );
+
+        case 'npm_run':
+          return bashTools.npmRun(
+            args.script as string,
+            args.cwd as string | undefined
+          );
+
+        // Context Tools (read-only document access)
+        case 'context_listDocuments':
+          return contextTools.listDocuments(config.allowedRoots[0]);
+
+        case 'context_readDocument':
+          return contextTools.readDocument(
+            config.allowedRoots[0],
+            args.path as string
+          );
+
+        case 'context_searchDocuments':
+          return contextTools.searchDocuments(
+            config.allowedRoots[0],
+            args.query as string
+          );
+
         default:
+          // Route MCP tools to the MCP manager
+          if (mcpManager.isMcpTool(toolName)) {
+            return mcpManager.executeTool(toolName, args).then((r) => r.result);
+          }
           throw new Error(`Unknown tool: ${toolName}`);
       }
     })();
@@ -113,6 +268,99 @@ export async function executeTools(
   }
 
   return results;
+}
+
+// Read-only tools that can be safely executed in parallel
+const READ_ONLY_TOOLS = new Set([
+  'fs_listFiles',
+  'fs_readFile',
+  'fs_glob',
+  'fs_grep',
+  'git_status',
+  'git_diff',
+  'github_getWorkflowRunStatus',
+  'logs_getStagingLogs',
+  'pm2_status',
+  'pm2_logs',
+  'web_search',
+  'web_fetch',
+  'context_listDocuments',
+  'context_readDocument',
+  'context_searchDocuments',
+]);
+
+/**
+ * Check if a tool is read-only (safe for parallel execution)
+ */
+export function isReadOnlyTool(toolName: string): boolean {
+  return READ_ONLY_TOOLS.has(toolName);
+}
+
+/**
+ * Interface for parallel tool execution results
+ */
+export interface ParallelToolExecution {
+  tools: Array<{ name: string; args: ToolArgs }>;
+  results: ToolExecutionResult[];
+  totalDuration: number;
+  parallelCount: number;
+  sequentialCount: number;
+}
+
+/**
+ * Execute tools in parallel where safe, sequential otherwise
+ *
+ * Read-only tools are executed in parallel for performance.
+ * Write tools are executed sequentially for safety.
+ */
+export async function executeToolsParallel(
+  tools: Array<{ name: string; args: ToolArgs }>
+): Promise<ParallelToolExecution> {
+  const start = Date.now();
+
+  // Separate read-only and write tools
+  const readOnlyTools: Array<{ name: string; args: ToolArgs; index: number }> = [];
+  const writeTools: Array<{ name: string; args: ToolArgs; index: number }> = [];
+
+  tools.forEach((tool, index) => {
+    const toolDef = getToolDefinition(tool.name);
+
+    // Skip tools that require confirmation
+    if (toolDef?.requiresConfirmation) {
+      writeTools.push({ ...tool, index });
+    } else if (isReadOnlyTool(tool.name)) {
+      readOnlyTools.push({ ...tool, index });
+    } else {
+      writeTools.push({ ...tool, index });
+    }
+  });
+
+  // Execute read-only tools in parallel
+  const readOnlyPromises = readOnlyTools.map(async (tool) => ({
+    index: tool.index,
+    result: await executeTool(tool.name, tool.args),
+  }));
+
+  const readOnlyResults = await Promise.all(readOnlyPromises);
+
+  // Execute write tools sequentially
+  const writeResults: Array<{ index: number; result: ToolExecutionResult }> = [];
+  for (const tool of writeTools) {
+    const result = await executeTool(tool.name, tool.args);
+    writeResults.push({ index: tool.index, result });
+  }
+
+  // Combine results in original order
+  const allResults = [...readOnlyResults, ...writeResults];
+  allResults.sort((a, b) => a.index - b.index);
+
+  return {
+    tools,
+    results: allResults.map((r) => r.result),
+    totalDuration: Date.now() - start,
+    parallelCount: readOnlyTools.length,
+    sequentialCount: writeTools.length,
+  };
 }
 
 async function withTimeout<T>(

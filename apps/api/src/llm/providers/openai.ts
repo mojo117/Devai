@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { config } from '../../config.js';
-import type { LLMProviderAdapter, GenerateRequest, GenerateResponse, ToolDefinition } from '../types.js';
+import type { LLMProviderAdapter, GenerateRequest, GenerateResponse, ToolDefinition, LLMMessage } from '../types.js';
 
 export class OpenAIProvider implements LLMProviderAdapter {
   readonly name = 'openai' as const;
@@ -23,6 +23,17 @@ export class OpenAIProvider implements LLMProviderAdapter {
   async generate(request: GenerateRequest): Promise<GenerateResponse> {
     const client = this.getClient();
 
+    // Build tool name alias map (dots to underscores for OpenAI)
+    const toolNameToAlias = new Map<string, string>();
+    const aliasToToolName = new Map<string, string>();
+    if (request.tools) {
+      for (const tool of request.tools) {
+        const alias = tool.name.replace(/\./g, '_');
+        toolNameToAlias.set(tool.name, alias);
+        aliasToToolName.set(alias, tool.name);
+      }
+    }
+
     const messages: OpenAI.ChatCompletionMessageParam[] = [];
 
     // Add system message if present
@@ -33,17 +44,12 @@ export class OpenAIProvider implements LLMProviderAdapter {
     // Add conversation messages
     for (const m of request.messages) {
       if (m.role === 'system') continue; // Already handled above
-      messages.push({
-        role: m.role as 'user' | 'assistant',
-        content: m.content,
-      });
+      this.convertMessage(m, messages, toolNameToAlias);
     }
 
-    const toolNameMap = new Map<string, string>();
     const tools = request.toolsEnabled && request.tools
       ? request.tools.map((tool) => {
-          const alias = tool.name.replace(/\./g, '_');
-          toolNameMap.set(alias, tool.name);
+          const alias = toolNameToAlias.get(tool.name) || tool.name;
           return this.convertTool(tool, alias);
         })
       : undefined;
@@ -63,7 +69,7 @@ export class OpenAIProvider implements LLMProviderAdapter {
     if (message.tool_calls) {
       for (const tc of message.tool_calls) {
         if (tc.type === 'function') {
-          const name = toolNameMap.get(tc.function.name) || tc.function.name;
+          const name = aliasToToolName.get(tc.function.name) || tc.function.name;
           toolCalls.push({
             id: tc.id,
             name,
@@ -98,6 +104,48 @@ export class OpenAIProvider implements LLMProviderAdapter {
         },
       },
     };
+  }
+
+  private convertMessage(
+    message: LLMMessage,
+    messages: OpenAI.ChatCompletionMessageParam[],
+    toolNameToAlias: Map<string, string>
+  ): void {
+    // Assistant message with tool calls
+    if (message.role === 'assistant' && message.toolCalls?.length) {
+      const toolCalls: OpenAI.ChatCompletionMessageToolCall[] = message.toolCalls.map((tc) => ({
+        id: tc.id,
+        type: 'function' as const,
+        function: {
+          name: toolNameToAlias.get(tc.name) || tc.name,
+          arguments: JSON.stringify(tc.arguments),
+        },
+      }));
+      messages.push({
+        role: 'assistant',
+        content: message.content || null,
+        tool_calls: toolCalls,
+      });
+      return;
+    }
+
+    // User message with tool results - these become separate 'tool' role messages
+    if (message.role === 'user' && message.toolResults?.length) {
+      for (const tr of message.toolResults) {
+        messages.push({
+          role: 'tool',
+          tool_call_id: tr.toolUseId,
+          content: tr.result,
+        });
+      }
+      return;
+    }
+
+    // Simple text message
+    messages.push({
+      role: message.role as 'user' | 'assistant',
+      content: message.content,
+    });
   }
 
   listModels(): string[] {

@@ -12,8 +12,10 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@fastify/cors": "^10.0.0",
+    "@fastify/rate-limit": "^10.3.0",
+    "@fastify/websocket": "^11.2.0",
     "@google/generative-ai": "^0.21.0",
-    "@supabase/supabase-js": "^2.45.4",
+    "@supabase/supabase-js": "^2.91.0",
     "bcrypt": "^5.1.1",
     "better-sqlite3": "^11.7.0",
     "dotenv": "^16.4.0",

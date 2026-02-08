@@ -1,13 +1,18 @@
-import { useState, useEffect } from 'react';
-import { ChatUI } from './components/ChatUI';
+import { useState, useEffect, useCallback } from 'react';
+import { ChatUI, type ToolEvent } from './components/ChatUI';
+import { type AgentName, type AgentPhase } from './components/AgentStatus';
 import { ProjectInfo } from './components/ProjectInfo';
-import { ActionCard } from './components/ActionCard';
-import { ToolsPanel } from './components/ToolsPanel';
-import { HistoryPanel } from './components/HistoryPanel';
+import { LeftSidebar, LEFT_SIDEBAR_WIDTH } from './components/LeftSidebar';
+import { ActionsPage } from './components/ActionsPage';
+import { SystemFeed, type FeedEvent, toolEventToFeedEvent } from './components/SystemFeed';
+import { ResizableDivider } from './components/ResizableDivider';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   fetchHealth,
   fetchActions,
   approveAction,
+  rejectAction,
+  retryAction,
   fetchSkills,
   reloadSkills,
   fetchProject,
@@ -20,16 +25,16 @@ import {
   clearAuthToken,
 } from './api';
 import type {
-  LLMProvider,
   Action,
   HealthResponse,
   SkillSummary,
   ProjectContext,
+  PinnedFilesSetting,
+  IgnorePatternsSetting,
+  ProjectContextOverrideSetting,
 } from './types';
 
 function App() {
-  // Default to OpenAI (GPT-4o)
-  const provider: LLMProvider = 'openai';
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [actions, setActions] = useState<Action[]>([]);
   const [skills, setSkills] = useState<SkillSummary[]>([]);
@@ -47,6 +52,60 @@ function App() {
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
+  const [pinnedFiles, setPinnedFiles] = useState<string[]>([]);
+  const [ignorePatterns, setIgnorePatterns] = useState<string[]>([]);
+  const [projectContextOverride, setProjectContextOverride] = useState<ProjectContextOverrideSetting>({
+    enabled: false,
+    summary: '',
+  });
+  const [view, setView] = useState<'chat' | 'actions'>('chat');
+  const [contextStats, setContextStats] = useState<{
+    tokensUsed: number;
+    tokenBudget: number;
+    note?: string;
+  } | null>(null);
+  const [feedEvents, setFeedEvents] = useState<FeedEvent[]>([]);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [feedWidth, setFeedWidth] = useState(384); // Default 384px (w-96)
+  const [clearFeedTrigger, setClearFeedTrigger] = useState(0);
+  const [mobilePanel, setMobilePanel] = useState<'chat' | 'feed'>('chat');
+  const [isMobile, setIsMobile] = useState(false);
+  const [activeAgent, setActiveAgent] = useState<AgentName | null>(null);
+  const [agentPhase, setAgentPhase] = useState<AgentPhase>('idle');
+
+  // Handle agent state changes from ChatUI
+  const handleAgentChange = useCallback((agent: AgentName | null, phase: AgentPhase) => {
+    setActiveAgent(agent);
+    setAgentPhase(phase);
+  }, []);
+
+  // Track window resize for mobile detection
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Convert tool events to feed events
+  const handleToolEvents = useCallback((toolEvents: ToolEvent[]) => {
+    const newFeedEvents = toolEvents.map(toolEventToFeedEvent);
+    setFeedEvents(newFeedEvents);
+  }, []);
+
+  // Clear feed events
+  const handleClearFeed = useCallback(() => {
+    setFeedEvents([]);
+    setClearFeedTrigger((prev) => prev + 1);
+  }, []);
+
+  // Handle resize of the system feed panel
+  const handleFeedResize = useCallback((deltaX: number) => {
+    setFeedWidth((prev) => {
+      const newWidth = prev - deltaX; // Subtract because dragging right should shrink the feed
+      return Math.max(200, Math.min(800, newWidth)); // Clamp between 200px and 800px
+    });
+  }, []);
 
   useEffect(() => {
     verifyAuth()
@@ -66,9 +125,66 @@ function App() {
   }, [isAuthed]);
 
   useEffect(() => {
+    if (!isAuthed) return;
+    let isMounted = true;
+
+    const loadProjectContextOverride = async () => {
+      try {
+        const stored = await fetchSetting('projectContextOverride');
+        const value = stored.value as ProjectContextOverrideSetting | null;
+        if (!isMounted) return;
+        const next = value && typeof value === 'object'
+          ? {
+              enabled: Boolean((value as ProjectContextOverrideSetting).enabled),
+              summary: typeof (value as ProjectContextOverrideSetting).summary === 'string'
+                ? (value as ProjectContextOverrideSetting).summary
+                : '',
+            }
+          : { enabled: false, summary: '' };
+        setProjectContextOverride(next);
+      } catch {
+        if (!isMounted) return;
+        setProjectContextOverride({ enabled: false, summary: '' });
+      }
+    };
+
+    loadProjectContextOverride();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthed]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
+    let isMounted = true;
+
+    const loadIgnorePatterns = async () => {
+      try {
+        const stored = await fetchSetting('ignorePatterns');
+        const value = stored.value as IgnorePatternsSetting | null;
+        if (!isMounted) return;
+        const patterns = value && Array.isArray((value as IgnorePatternsSetting).patterns)
+          ? (value as IgnorePatternsSetting).patterns.filter((p) => typeof p === 'string')
+          : [];
+        setIgnorePatterns(patterns);
+      } catch {
+        if (!isMounted) return;
+        setIgnorePatterns([]);
+      }
+    };
+
+    loadIgnorePatterns();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthed]);
+
+  useEffect(() => {
     if (!isAuthed || !health?.projectRoot) return;
     setProjectLoading(true);
-    fetchProject()
+    fetchProject(health.projectRoot)
       .then((data) => {
         setProjectContext(data.context);
         setProjectContextLoadedAt(new Date().toISOString());
@@ -119,10 +235,57 @@ function App() {
 
   useEffect(() => {
     if (!isAuthed) return;
+    let isMounted = true;
+
+    const loadPinned = async () => {
+      try {
+        const stored = await fetchSetting('pinnedFiles');
+        const value = stored.value as PinnedFilesSetting | null;
+        if (!isMounted) return;
+        const files = value && Array.isArray((value as PinnedFilesSetting).files)
+          ? (value as PinnedFilesSetting).files.filter((f) => typeof f === 'string')
+          : [];
+        setPinnedFiles(files);
+      } catch {
+        if (!isMounted) return;
+        setPinnedFiles([]);
+      }
+    };
+
+    loadPinned();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthed]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
     saveSetting('selectedSkills', selectedSkillIds).catch(() => {
       // Non-blocking persistence; ignore errors here.
     });
   }, [isAuthed, selectedSkillIds]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
+    saveSetting('pinnedFiles', { files: pinnedFiles }).catch(() => {
+      // Non-blocking persistence; ignore errors here.
+    });
+  }, [isAuthed, pinnedFiles]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
+    saveSetting('ignorePatterns', { patterns: ignorePatterns }).catch(() => {
+      // Non-blocking persistence; ignore errors here.
+    });
+  }, [isAuthed, ignorePatterns]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
+    saveSetting('projectContextOverride', projectContextOverride).catch(() => {
+      // Non-blocking persistence; ignore errors here.
+    });
+  }, [isAuthed, projectContextOverride]);
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -142,6 +305,26 @@ function App() {
       setActions(data.actions);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to approve');
+    }
+  };
+
+  const handleReject = async (actionId: string) => {
+    try {
+      await rejectAction(actionId);
+      const data = await fetchActions();
+      setActions(data.actions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reject');
+    }
+  };
+
+  const handleRetry = async (actionId: string) => {
+    try {
+      await retryAction(actionId);
+      const data = await fetchActions();
+      setActions(data.actions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to retry');
     }
   };
 
@@ -172,9 +355,10 @@ function App() {
   };
 
   const handleRefreshProject = async () => {
+    if (!health?.projectRoot) return;
     setProjectLoading(true);
     try {
-      const data = await refreshProject();
+      const data = await refreshProject(health.projectRoot);
       setProjectContext(data.context);
       setProjectContextLoadedAt(new Date().toISOString());
     } catch (err) {
@@ -263,12 +447,16 @@ function App() {
     );
   }
 
-  const pendingActions = actions.filter((a) => a.status === 'pending');
+  const sortedActions = [...actions].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const pendingActions = sortedActions.filter((a) => a.status === 'pending');
+  const activeActions = sortedActions.filter((a) => a.status === 'approved' || a.status === 'executing');
+  const completedActions = sortedActions.filter((a) => a.status === 'done' || a.status === 'failed' || a.status === 'rejected');
 
   return (
+    <ErrorBoundary>
     <div className="min-h-screen flex flex-col">
-      {/* Tools Panel (collapsible) */}
-      <ToolsPanel
+      {/* Left Sidebar with Toolbar and Panels - hidden on mobile */}
+      {!isMobile && <LeftSidebar
         allowedRoots={health?.allowedRoots}
         skills={skills}
         selectedSkillIds={selectedSkillIds}
@@ -282,25 +470,94 @@ function App() {
         projectContextLoadedAt={projectContextLoadedAt}
         onRefreshProject={handleRefreshProject}
         projectLoading={projectLoading}
-      />
+        pinnedFiles={pinnedFiles}
+        onUnpinFile={(file) => setPinnedFiles((prev) => prev.filter((f) => f !== file))}
+        ignorePatterns={ignorePatterns}
+        onUpdateIgnorePatterns={setIgnorePatterns}
+        projectContextOverride={projectContextOverride}
+        onUpdateProjectContextOverride={setProjectContextOverride}
+        contextStats={contextStats}
+        mcpServers={health?.mcp}
+      />}
 
-      {/* History Panel (collapsible) */}
-      <HistoryPanel />
+      {/* Header - compact sticky header */}
+      <header
+        className="sticky top-0 z-40 bg-gray-800/95 backdrop-blur border-b border-gray-700 px-3 md:px-4 py-2"
+        style={{ marginLeft: isMobile ? 0 : LEFT_SIDEBAR_WIDTH }}
+      >
+        <div className="flex items-center justify-between gap-2">
+          {/* Left: Logo + View Toggle */}
+          <div className="flex items-center gap-2">
+            <h1 className="text-base font-bold text-blue-400">DevAI</h1>
+            <div className="flex text-[11px]">
+              <button
+                onClick={() => setView('chat')}
+                className={`px-2 py-1 rounded-l border-y border-l ${
+                  view === 'chat'
+                    ? 'bg-blue-600 border-blue-500 text-white'
+                    : 'border-gray-600 text-gray-400 hover:bg-gray-700'
+                }`}
+              >
+                Chat
+              </button>
+              <button
+                onClick={() => setView('actions')}
+                className={`px-2 py-1 rounded-r border ${
+                  view === 'actions'
+                    ? 'bg-blue-600 border-blue-500 text-white'
+                    : 'border-gray-600 text-gray-400 hover:bg-gray-700'
+                }`}
+              >
+                Actions
+              </button>
+            </div>
+          </div>
 
-      {/* Header */}
-      <header className="bg-gray-800 border-b border-gray-700 px-6 py-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <h1 className="text-xl font-bold text-blue-400">DevAI</h1>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-400">Model: <span className="text-green-400">GPT-4o</span></span>
-            <ProjectInfo projectRoot={health?.projectRoot} />
+          {/* Center: Agent Status (compact) */}
+          <div className="hidden sm:flex items-center gap-1 text-[11px]">
+            <span className={`px-1.5 py-0.5 rounded ${activeAgent === 'chapo' ? 'bg-purple-600/30 text-purple-300' : 'text-gray-500'}`} title="CHAPO - Coordinator">
+              🎯
+            </span>
+            <span className="text-gray-600">→</span>
+            <span className={`px-1.5 py-0.5 rounded ${activeAgent === 'koda' ? 'bg-blue-600/30 text-blue-300' : 'text-gray-500'}`} title="KODA - Developer">
+              💻
+            </span>
+            <span className={`px-1.5 py-0.5 rounded ${activeAgent === 'devo' ? 'bg-green-600/30 text-green-300' : 'text-gray-500'}`} title="DEVO - DevOps">
+              🔧
+            </span>
+            <span className={`px-1.5 py-0.5 rounded ${activeAgent === 'scout' ? 'bg-orange-600/30 text-orange-300' : 'text-gray-500'}`} title="SCOUT - Explorer">
+              🔍
+            </span>
+            {activeAgent && (
+              <span className={`ml-1 text-[10px] ${
+                agentPhase === 'thinking' ? 'text-cyan-400 animate-pulse' :
+                agentPhase === 'execution' || agentPhase === 'executing' ? 'text-yellow-400' :
+                agentPhase === 'error' ? 'text-red-400' :
+                'text-gray-500'
+              }`}>
+                {agentPhase === 'qualification' && '...'}
+                {agentPhase === 'thinking' && '💭'}
+                {(agentPhase === 'execution' || agentPhase === 'executing') && '⚡'}
+                {agentPhase === 'idle' && '✓'}
+              </span>
+            )}
+          </div>
+
+          {/* Right: Status + Project */}
+          <div className="flex items-center gap-3 text-[11px]">
+            <span className={`${health ? 'text-green-400' : 'text-yellow-400'}`}>
+              {health ? '● Online' : '○ ...'}
+            </span>
+            <span className="hidden md:inline text-gray-500 truncate max-w-[150px]" title={health?.projectRoot || ''}>
+              {health?.projectRoot?.split('/').pop() || ''}
+            </span>
           </div>
         </div>
       </header>
 
       {/* Error Banner */}
       {error && (
-        <div className="bg-red-900/50 border-b border-red-700 px-6 py-2 text-red-200 text-sm">
+        <div className="bg-red-900/50 border-b border-red-700 px-4 md:px-6 py-2 text-red-200 text-sm" style={{ marginLeft: isMobile ? 0 : LEFT_SIDEBAR_WIDTH }}>
           {error}
           <button
             onClick={() => setError(null)}
@@ -312,51 +569,83 @@ function App() {
       )}
 
       {/* Main Content */}
-      <div className="flex-1 flex max-w-6xl mx-auto w-full">
-        {/* Chat Area */}
-        <div className="flex-1 flex flex-col">
-          <ChatUI
-            provider={provider}
-            projectRoot={health?.projectRoot}
-            skillIds={selectedSkillIds}
-          />
-        </div>
-
-        {/* Actions Sidebar */}
-        {pendingActions.length > 0 && (
-          <aside className="w-80 border-l border-gray-700 p-4 overflow-y-auto">
-            <h2 className="text-sm font-semibold text-gray-400 mb-4">
-              Pending Actions ({pendingActions.length})
-            </h2>
-            <div className="space-y-3">
-              {pendingActions.map((action) => (
-                <ActionCard
-                  key={action.id}
-                  action={action}
-                  onApprove={() => handleApprove(action.id)}
-                />
-              ))}
+      <div className="flex-1 flex w-full overflow-hidden min-h-0" style={{ marginLeft: isMobile ? 0 : LEFT_SIDEBAR_WIDTH }}>
+        {view === 'chat' ? (
+          <>
+            {/* Chat Area - shown on desktop always, on mobile only when mobilePanel is 'chat' */}
+            {/* Desktop: 2/3 width, Mobile: full width */}
+            <div className={`flex flex-col min-w-0 min-h-0 overflow-hidden ${isMobile ? (mobilePanel === 'chat' ? 'flex-1' : 'hidden') : 'w-2/3'}`}>
+              <ChatUI
+                projectRoot={health?.projectRoot}
+                skillIds={selectedSkillIds}
+                allowedRoots={health?.allowedRoots}
+                pinnedFiles={pinnedFiles}
+                ignorePatterns={ignorePatterns}
+                projectContextOverride={projectContextOverride}
+                onPinFile={(file) => setPinnedFiles((prev) => (prev.includes(file) ? prev : [...prev, file]))}
+                onContextUpdate={(stats) => setContextStats(stats)}
+                onToolEvent={handleToolEvents}
+                onLoadingChange={setChatLoading}
+                onAgentChange={handleAgentChange}
+                clearFeedTrigger={clearFeedTrigger}
+              />
             </div>
-          </aside>
+
+            {/* Resizable Divider - hidden on mobile */}
+            {!isMobile && <ResizableDivider onResize={handleFeedResize} />}
+
+            {/* System Feed - shown on desktop always, on mobile only when mobilePanel is 'feed' */}
+            {/* Desktop: 1/3 width, Mobile: full width */}
+            <aside
+              className={`min-h-0 overflow-hidden ${isMobile ? (mobilePanel === 'feed' ? 'flex-1' : 'hidden') : 'w-1/3 flex-shrink-0'}`}
+            >
+              <SystemFeed events={feedEvents} isLoading={chatLoading} onClear={handleClearFeed} />
+            </aside>
+          </>
+        ) : (
+          <ActionsPage
+            actions={sortedActions}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            onRetry={handleRetry}
+            onRefresh={async () => {
+              const data = await fetchActions();
+              setActions(data.actions);
+            }}
+          />
         )}
       </div>
 
-      {/* Status Bar */}
-      <footer className="bg-gray-800 border-t border-gray-700 px-6 py-2 text-xs text-gray-500">
-        <div className="max-w-6xl mx-auto flex justify-between">
-          <span>
-            Status: {health ? (
-              <span className="text-green-400">Connected</span>
-            ) : (
-              <span className="text-yellow-400">Connecting...</span>
-            )}
-          </span>
-          <span>
-            Environment: {health?.environment || 'unknown'}
-          </span>
+      {/* Mobile Panel Toggle - only shown on mobile in chat view */}
+      {isMobile && view === 'chat' && (
+        <div className="bg-gray-800 border-t border-gray-700 px-4 py-2">
+          <div className="flex items-center justify-center gap-1">
+            <button
+              onClick={() => setMobilePanel('chat')}
+              className={`flex-1 px-4 py-2 rounded-l-lg text-sm font-medium transition-colors ${
+                mobilePanel === 'chat'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              Chat
+            </button>
+            <button
+              onClick={() => setMobilePanel('feed')}
+              className={`flex-1 px-4 py-2 rounded-r-lg text-sm font-medium transition-colors ${
+                mobilePanel === 'feed'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              System
+            </button>
+          </div>
         </div>
-      </footer>
+      )}
+
     </div>
+    </ErrorBoundary>
   );
 }
 

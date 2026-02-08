@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
-import type { ProjectContext, ProjectFileEntry, SkillSummary } from '../types';
-import { listProjectFiles } from '../api';
+import type {
+  ProjectContext,
+  ProjectFileEntry,
+  ProjectSearchMatch,
+  SkillSummary,
+} from '../types';
+import { listProjectFiles, readProjectFile, searchProjectFiles } from '../api';
 
 interface Tool {
   name: string;
@@ -35,6 +40,17 @@ interface ToolsPanelProps {
   projectContextLoadedAt: string | null;
   onRefreshProject: () => void;
   projectLoading: boolean;
+  pinnedFiles: string[];
+  onUnpinFile: (file: string) => void;
+  ignorePatterns: string[];
+  onUpdateIgnorePatterns: (patterns: string[]) => void;
+  projectContextOverride: { enabled: boolean; summary: string };
+  onUpdateProjectContextOverride: (override: { enabled: boolean; summary: string }) => void;
+  contextStats?: {
+    tokensUsed: number;
+    tokenBudget: number;
+    note?: string;
+  } | null;
 }
 
 export function ToolsPanel({
@@ -51,6 +67,13 @@ export function ToolsPanel({
   projectContextLoadedAt,
   onRefreshProject,
   projectLoading,
+  pinnedFiles,
+  onUnpinFile,
+  ignorePatterns,
+  onUpdateIgnorePatterns,
+  projectContextOverride,
+  onUpdateProjectContextOverride,
+  contextStats,
 }: ToolsPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isAccessOpen, setIsAccessOpen] = useState(false);
@@ -58,22 +81,57 @@ export function ToolsPanel({
   const [files, setFiles] = useState<ProjectFileEntry[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesError, setFilesError] = useState<string | null>(null);
+  const [selectedRoot, setSelectedRoot] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchGlob, setSearchGlob] = useState('');
+  const [searchResults, setSearchResults] = useState<ProjectSearchMatch[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [filePreviewPath, setFilePreviewPath] = useState<string | null>(null);
+  const [filePreviewContent, setFilePreviewContent] = useState<string | null>(null);
+  const [filePreviewError, setFilePreviewError] = useState<string | null>(null);
+  const [filePreviewLoading, setFilePreviewLoading] = useState(false);
+  const [ignoreInput, setIgnoreInput] = useState('');
+  const [editingSummary, setEditingSummary] = useState(false);
+  const [summaryDraft, setSummaryDraft] = useState('');
+  const [overrideEnabledDraft, setOverrideEnabledDraft] = useState(false);
 
   useEffect(() => {
-    if (!isOpen || !projectRoot) return;
+    if (!isOpen || !selectedRoot) return;
     setFilesLoading(true);
     setFilesError(null);
-    listProjectFiles(filesPath)
+    const path = filesPath === '.' ? selectedRoot : `${selectedRoot}/${filesPath}`;
+    listProjectFiles(path, ignorePatterns)
       .then((data) => setFiles(data.files))
       .catch((err) => setFilesError(err instanceof Error ? err.message : 'Failed to load files'))
       .finally(() => setFilesLoading(false));
-  }, [isOpen, filesPath, projectRoot]);
+  }, [isOpen, filesPath, selectedRoot, ignorePatterns]);
 
   useEffect(() => {
-    if (projectRoot) {
-      setFilesPath('.');
+    if (allowedRoots && allowedRoots.length > 0) {
+      setSelectedRoot((prev) => prev || allowedRoots[0]);
     }
-  }, [projectRoot]);
+  }, [allowedRoots]);
+
+  useEffect(() => {
+    setFilesPath('.');
+    setSearchResults([]);
+    setSearchError(null);
+  }, [selectedRoot]);
+
+  useEffect(() => {
+    setIgnoreInput(ignorePatterns.join('\n'));
+  }, [ignorePatterns]);
+
+  useEffect(() => {
+    if (editingSummary) return;
+    setOverrideEnabledDraft(projectContextOverride.enabled);
+    if (projectContextOverride.summary) {
+      setSummaryDraft(projectContextOverride.summary);
+      return;
+    }
+    setSummaryDraft(projectContext?.summary || '');
+  }, [projectContextOverride, projectContext, editingSummary]);
 
   const handleOpenEntry = (entry: ProjectFileEntry) => {
     if (entry.type !== 'directory') return;
@@ -89,18 +147,70 @@ export function ToolsPanel({
     });
   };
 
+  const handleSearch = async () => {
+    if (!searchQuery.trim() || !selectedRoot) return;
+    setSearchLoading(true);
+    setSearchError(null);
+    try {
+      const data = await searchProjectFiles(
+        searchQuery.trim(),
+        selectedRoot,
+        searchGlob.trim() || undefined,
+        ignorePatterns
+      );
+      setSearchResults(data.matches);
+    } catch (err) {
+      setSearchError(err instanceof Error ? err.message : 'Search failed');
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const handleSaveSummary = () => {
+    onUpdateProjectContextOverride({
+      enabled: overrideEnabledDraft,
+      summary: summaryDraft.trim(),
+    });
+    setEditingSummary(false);
+  };
+
+  const handleApplyIgnore = () => {
+    const patterns = ignoreInput
+      .split(/[\n,]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    onUpdateIgnorePatterns(patterns);
+  };
+
+  const handlePreviewFile = async (relativePath: string) => {
+    if (!selectedRoot) return;
+    const fullPath = `${selectedRoot}/${relativePath}`;
+    setFilePreviewLoading(true);
+    setFilePreviewError(null);
+    setFilePreviewPath(relativePath);
+    try {
+      const data = await readProjectFile(fullPath);
+      setFilePreviewContent(data.content);
+    } catch (err) {
+      setFilePreviewContent(null);
+      setFilePreviewError(err instanceof Error ? err.message : 'Failed to read file');
+    } finally {
+      setFilePreviewLoading(false);
+    }
+  };
+
   return (
-    <div className="fixed right-0 top-1/2 -translate-y-1/2 z-50">
+    <div className="fixed left-0 top-1/2 -translate-y-1/2 z-50">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="absolute right-0 top-1/2 -translate-y-1/2 bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-4 rounded-l-lg shadow-lg transition-all"
+        className="absolute left-full top-1/2 -translate-y-1/2 bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-4 rounded-r-lg shadow-lg transition-all"
         style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
       >
-        {isOpen ? '>' : '<'} Tools
+        Tools {isOpen ? '<' : '>'}
       </button>
 
       <div
-        className={`bg-gray-800 border-l border-gray-700 shadow-xl transition-all duration-300 overflow-hidden ${
+        className={`bg-gray-800 border-r border-gray-700 shadow-xl transition-all duration-300 overflow-hidden ${
           isOpen ? 'w-72' : 'w-0'
         }`}
       >
@@ -124,14 +234,170 @@ export function ToolsPanel({
               </p>
             )}
             {projectContext ? (
-              <pre className="mt-2 text-[11px] bg-gray-900 p-2 rounded text-gray-300 whitespace-pre-wrap">
-                {projectContext.summary}
-              </pre>
+              <div className="mt-2 text-[11px] bg-gray-900 p-2 rounded text-gray-300 space-y-2">
+                <div className="grid grid-cols-2 gap-2 text-[10px] text-gray-400">
+                  <div>
+                    <div className="uppercase tracking-wide text-gray-500">Framework</div>
+                    <div className="text-gray-300">{projectContext.framework}</div>
+                  </div>
+                  <div>
+                    <div className="uppercase tracking-wide text-gray-500">Language</div>
+                    <div className="text-gray-300">{projectContext.language}</div>
+                  </div>
+                  <div>
+                    <div className="uppercase tracking-wide text-gray-500">Package Manager</div>
+                    <div className="text-gray-300">{projectContext.packageManager}</div>
+                  </div>
+                  <div>
+                    <div className="uppercase tracking-wide text-gray-500">Tests</div>
+                    <div className="text-gray-300">{projectContext.hasTests ? 'Yes' : 'No'}</div>
+                  </div>
+                  {projectContext.testCommand && (
+                    <div className="col-span-2">
+                      <div className="uppercase tracking-wide text-gray-500">Test Command</div>
+                      <div className="text-gray-300">{projectContext.testCommand}</div>
+                    </div>
+                  )}
+                  {projectContext.buildCommand && (
+                    <div className="col-span-2">
+                      <div className="uppercase tracking-wide text-gray-500">Build Command</div>
+                      <div className="text-gray-300">{projectContext.buildCommand}</div>
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center justify-between text-[10px] text-gray-500 uppercase tracking-wide">
+                    <span>Summary</span>
+                    <button
+                      onClick={() => setEditingSummary((prev) => !prev)}
+                      className="text-[10px] text-gray-400 hover:text-gray-200"
+                    >
+                      {editingSummary ? 'Close' : 'Edit'}
+                    </button>
+                  </div>
+                  {editingSummary ? (
+                    <div className="mt-2 space-y-2">
+                      <textarea
+                        value={summaryDraft}
+                        onChange={(e) => setSummaryDraft(e.target.value)}
+                        rows={5}
+                        className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200"
+                      />
+                      <label className="flex items-center gap-2 text-[10px] text-gray-400">
+                        <input
+                          type="checkbox"
+                          checked={overrideEnabledDraft}
+                          onChange={(e) => setOverrideEnabledDraft(e.target.checked)}
+                        />
+                        Use override in prompt
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleSaveSummary}
+                          className="text-[10px] text-gray-200 bg-blue-600 px-2 py-1 rounded"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingSummary(false);
+                            setSummaryDraft(projectContextOverride.summary || projectContext?.summary || '');
+                            setOverrideEnabledDraft(projectContextOverride.enabled);
+                          }}
+                          className="text-[10px] text-gray-400 hover:text-gray-200"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <pre className="mt-2 whitespace-pre-wrap text-gray-300">
+                      {(projectContextOverride.enabled && projectContextOverride.summary)
+                        ? projectContextOverride.summary
+                        : projectContext.summary}
+                    </pre>
+                  )}
+                  {projectContextOverride.enabled && !editingSummary && (
+                    <p className="text-[10px] text-blue-300 mt-1">
+                      Using user-provided summary override.
+                    </p>
+                  )}
+                </div>
+              </div>
             ) : (
               <p className="text-xs text-gray-500 mt-2">
                 Project context not available.
               </p>
             )}
+            {contextStats && (
+              <div className="mt-3">
+                <div className="flex items-center justify-between text-[10px] text-gray-500">
+                  <span>Context usage</span>
+                  <span>
+                    ~{contextStats.tokensUsed}/{contextStats.tokenBudget}
+                  </span>
+                </div>
+                <div className="mt-1 h-2 bg-gray-900 rounded">
+                  <div
+                    className="h-2 rounded bg-blue-600"
+                    style={{
+                      width: `${Math.min(100, Math.round((contextStats.tokensUsed / contextStats.tokenBudget) * 100))}%`,
+                    }}
+                  />
+                </div>
+                {contextStats.note && (
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    {contextStats.note}
+                  </p>
+                )}
+              </div>
+            )}
+            <div className="mt-3">
+              <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                Pinned Files
+              </div>
+              {pinnedFiles.length === 0 ? (
+                <p className="text-xs text-gray-500">No pinned files.</p>
+              ) : (
+                <div className="space-y-1">
+                  {pinnedFiles.map((file) => (
+                    <div
+                      key={file}
+                      className="flex items-center justify-between bg-gray-900 rounded px-2 py-1 text-[11px] text-gray-200"
+                    >
+                      <span className="truncate">{file}</span>
+                      <button
+                        onClick={() => onUnpinFile(file)}
+                        className="text-[10px] text-gray-400 hover:text-gray-200"
+                      >
+                        Unpin
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="mt-4">
+              <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                Ignore Patterns
+              </div>
+              <textarea
+                value={ignoreInput}
+                onChange={(e) => setIgnoreInput(e.target.value)}
+                rows={3}
+                placeholder="e.g. node_modules/**, **/dist/**"
+                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200"
+              />
+              <div className="mt-2 flex items-center justify-between text-[10px] text-gray-500">
+                <span>{ignorePatterns.length} active</span>
+                <button
+                  onClick={handleApplyIgnore}
+                  className="text-[10px] text-gray-400 hover:text-gray-200"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
           </div>
 
           <div className="mb-5">
@@ -200,12 +466,28 @@ export function ToolsPanel({
               </button>
             </div>
             <p className="text-[10px] text-gray-600 mt-1">
-              Path: {filesPath}
+              Root: {selectedRoot || 'none'} / {filesPath}
             </p>
-            {!projectRoot ? (
-              <p className="text-xs text-gray-500 mt-2">Project root not configured.</p>
+            {!selectedRoot ? (
+              <p className="text-xs text-gray-500 mt-2">No allowed root selected.</p>
             ) : (
               <>
+                {allowedRoots && allowedRoots.length > 1 && (
+                  <div className="mt-2">
+                    <label className="text-[11px] text-gray-500">Root</label>
+                    <select
+                      value={selectedRoot}
+                      onChange={(e) => setSelectedRoot(e.target.value)}
+                      className="mt-1 w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200"
+                    >
+                      {allowedRoots.map((root) => (
+                        <option key={root} value={root}>
+                          {root}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 {filesError && (
                   <p className="text-xs text-red-300 mt-2">{filesError}</p>
                 )}
@@ -237,6 +519,95 @@ export function ToolsPanel({
               </>
             )}
           </div>
+
+          <div className="mb-5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-gray-400">
+                Repo Search
+              </h2>
+              <button
+                onClick={handleSearch}
+                disabled={searchLoading || !searchQuery.trim() || !selectedRoot}
+                className="text-[10px] text-gray-400 hover:text-gray-200 disabled:opacity-50"
+              >
+                {searchLoading ? 'Searching...' : 'Run'}
+              </button>
+            </div>
+            <div className="mt-2 space-y-2">
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search pattern"
+                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200"
+              />
+              <input
+                value={searchGlob}
+                onChange={(e) => setSearchGlob(e.target.value)}
+                placeholder="Glob filter (optional)"
+                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200"
+              />
+            </div>
+            {searchError && (
+              <p className="text-xs text-red-300 mt-2">{searchError}</p>
+            )}
+            {searchResults.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {searchResults.slice(0, 20).map((match, idx) => (
+                  <div key={`${match.file}-${match.line}-${idx}`} className="bg-gray-900 rounded p-2 text-xs text-gray-200">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-[11px] text-blue-300 truncate">
+                        {match.file}:{match.line}
+                      </span>
+                      <button
+                        onClick={() => handlePreviewFile(match.file)}
+                        className="text-[10px] text-gray-400 hover:text-gray-200"
+                      >
+                        Open
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-1">{match.content}</p>
+                  </div>
+                ))}
+                {searchResults.length > 20 && (
+                  <p className="text-[10px] text-gray-500">Showing first 20 matches.</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {filePreviewPath && (
+            <div className="mb-5">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-gray-400">
+                  File Preview
+                </h2>
+                <button
+                  onClick={() => {
+                    setFilePreviewPath(null);
+                    setFilePreviewContent(null);
+                    setFilePreviewError(null);
+                  }}
+                  className="text-[10px] text-gray-400 hover:text-gray-200"
+                >
+                  Close
+                </button>
+              </div>
+              <p className="text-[10px] text-gray-600 mt-1 truncate">{filePreviewPath}</p>
+              {filePreviewLoading && (
+                <p className="text-xs text-gray-500 mt-2">Loading preview...</p>
+              )}
+              {filePreviewError && (
+                <p className="text-xs text-red-300 mt-2">{filePreviewError}</p>
+              )}
+              {filePreviewContent && (
+                <pre className="mt-2 text-[11px] bg-gray-900 p-2 rounded text-gray-300 whitespace-pre-wrap max-h-48 overflow-y-auto">
+                  {filePreviewContent.length > 2000
+                    ? `${filePreviewContent.slice(0, 2000)}\n...`
+                    : filePreviewContent}
+                </pre>
+              )}
+            </div>
+          )}
 
           <h2 className="text-sm font-semibold text-gray-400 mb-4">
             Available Tools ({AVAILABLE_TOOLS.length})

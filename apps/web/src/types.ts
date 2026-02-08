@@ -9,6 +9,25 @@ export interface ChatMessage {
   timestamp: string;
 }
 
+export interface PinnedFilesSetting {
+  files: string[];
+}
+
+export interface IgnorePatternsSetting {
+  patterns: string[];
+}
+
+export interface ProjectContextOverrideSetting {
+  enabled: boolean;
+  summary: string;
+}
+
+export interface ContextStats {
+  tokensUsed: number;
+  tokenBudget: number;
+  note?: string;
+}
+
 export interface SessionSummary {
   id: string;
   title: string | null;
@@ -28,7 +47,14 @@ export interface SettingResponse {
   value: unknown;
 }
 
-export type ActionStatus = 'pending' | 'approved' | 'executing' | 'done' | 'failed';
+export type ActionStatus = 'pending' | 'approved' | 'executing' | 'done' | 'failed' | 'rejected';
+
+export interface ActionPreview {
+  kind: 'diff' | 'summary';
+  path: string;
+  diff?: string;
+  summary?: string;
+}
 
 export interface Action {
   id: string;
@@ -37,9 +63,17 @@ export interface Action {
   description: string;
   status: ActionStatus;
   createdAt: string;
+  preview?: ActionPreview;
   approvedAt?: string;
   executedAt?: string;
   result?: unknown;
+  error?: string;
+}
+
+export interface McpServerStatus {
+  name: string;
+  status: 'connected' | 'disconnected' | 'error';
+  toolCount: number;
   error?: string;
 }
 
@@ -47,11 +81,13 @@ export interface HealthResponse {
   status: string;
   timestamp: string;
   environment: string;
-  providers: {
+  apis: {
     anthropic: boolean;
     openai: boolean;
     gemini: boolean;
+    perplexity: boolean;
   };
+  mcp?: McpServerStatus[];
   projectRoot: string | null;
   allowedRoots: string[];
 }
@@ -94,4 +130,32 @@ export interface ProjectFileEntry {
 export interface ProjectFilesResponse {
   path: string;
   files: ProjectFileEntry[];
+}
+
+export interface ProjectFileResponse {
+  path: string;
+  content: string;
+  size: number;
+}
+
+export interface ProjectSearchMatch {
+  file: string;
+  line: number;
+  content: string;
+}
+
+export interface ProjectSearchResponse {
+  pattern: string;
+  basePath: string;
+  matches: ProjectSearchMatch[];
+  filesSearched: number;
+  truncated: boolean;
+}
+
+export interface ProjectGlobResponse {
+  pattern: string;
+  basePath: string;
+  files: string[];
+  count: number;
+  truncated: boolean;
 }
