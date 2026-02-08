@@ -35,6 +35,13 @@ export interface Config {
 
   // Persistence
   dbPath: string;
+
+  // Looper-AI
+  looperMaxIterations: number;
+  looperMaxConversationTokens: number;
+  looperMaxToolRetries: number;
+  looperMinValidationConfidence: number;
+  looperSelfValidationEnabled: boolean;
 }
 
 export function loadConfig(): Config {
@@ -67,6 +74,13 @@ export function loadConfig(): Config {
     toolAllowedExtensions: parseExtensions(process.env.TOOL_ALLOWED_EXTENSIONS),
 
     dbPath: process.env.DB_PATH || resolve(process.cwd(), '../../var/devai.db'),
+
+    // Looper-AI
+    looperMaxIterations: parseInt(process.env.LOOPER_MAX_ITERATIONS || '25', 10),
+    looperMaxConversationTokens: parseInt(process.env.LOOPER_MAX_CONVERSATION_TOKENS || '120000', 10),
+    looperMaxToolRetries: parseInt(process.env.LOOPER_MAX_TOOL_RETRIES || '3', 10),
+    looperMinValidationConfidence: parseFloat(process.env.LOOPER_MIN_VALIDATION_CONFIDENCE || '0.7'),
+    looperSelfValidationEnabled: process.env.LOOPER_SELF_VALIDATION !== 'false',
   };
 }
 

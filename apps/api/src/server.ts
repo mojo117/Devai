@@ -8,6 +8,7 @@ import { projectRoutes } from './routes/project.js';
 import { skillsRoutes } from './routes/skills.js';
 import { sessionsRoutes } from './routes/sessions.js';
 import { settingsRoutes } from './routes/settings.js';
+import { looperRoutes } from './routes/looper.js';
 import { authMiddleware, registerAuthRoutes } from './routes/auth.js';
 import { initDb } from './db/index.js';
 
@@ -53,6 +54,7 @@ await app.register(projectRoutes, { prefix: '/api' });
 await app.register(skillsRoutes, { prefix: '/api' });
 await app.register(sessionsRoutes, { prefix: '/api' });
 await app.register(settingsRoutes, { prefix: '/api' });
+await app.register(looperRoutes, { prefix: '/api' });
 
 // Start server
 const start = async () => {
