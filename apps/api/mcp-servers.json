@@ -3,7 +3,7 @@
     {
       "name": "serena",
       "command": "/root/.local/bin/uvx",
-      "args": ["--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server", "--project", "/mnt/klyde-projects"],
+      "args": ["--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server", "--project", "/mnt/klyde-projects/Devai"],
       "requiresConfirmation": true,
       "toolPrefix": "serena",
       "enabledForAgents": ["chapo", "koda"]
