@@ -7,7 +7,7 @@ vi.mock('../actions/preview.js', () => ({
 }));
 
 describe('chat plan gate', () => {
-  it('blocks confirmation actions when plan is not approved', async () => {
+  it('requires approval for confirmation actions', async () => {
     const toolCall: ToolCall = {
       id: 'tool-1',
       name: 'askForConfirmation',
@@ -19,6 +19,8 @@ describe('chat plan gate', () => {
     };
 
     const result = await handleToolCall(toolCall, null, undefined);
-    expect(result).toMatch(/Plan not approved/i);
+    expect(result).toMatch(/Action created:/i);
+    expect(result).toMatch(/requires your approval/i);
+    expect(result).toMatch(/Action ID:/i);
   });
 });
