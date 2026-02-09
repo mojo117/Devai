@@ -11,6 +11,10 @@ import { synthesizeResponse } from './synthesizer/index.js';
 import type { AssignedTask, AgentExecutionResult } from './deterministicRouter/types.js';
 import type { SendEventFn } from './router.js';
 import { executeAgentTask } from './executor.js';
+import { nanoid } from 'nanoid';
+import * as stateManager from './stateManager.js';
+import type { ApprovalRequest, UserQuestion } from './types.js';
+import { config } from '../config.js';
 
 export interface NewProcessRequestOptions {
   sessionId: string;
@@ -26,6 +30,10 @@ export interface NewProcessRequestOptions {
 export async function processRequestNew(options: NewProcessRequestOptions): Promise<string> {
   const { sessionId, userMessage, projectRoot, sendEvent, conversationHistory = [] } = options;
 
+  // Keep state in sync even when using the new router (used by approval flows / persistence).
+  await stateManager.ensureStateLoaded(sessionId);
+  stateManager.setOriginalRequest(sessionId, userMessage);
+
   // Filter history to only valid roles (user/assistant) like legacy router
   const filteredHistory = conversationHistory
     .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -35,6 +43,17 @@ export async function processRequestNew(options: NewProcessRequestOptions): Prom
     }));
 
   console.info('[newRouter] Processing request', { sessionId, messageLength: userMessage.length });
+
+  // If a continuation approval was granted, bump the executor turn budget for this run.
+  const state = stateManager.getState(sessionId);
+  const maxTurnsOverride = state?.taskContext.gatheredInfo['newRouterMaxTurnsOverride'];
+  const effectiveMaxTurns = typeof maxTurnsOverride === 'number'
+    ? maxTurnsOverride
+    : config.newAgentExecutorMaxTurns;
+  if (typeof maxTurnsOverride === 'number' && state) {
+    // One-shot override: clear after consuming to avoid permanently raising the budget.
+    delete state.taskContext.gatheredInfo['newRouterMaxTurnsOverride'];
+  }
 
   // Phase 1: Analyze
   sendEvent({ type: 'agent_thinking', agent: 'chapo', status: 'Analysiere Anfrage...' });
@@ -55,15 +74,15 @@ export async function processRequestNew(options: NewProcessRequestOptions): Prom
   // Handle clarification
   if (routing.type === 'question') {
     const question = routing.question ?? 'Kannst du deine Anfrage genauer beschreiben?';
-    sendEvent({
-      type: 'user_question',
-      question: {
-        questionId: sessionId,
-        question,
-        fromAgent: 'chapo',
-        timestamp: new Date().toISOString(),
-      },
-    });
+    const q: UserQuestion = {
+      questionId: nanoid(),
+      question,
+      fromAgent: 'chapo',
+      timestamp: new Date().toISOString(),
+    };
+    stateManager.addPendingQuestion(sessionId, q);
+    stateManager.setPhase(sessionId, 'waiting_user');
+    sendEvent({ type: 'user_question', question: q });
     return question;
   }
 
@@ -106,23 +125,59 @@ export async function processRequestNew(options: NewProcessRequestOptions): Prom
         projectRoot,
         sendEvent,
         conversationHistory: filteredHistory,
+        maxTurns: effectiveMaxTurns,
       });
 
       results.set(task.index, result);
 
       // If agent signals uncertainty, ask user
       if (result.uncertain) {
-        const uncertainQuestion = result.uncertaintyReason ?? 'Ich bin unsicher, wie ich fortfahren soll. Kannst du mir mehr Kontext geben?';
-        sendEvent({
-          type: 'user_question',
-          question: {
-            questionId: `${sessionId}-${task.index}`,
-            question: uncertainQuestion,
+        const reason = result.uncertaintyReason ?? 'Ich bin unsicher, wie ich fortfahren soll. Kannst du mir mehr Kontext geben?';
+
+        // Special-case: executor hit an internal budget. Treat as an approval so "yes" can resume.
+        if (result.budgetHit) {
+          const budget = result.budgetHit;
+          const budgetLabel =
+            budget.type === 'turns' ? 'LLM turns' :
+            budget.type === 'tool_calls' ? 'tool calls' :
+            'time';
+          const budgetValue = budget.type === 'time' ? `${budget.used}/${budget.limit}ms` : `${budget.used}/${budget.limit}`;
+
+          const approval: ApprovalRequest = {
+            approvalId: nanoid(),
+            description:
+              `The agent hit an internal budget (${budgetLabel}: ${budgetValue}) while working on:\n` +
+              `- ${task.description}\n\n` +
+              `Approve to retry this request with a higher limit.`,
+            riskLevel: 'low',
+            actions: [],
             fromAgent: task.agent,
             timestamp: new Date().toISOString(),
-          },
-        });
-        return uncertainQuestion;
+            context: {
+              kind: 'new_router_continue',
+              maxTurns: config.newAgentExecutorMaxTurnsOnContinue,
+              budget,
+              taskIndex: task.index,
+            },
+          };
+
+          stateManager.addPendingApproval(sessionId, approval);
+          stateManager.setPhase(sessionId, 'waiting_user');
+          sendEvent({ type: 'approval_request', request: approval, sessionId });
+
+          return `I hit an internal budget while working on "${task.description}". Use the Continue prompt below to proceed.`;
+        }
+
+        const q: UserQuestion = {
+          questionId: nanoid(),
+          question: reason,
+          fromAgent: task.agent,
+          timestamp: new Date().toISOString(),
+        };
+        stateManager.addPendingQuestion(sessionId, q);
+        stateManager.setPhase(sessionId, 'waiting_user');
+        sendEvent({ type: 'user_question', question: q });
+        return reason;
       }
 
       sendEvent({ type: 'agent_complete', agent: task.agent, result: 'done' });

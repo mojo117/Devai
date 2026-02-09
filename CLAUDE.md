@@ -12,6 +12,8 @@
 | **Sync** | Mutagen (~200-500ms hot-reload) |
 | **Dev Port** | 3008 |
 
+**Default:** work on branch `dev` in this worktree (`/opt/Klyde/projects/Devai`). Only switch branches or work on Baso worktrees if the user explicitly asks.
+
 ## How This Works
 
 You are editing files in `/opt/Klyde/projects/Devai/` on the Klyde server.

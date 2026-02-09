@@ -1,8 +1,10 @@
 # Dependencies
 node_modules/
+node_modules
 
 # Build output
 dist/
+dist
 
 # Environment files - NEVER commit unencrypted .env files
 .env
@@ -30,6 +32,10 @@ apps/api/var/audit.log
 .vscode/
 *.swp
 *.swo
+
+# Local agent / editor artifacts (never commit)
+.claude/
+.klyde-history/
 
 # OS files
 .DS_Store

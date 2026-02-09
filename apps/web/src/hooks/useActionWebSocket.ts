@@ -29,6 +29,7 @@ export function useActionWebSocket({
   onInitialSync,
   enabled = true,
 }: UseActionWebSocketOptions): UseActionWebSocketReturn {
+  const debug = import.meta.env.DEV && Boolean((window as any).__DEVAI_DEBUG);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -55,7 +56,7 @@ export function useActionWebSocket({
       wsUrl += `?sessionId=${encodeURIComponent(sessionId)}`;
     }
 
-    console.log('[WS] Connecting to', wsUrl);
+    if (debug) console.log('[WS] Connecting to', wsUrl);
     setConnectionState('connecting');
 
     try {
@@ -63,7 +64,7 @@ export function useActionWebSocket({
       wsRef.current = ws;
 
       ws.onopen = () => {
-        console.log('[WS] Connected');
+        if (debug) console.log('[WS] Connected');
         setConnectionState('connected');
         reconnectAttempts.current = 0;
 
@@ -78,7 +79,7 @@ export function useActionWebSocket({
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data) as ActionWebSocketEvent;
-          console.log('[WS] Received:', data.type, data);
+          if (debug) console.log('[WS] Received:', data.type, data);
 
           switch (data.type) {
             case 'action_pending':
@@ -110,7 +111,7 @@ export function useActionWebSocket({
       };
 
       ws.onclose = (event) => {
-        console.log('[WS] Disconnected', event.code, event.reason);
+        if (debug) console.log('[WS] Disconnected', event.code, event.reason);
         setConnectionState('disconnected');
 
         // Clean up ping interval
@@ -123,7 +124,7 @@ export function useActionWebSocket({
         if (enabled && reconnectAttempts.current < 100) {
           const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
           reconnectAttempts.current++;
-          console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current})`);
+          if (debug) console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current})`);
 
           reconnectTimeoutRef.current = setTimeout(() => {
             connect();
@@ -132,14 +133,14 @@ export function useActionWebSocket({
       };
 
       ws.onerror = (error) => {
-        console.error('[WS] Error:', error);
+        if (debug) console.error('[WS] Error:', error);
         setConnectionState('error');
       };
     } catch (err) {
-      console.error('[WS] Failed to create WebSocket:', err);
+      if (debug) console.error('[WS] Failed to create WebSocket:', err);
       setConnectionState('error');
     }
-  }, [enabled, sessionId, onActionPending, onActionUpdated, onInitialSync]);
+  }, [debug, enabled, sessionId, onActionPending, onActionUpdated, onInitialSync]);
 
   const reconnect = useCallback(() => {
     // Close existing connection

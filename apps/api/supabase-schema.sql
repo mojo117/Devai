@@ -51,6 +51,28 @@ CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp DESC);
 
+-- Agent state persistence (multi-agent router)
+CREATE TABLE IF NOT EXISTS agent_states (
+  session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+  state JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_states_updated_at ON agent_states(updated_at DESC);
+
+-- Looper persistence
+CREATE TABLE IF NOT EXISTS looper_states (
+  session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+  status TEXT NOT NULL DEFAULT 'idle',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_looper_states_updated_at ON looper_states(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_looper_states_status ON looper_states(status);
+
 -- Insert default user
 INSERT INTO users (id, name, created_at)
 VALUES ('local', 'Local User', NOW())

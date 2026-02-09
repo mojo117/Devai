@@ -23,11 +23,12 @@ import { createSession, saveMessage, updateSessionTitleIfEmpty, getMessages, get
 import {
   processRequest as processMultiAgentRequest,
   handleUserApproval,
+  handleUserResponse,
   handlePlanApproval,
   getCurrentPlan,
   getTasks,
 } from '../agents/router.js';
-import { getState, getOrCreateState, getTaskProgress } from '../agents/stateManager.js';
+import { getState, getOrCreateState, getTaskProgress, ensureStateLoaded } from '../agents/stateManager.js';
 import type { AgentStreamEvent } from '../agents/types.js';
 
 const ChatRequestSchema = z.object({
@@ -52,6 +53,12 @@ const AgentApprovalSchema = z.object({
   sessionId: z.string(),
   approvalId: z.string(),
   approved: z.boolean(),
+});
+
+const AgentQuestionResponseSchema = z.object({
+  sessionId: z.string(),
+  questionId: z.string(),
+  answer: z.string().min(1),
 });
 
 const PlanApprovalSchema = z.object({
@@ -330,7 +337,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       await saveMessage(activeSessionId, responseMessage);
 
       // Get current pending actions
-      const pendingActions = getPendingActions();
+      const pendingActions = await getPendingActions();
 
       const contextStats = buildContextStats({
         systemPrompt: SYSTEM_PROMPT,
@@ -393,7 +400,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const { message, sessionId: requestedSessionId, projectRoot } = parseResult.data;
+      const { message, sessionId: requestedSessionId, projectRoot } = parseResult.data;
 
     // Validate project root
     let validatedProjectRoot: string | null = null;
@@ -411,6 +418,9 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     try {
       const activeSessionId = requestedSessionId || (await createSession()).id;
 
+      // Load/persist agent state so approvals/questions survive API restarts.
+      await ensureStateLoaded(activeSessionId);
+
       // Load conversation history (last 30 messages)
       const historyMessages = await getMessages(activeSessionId);
       const recentHistory = historyMessages.slice(-30).map(m => ({
@@ -420,8 +430,10 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
       // Initialize or get state
       const state = getOrCreateState(activeSessionId);
+      // Keep the last request for approval/resume flows (independent of projectRoot).
+      state.taskContext.originalRequest = message;
       if (validatedProjectRoot) {
-        state.taskContext.originalRequest = message;
+        state.taskContext.gatheredInfo['projectRoot'] = validatedProjectRoot;
       }
 
       const sendEvent = (event: AgentStreamEvent | Record<string, unknown>) => {
@@ -470,7 +482,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
       // Get final state for response
       const finalState = getState(activeSessionId);
-      const pendingActions = getPendingActions();
+      const pendingActions = await getPendingActions();
 
       sendEvent({
         type: 'response',
@@ -513,6 +525,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     app.log.info(`[agents] approval decision sessionId=${sessionId} approvalId=${approvalId} approved=${approved}`);
 
     try {
+      await ensureStateLoaded(sessionId);
       const sendEvent = (event: AgentStreamEvent | Record<string, unknown>) => {
         reply.raw.write(`${JSON.stringify(event)}\n`);
       };
@@ -531,11 +544,12 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         await saveMessage(sessionId, responseMessage);
       }
 
+      const pendingActions = await getPendingActions();
       sendEvent({
         type: 'response',
         response: {
           message: responseMessage,
-          pendingActions: getPendingActions(),
+          pendingActions,
           sessionId,
           agentHistory: state?.agentHistory || [],
         },
@@ -553,14 +567,80 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  // Handle user responses to agent questions (clarifications)
+  app.post('/chat/agents/question', {
+    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
+    app.log.info('[agents] question response endpoint hit');
+    reply.raw.setHeader('Content-Type', 'application/x-ndjson');
+
+    const parseResult = AgentQuestionResponseSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: 'Invalid request',
+        details: parseResult.error.issues,
+      });
+    }
+
+    const { sessionId, questionId, answer } = parseResult.data;
+
+    try {
+      await ensureStateLoaded(sessionId);
+      const sendEvent = (event: AgentStreamEvent | Record<string, unknown>) => {
+        reply.raw.write(`${JSON.stringify(event)}\n`);
+      };
+
+      const result = await handleUserResponse(sessionId, questionId, answer, sendEvent);
+
+      const responseMessage: ChatMessage = {
+        id: nanoid(),
+        role: 'assistant',
+        content: result,
+        timestamp: new Date().toISOString(),
+      };
+
+      const state = getState(sessionId);
+      if (state) {
+        // Persist the user's clarification as a real message for session history.
+        const userMsg: ChatMessage = {
+          id: nanoid(),
+          role: 'user',
+          content: answer,
+          timestamp: new Date().toISOString(),
+        };
+        await saveMessage(sessionId, userMsg);
+        await saveMessage(sessionId, responseMessage);
+      }
+
+      const pendingActions = await getPendingActions();
+      sendEvent({
+        type: 'response',
+        response: {
+          message: responseMessage,
+          pendingActions,
+          sessionId,
+          agentHistory: state?.agentHistory || [],
+        },
+      });
+
+      reply.raw.end();
+      return reply;
+    } catch (error) {
+      app.log.error(error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return reply.status(500).send({
+        error: 'Multi-agent question response failed',
+        details: errorMessage,
+      });
+    }
+  });
+
   // Get agent state for a session
   app.get('/chat/agents/:sessionId/state', async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };
+    await ensureStateLoaded(sessionId);
     const state = getState(sessionId);
-
-    if (!state) {
-      return reply.status(404).send({ error: 'Session not found' });
-    }
+    if (!state) return reply.status(404).send({ error: 'Session not found' });
 
     return reply.send({
       sessionId,
@@ -593,6 +673,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     app.log.info(`[agents] plan decision sessionId=${sessionId} planId=${planId} approved=${approved} reason=${reason}`);
 
     try {
+      await ensureStateLoaded(sessionId);
       const sendEvent = (event: AgentStreamEvent | Record<string, unknown>) => {
         reply.raw.write(`${JSON.stringify(event)}\n`);
       };
@@ -611,11 +692,12 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         await saveMessage(sessionId, responseMessage);
       }
 
+      const pendingActions = await getPendingActions();
       sendEvent({
         type: 'response',
         response: {
           message: responseMessage,
-          pendingActions: getPendingActions(),
+          pendingActions,
           sessionId,
           agentHistory: state?.agentHistory || [],
         },
@@ -636,6 +718,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
   // Get current plan for a session
   app.get('/chat/agents/:sessionId/plan', async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };
+    await ensureStateLoaded(sessionId);
     const plan = getCurrentPlan(sessionId);
 
     if (!plan) {
@@ -651,6 +734,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
   // Get tasks for a session
   app.get('/chat/agents/:sessionId/tasks', async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };
+    await ensureStateLoaded(sessionId);
     const tasks = getTasks(sessionId);
     const progress = getTaskProgress(sessionId);
 
