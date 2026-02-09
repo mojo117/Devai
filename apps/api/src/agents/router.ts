@@ -1253,6 +1253,11 @@ export async function handleUserResponse(
     return 'Frage nicht gefunden.';
   }
 
+  const historyAgent: AgentName =
+    question.fromAgent === 'chapo' || question.fromAgent === 'koda' || question.fromAgent === 'devo' || question.fromAgent === 'scout'
+      ? question.fromAgent
+      : 'chapo';
+
   const userResponse: UserResponse = {
     questionId,
     answer,
@@ -1261,7 +1266,7 @@ export async function handleUserResponse(
 
   stateManager.addHistoryEntry(
     sessionId,
-    'chapo',
+    historyAgent,
     'respond',
     question,
     userResponse,
@@ -1315,10 +1320,10 @@ export async function handleUserApproval(
     if (typeof maxTurns === 'number' && Number.isFinite(maxTurns) && maxTurns > 0) {
       stateManager.setGatheredInfo(sessionId, 'newRouterMaxTurnsOverride', maxTurns);
     }
+  } else {
+    // Only grant "global approval" for real risk approvals. Continue-gates should not disable future approval checks.
+    stateManager.grantApproval(sessionId);
   }
-
-  // Grant approval and continue
-  stateManager.grantApproval(sessionId);
 
   const state = stateManager.getState(sessionId);
   if (state) {

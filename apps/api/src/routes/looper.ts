@@ -115,7 +115,6 @@ export const looperRoutes: FastifyPluginAsync = async (app) => {
         content: message,
         timestamp: new Date().toISOString(),
       };
-      saveMessage(sessionId, userMsg);
 
       const assistantMsg: ChatMessage = {
         id: nanoid(),
@@ -123,10 +122,13 @@ export const looperRoutes: FastifyPluginAsync = async (app) => {
         content: result.answer,
         timestamp: new Date().toISOString(),
       };
-      saveMessage(sessionId, assistantMsg);
 
       const title = message.length > 60 ? `${message.slice(0, 57)}...` : message;
-      updateSessionTitleIfEmpty(sessionId, title);
+      await Promise.all([
+        saveMessage(sessionId, userMsg),
+        saveMessage(sessionId, assistantMsg),
+        updateSessionTitleIfEmpty(sessionId, title),
+      ]);
 
       // Final response event
       sendEvent({
