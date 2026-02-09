@@ -66,16 +66,19 @@ export function ChatUI({ projectRoot, skillIds, allowedRoots, pinnedFiles, ignor
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
   const [pendingQuestions, setPendingQuestions] = useState<PendingQuestion[]>([]);
 
-  // Debug: log pendingActions changes
+  const debug = import.meta.env.DEV && Boolean((window as any).__DEVAI_DEBUG);
   useEffect(() => {
+    if (!debug) return;
     console.log('[ChatUI] pendingActions changed:', pendingActions.length, pendingActions);
-  }, [pendingActions]);
+  }, [debug, pendingActions]);
   useEffect(() => {
+    if (!debug) return;
     console.log('[ChatUI] pendingApprovals changed:', pendingApprovals.length, pendingApprovals);
-  }, [pendingApprovals]);
+  }, [debug, pendingApprovals]);
   useEffect(() => {
+    if (!debug) return;
     console.log('[ChatUI] pendingQuestions changed:', pendingQuestions.length, pendingQuestions);
-  }, [pendingQuestions]);
+  }, [debug, pendingQuestions]);
 
   const [fileHints, setFileHints] = useState<string[]>([]);
   const [fileHintsLoading, setFileHintsLoading] = useState(false);
@@ -246,7 +249,7 @@ export function ChatUI({ projectRoot, skillIds, allowedRoots, pinnedFiles, ignor
 
   // WebSocket handlers for real-time action updates
   const handleActionPending = useCallback((action: Action) => {
-    console.log('[ChatUI] handleActionPending called:', action);
+    if (debug) console.log('[ChatUI] handleActionPending called:', action);
     setPendingActions((prev) => {
       // Check if action already exists
       if (prev.some((a) => a.actionId === action.id)) {
@@ -488,7 +491,7 @@ export function ChatUI({ projectRoot, skillIds, allowedRoots, pinnedFiles, ignor
         break;
       }
       case 'action_pending': {
-        console.log('[ChatUI] Stream action_pending event:', event);
+        if (debug) console.log('[ChatUI] Stream action_pending event:', event);
         const pendingAction: PendingAction = {
           actionId: (event as any).actionId as string,
           toolName: (event as any).toolName as string,
