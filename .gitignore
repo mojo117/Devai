@@ -31,6 +31,10 @@ apps/api/var/audit.log
 *.swp
 *.swo
 
+# Local agent / editor artifacts (never commit)
+.claude/
+.klyde-history/
+
 # OS files
 .DS_Store
 Thumbs.db
