@@ -58,6 +58,11 @@ git commit -m "Description of changes"
 git push origin dev
 ```
 
+### Serena (MCP) Workspace Notes
+- Serena will create a local `.serena/` folder (cache, generated project config, tool/memory artifacts).
+- This is **runtime/editor state** and should stay **uncommitted**; we ignore it via `.gitignore`.
+- Follow-up (eventually): add a small startup/CI guard that auto-ensures `.serena/` is in `.gitignore` (or warns) so it can’t accidentally show up again.
+
 ## IMPORTANT: What NOT to Do
 
 ### ⚠️ NEVER CHANGE PORTS ⚠️
