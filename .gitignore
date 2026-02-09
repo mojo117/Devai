@@ -36,6 +36,7 @@ apps/api/var/audit.log
 # Local agent / editor artifacts (never commit)
 .claude/
 .klyde-history/
+.serena/
 
 # OS files
 .DS_Store
