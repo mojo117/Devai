@@ -38,9 +38,18 @@ function expandEnvInString(value: string): string {
 }
 
 function resolveProjectPath(path: string): string {
+  const mappedCandidates: string[] = [];
+  if (path.startsWith('/opt/Klyde/projects/')) {
+    mappedCandidates.push(path.replace('/opt/Klyde/projects/', '/mnt/klyde-projects/'));
+  }
+  if (path.startsWith('/mnt/klyde-projects/')) {
+    mappedCandidates.push(path.replace('/mnt/klyde-projects/', '/opt/Klyde/projects/'));
+  }
+
   const candidates: string[] = [
     path,
     // Common cross-host mappings:
+    ...mappedCandidates,
     path === '/opt/Klyde/projects' ? '/mnt/klyde-projects' : '',
     path === '/mnt/klyde-projects' ? '/opt/Klyde/projects' : '',
     // Last-resort locations (Baso runtime)

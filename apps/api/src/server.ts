@@ -75,13 +75,6 @@ await app.register(websocketRoutes, { prefix: '/api' });
 // Start server
 const start = async () => {
   try {
-    // Initialize MCP servers and register their tools
-    await mcpManager.initialize();
-    const mcpTools = mcpManager.getToolDefinitions();
-    if (mcpTools.length > 0) {
-      registerMcpTools(mcpTools);
-    }
-
     await app.listen({ port: config.port, host: '0.0.0.0' });
     console.log(`DevAI API running on http://localhost:${config.port}`);
     console.log(`Environment: ${config.nodeEnv}`);
@@ -92,7 +85,25 @@ const start = async () => {
     if (config.openaiApiKey) providers.push('OpenAI');
     if (config.geminiApiKey) providers.push('Gemini');
     console.log(`Configured LLM providers: ${providers.length > 0 ? providers.join(', ') : 'None'}`);
-    console.log(`MCP tools: ${mcpTools.length > 0 ? mcpTools.map((t) => t.name).join(', ') : 'None'}`);
+
+    // Initialize MCP servers asynchronously so the API starts quickly even if MCP servers are slow.
+    // This avoids long startup delays (e.g. Serena scanning large project trees).
+    const mcpInitPromise = (async () => {
+      try {
+        await mcpManager.initialize();
+        const mcpTools = mcpManager.getToolDefinitions();
+        if (mcpTools.length > 0) {
+          registerMcpTools(mcpTools);
+        }
+        console.log(`MCP tools: ${mcpTools.length > 0 ? mcpTools.map((t) => t.name).join(', ') : 'None'}`);
+      } catch (err) {
+        app.log.error({ err }, 'Failed to initialize MCP (continuing without MCP tools)');
+      }
+    })();
+
+    // Ensure shutdown waits for init to settle before trying to tear down MCP.
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    (app as any).mcpInitPromise = mcpInitPromise;
   } catch (err) {
     app.log.error(err);
     process.exit(1);
@@ -102,6 +113,10 @@ const start = async () => {
 // Graceful shutdown
 const shutdown = async () => {
   console.log('Shutting down...');
+  const mcpInitPromise = (app as any).mcpInitPromise as Promise<void> | undefined;
+  if (mcpInitPromise) {
+    try { await mcpInitPromise; } catch { /* ignore */ }
+  }
   await mcpManager.shutdown();
   await app.close();
   process.exit(0);
