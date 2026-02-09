@@ -81,12 +81,14 @@ export async function sendMessage(
   pinnedFiles?: string[],
   projectContextOverride?: { enabled: boolean; summary: string },
   sessionId?: string,
-  onEvent?: (event: ChatStreamEvent) => void
+  onEvent?: (event: ChatStreamEvent) => void,
+  abortSignal?: AbortSignal
 ): Promise<{ message: ChatMessage; pendingActions: Action[]; sessionId?: string; contextStats?: { tokensUsed: number; tokenBudget: number; note?: string } }> {
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ messages, provider, projectRoot, skillIds, pinnedFiles, projectContextOverride, sessionId }),
+    signal: abortSignal,
   });
 
   if (!res.ok) {
@@ -530,6 +532,82 @@ export async function sendAgentApproval(
   return finalResponse;
 }
 
+export async function sendAgentQuestionResponse(
+  sessionId: string,
+  questionId: string,
+  answer: string,
+  onEvent?: (event: ChatStreamEvent) => void
+): Promise<MultiAgentResponse> {
+  const res = await fetch(`${API_BASE}/chat/agents/question`, {
+    method: 'POST',
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ sessionId, questionId, answer }),
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || 'Failed to submit question response');
+  }
+
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/x-ndjson')) {
+    return res.json();
+  }
+
+  if (!res.body) {
+    throw new Error('Missing response body');
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalResponse: MultiAgentResponse | null = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line) as { type?: string; response?: unknown };
+        if (onEvent) {
+          onEvent(event as ChatStreamEvent);
+        }
+        if (event.type === 'response') {
+          finalResponse = event.response as MultiAgentResponse;
+        }
+      } catch (e) {
+        console.warn('Failed to parse NDJSON line:', line, e);
+      }
+    }
+  }
+
+  if (buffer.trim()) {
+    try {
+      const event = JSON.parse(buffer) as { type?: string; response?: unknown };
+      if (onEvent) {
+        onEvent(event as ChatStreamEvent);
+      }
+      if (event.type === 'response') {
+        finalResponse = event.response as MultiAgentResponse;
+      }
+    } catch (e) {
+      console.warn('Failed to parse final NDJSON buffer:', buffer, e);
+    }
+  }
+
+  if (!finalResponse) {
+    throw new Error('No response received from server');
+  }
+
+  return finalResponse;
+}
+
 export async function sendMultiAgentMessage(
   message: string,
   projectRoot?: string,
@@ -620,4 +698,48 @@ export async function fetchAgentState(sessionId: string): Promise<{
   });
   if (!res.ok) throw new Error('Failed to fetch agent state');
   return res.json();
+}
+
+// Global Context API
+
+export interface GlobalContext {
+  content: string;
+  enabled: boolean;
+}
+
+export async function fetchGlobalContext(): Promise<GlobalContext> {
+  const res = await fetch(`${API_BASE}/settings/global-context`, {
+    headers: withAuthHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to fetch global context');
+  return res.json();
+}
+
+export async function saveGlobalContext(context: GlobalContext): Promise<GlobalContext> {
+  const res = await fetch(`${API_BASE}/settings/global-context`, {
+    method: 'POST',
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(context),
+  });
+  if (!res.ok) throw new Error('Failed to save global context');
+  return res.json();
+}
+
+export async function getTrustMode(): Promise<{ mode: 'default' | 'trusted' }> {
+  const response = await fetch(`${API_BASE}/settings/trust-mode`);
+  if (!response.ok) {
+    throw new Error('Failed to get trust mode');
+  }
+  return response.json();
+}
+
+export async function setTrustMode(mode: 'default' | 'trusted'): Promise<void> {
+  const response = await fetch(`${API_BASE}/settings/trust-mode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  });
+  if (!response.ok) {
+    throw new Error('Failed to set trust mode');
+  }
 }

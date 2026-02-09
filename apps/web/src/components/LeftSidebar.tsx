@@ -1,13 +1,16 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type {
   ProjectContext,
   SkillSummary,
+  McpServerStatus,
 } from '../types';
 
 // Import the panel content components
 import { PromptsPanelContent } from './PromptsPanelContent';
 import { ToolsPanelContent } from './ToolsPanelContent';
 import { HistoryPanelContent } from './HistoryPanelContent';
+import { GlobalContext } from './GlobalContext';
+import { getTrustMode, setTrustMode } from '../api';
 
 type PanelType = 'prompts' | 'tools' | 'history' | null;
 
@@ -37,10 +40,33 @@ interface LeftSidebarProps {
     tokenBudget: number;
     note?: string;
   } | null;
+  mcpServers?: McpServerStatus[];
 }
 
 export function LeftSidebar(props: LeftSidebarProps) {
   const [activePanel, setActivePanel] = useState<PanelType>(null);
+  const [isGlobalContextOpen, setIsGlobalContextOpen] = useState(false);
+  const [trustMode, setTrustModeState] = useState<'default' | 'trusted'>('default');
+  const [trustLoading, setTrustLoading] = useState(false);
+
+  useEffect(() => {
+    getTrustMode()
+      .then((res) => setTrustModeState(res.mode))
+      .catch(console.error);
+  }, []);
+
+  const handleTrustToggle = async () => {
+    const newMode = trustMode === 'default' ? 'trusted' : 'default';
+    setTrustLoading(true);
+    try {
+      await setTrustMode(newMode);
+      setTrustModeState(newMode);
+    } catch (error) {
+      console.error('Failed to toggle trust mode:', error);
+    } finally {
+      setTrustLoading(false);
+    }
+  };
 
   const togglePanel = (panel: PanelType) => {
     setActivePanel((prev) => (prev === panel ? null : panel));
@@ -72,6 +98,31 @@ export function LeftSidebar(props: LeftSidebarProps) {
             {btn.label}
           </button>
         ))}
+        {/* Global Context Button - Opens Modal */}
+        <button
+          onClick={() => setIsGlobalContextOpen(true)}
+          className="w-8 py-4 rounded text-gray-200 text-xs font-medium transition-all shadow-md bg-gray-800 hover:bg-green-600"
+          style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
+          title="Global Context"
+        >
+          Context
+        </button>
+        {/* Trust Mode Toggle */}
+        <div className="mt-auto mb-4">
+          <button
+            onClick={handleTrustToggle}
+            disabled={trustLoading}
+            className={`w-8 py-4 rounded text-xs font-medium transition-all shadow-md ${
+              trustMode === 'trusted'
+                ? 'bg-green-600 text-white'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+            }`}
+            style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
+            title={trustMode === 'trusted' ? 'Trust Mode: ON (click to disable)' : 'Trust Mode: OFF (click to enable)'}
+          >
+            {trustMode === 'trusted' ? '🔓 Trust' : '🔒 Trust'}
+          </button>
+        </div>
       </div>
 
       {/* Expandable Panel Area */}
@@ -106,11 +157,15 @@ export function LeftSidebar(props: LeftSidebarProps) {
               projectContextOverride={props.projectContextOverride}
               onUpdateProjectContextOverride={props.onUpdateProjectContextOverride}
               contextStats={props.contextStats}
+              mcpServers={props.mcpServers}
             />
           )}
           {activePanel === 'history' && <HistoryPanelContent />}
         </div>
       </div>
+
+      {/* Global Context Modal */}
+      <GlobalContext isOpen={isGlobalContextOpen} onClose={() => setIsGlobalContextOpen(false)} />
     </div>
   );
 }

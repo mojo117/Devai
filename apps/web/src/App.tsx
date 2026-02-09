@@ -6,6 +6,7 @@ import { LeftSidebar, LEFT_SIDEBAR_WIDTH } from './components/LeftSidebar';
 import { ActionsPage } from './components/ActionsPage';
 import { SystemFeed, type FeedEvent, toolEventToFeedEvent } from './components/SystemFeed';
 import { ResizableDivider } from './components/ResizableDivider';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   fetchHealth,
   fetchActions,
@@ -452,6 +453,7 @@ function App() {
   const completedActions = sortedActions.filter((a) => a.status === 'done' || a.status === 'failed' || a.status === 'rejected');
 
   return (
+    <ErrorBoundary>
     <div className="min-h-screen flex flex-col">
       {/* Left Sidebar with Toolbar and Panels - hidden on mobile */}
       {!isMobile && <LeftSidebar
@@ -475,33 +477,35 @@ function App() {
         projectContextOverride={projectContextOverride}
         onUpdateProjectContextOverride={setProjectContextOverride}
         contextStats={contextStats}
+        mcpServers={health?.mcp}
       />}
 
-      {/* Header - with left margin for sidebar on desktop */}
+      {/* Header - compact sticky header */}
       <header
-        className="sticky top-0 z-40 bg-gray-800 border-b border-gray-700 px-4 md:px-6 py-3 md:py-4"
+        className="sticky top-0 z-40 bg-gray-800/95 backdrop-blur border-b border-gray-700 px-3 md:px-4 py-2"
         style={{ marginLeft: isMobile ? 0 : LEFT_SIDEBAR_WIDTH }}
       >
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2 md:gap-4">
-            <h1 className="text-lg md:text-xl font-bold text-blue-400">DevAI</h1>
-            <div className="flex items-center gap-1 md:gap-2 text-xs">
+        <div className="flex items-center justify-between gap-2">
+          {/* Left: Logo + View Toggle */}
+          <div className="flex items-center gap-2">
+            <h1 className="text-base font-bold text-blue-400">DevAI</h1>
+            <div className="flex text-[11px]">
               <button
                 onClick={() => setView('chat')}
-                className={`px-2 md:px-3 py-1 md:py-1.5 rounded border ${
+                className={`px-2 py-1 rounded-l border-y border-l ${
                   view === 'chat'
                     ? 'bg-blue-600 border-blue-500 text-white'
-                    : 'border-gray-700 text-gray-300 hover:bg-gray-800'
+                    : 'border-gray-600 text-gray-400 hover:bg-gray-700'
                 }`}
               >
                 Chat
               </button>
               <button
                 onClick={() => setView('actions')}
-                className={`px-2 md:px-3 py-1 md:py-1.5 rounded border ${
+                className={`px-2 py-1 rounded-r border ${
                   view === 'actions'
                     ? 'bg-blue-600 border-blue-500 text-white'
-                    : 'border-gray-700 text-gray-300 hover:bg-gray-800'
+                    : 'border-gray-600 text-gray-400 hover:bg-gray-700'
                 }`}
               >
                 Actions
@@ -509,87 +513,44 @@ function App() {
             </div>
           </div>
 
-          {/* Agent Workflow Visualization */}
-          <div className="flex items-center gap-0.5 md:gap-1 bg-gray-900/50 rounded-lg px-2 md:px-3 py-1.5 border border-gray-700">
-            {/* CHAPO */}
-            <div
-              className={`flex items-center gap-1 px-1.5 md:px-2 py-0.5 rounded-md text-xs transition-all ${
-                activeAgent === 'chapo'
-                  ? 'bg-purple-600/30 text-purple-300 shadow-[0_0_8px_rgba(168,85,247,0.4)]'
-                  : 'text-gray-500'
-              }`}
-              title="CHAPO - Task Coordinator"
-            >
-              <span className="text-sm md:text-base">🎯</span>
-              <span className="hidden lg:inline font-medium text-[11px]">CHAPO</span>
-              {activeAgent === 'chapo' && (
-                <span className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-pulse" />
-              )}
-            </div>
-
-            {/* Arrow CHAPO → KODA */}
-            <svg className={`w-4 h-4 md:w-5 md:h-5 ${activeAgent === 'koda' || activeAgent === 'devo' ? 'text-gray-400' : 'text-gray-600'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M5 12h14M13 5l7 7-7 7" />
-            </svg>
-
-            {/* KODA */}
-            <div
-              className={`flex items-center gap-1 px-1.5 md:px-2 py-0.5 rounded-md text-xs transition-all ${
-                activeAgent === 'koda'
-                  ? 'bg-blue-600/30 text-blue-300 shadow-[0_0_8px_rgba(59,130,246,0.4)]'
-                  : 'text-gray-500'
-              }`}
-              title="KODA - Senior Developer"
-            >
-              <span className="text-sm md:text-base">💻</span>
-              <span className="hidden lg:inline font-medium text-[11px]">KODA</span>
-              {activeAgent === 'koda' && (
-                <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
-              )}
-            </div>
-
-            {/* Arrow KODA → DEVO */}
-            <svg className={`w-4 h-4 md:w-5 md:h-5 ${activeAgent === 'devo' ? 'text-gray-400' : 'text-gray-600'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M5 12h14M13 5l7 7-7 7" />
-            </svg>
-
-            {/* DEVO */}
-            <div
-              className={`flex items-center gap-1 px-1.5 md:px-2 py-0.5 rounded-md text-xs transition-all ${
-                activeAgent === 'devo'
-                  ? 'bg-green-600/30 text-green-300 shadow-[0_0_8px_rgba(34,197,94,0.4)]'
-                  : 'text-gray-500'
-              }`}
-              title="DEVO - DevOps Engineer"
-            >
-              <span className="text-sm md:text-base">🔧</span>
-              <span className="hidden lg:inline font-medium text-[11px]">DEVO</span>
-              {activeAgent === 'devo' && (
-                <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
-              )}
-            </div>
-
-            {/* Status indicator */}
+          {/* Center: Agent Status (compact) */}
+          <div className="hidden sm:flex items-center gap-1 text-[11px]">
+            <span className={`px-1.5 py-0.5 rounded ${activeAgent === 'chapo' ? 'bg-purple-600/30 text-purple-300' : 'text-gray-500'}`} title="CHAPO - Coordinator">
+              🎯
+            </span>
+            <span className="text-gray-600">→</span>
+            <span className={`px-1.5 py-0.5 rounded ${activeAgent === 'koda' ? 'bg-blue-600/30 text-blue-300' : 'text-gray-500'}`} title="KODA - Developer">
+              💻
+            </span>
+            <span className={`px-1.5 py-0.5 rounded ${activeAgent === 'devo' ? 'bg-green-600/30 text-green-300' : 'text-gray-500'}`} title="DEVO - DevOps">
+              🔧
+            </span>
+            <span className={`px-1.5 py-0.5 rounded ${activeAgent === 'scout' ? 'bg-orange-600/30 text-orange-300' : 'text-gray-500'}`} title="SCOUT - Explorer">
+              🔍
+            </span>
             {activeAgent && (
-              <div className="ml-1 md:ml-2 pl-1 md:pl-2 border-l border-gray-600">
-                <span className={`text-[10px] md:text-xs ${
-                  agentPhase === 'execution' ? 'text-yellow-400' :
-                  agentPhase === 'review' ? 'text-blue-400' :
-                  agentPhase === 'error' ? 'text-red-400' :
-                  'text-gray-400'
-                }`}>
-                  {agentPhase === 'qualification' && 'Analyzing...'}
-                  {agentPhase === 'execution' && 'Working...'}
-                  {agentPhase === 'review' && 'Reviewing...'}
-                  {agentPhase === 'error' && 'Error'}
-                  {agentPhase === 'idle' && 'Ready'}
-                </span>
-              </div>
+              <span className={`ml-1 text-[10px] ${
+                agentPhase === 'thinking' ? 'text-cyan-400 animate-pulse' :
+                agentPhase === 'execution' || agentPhase === 'executing' ? 'text-yellow-400' :
+                agentPhase === 'error' ? 'text-red-400' :
+                'text-gray-500'
+              }`}>
+                {agentPhase === 'qualification' && '...'}
+                {agentPhase === 'thinking' && '💭'}
+                {(agentPhase === 'execution' || agentPhase === 'executing') && '⚡'}
+                {agentPhase === 'idle' && '✓'}
+              </span>
             )}
           </div>
 
-          <div className="hidden md:flex items-center gap-4">
-            <ProjectInfo projectRoot={health?.projectRoot} />
+          {/* Right: Status + Project */}
+          <div className="flex items-center gap-3 text-[11px]">
+            <span className={`${health ? 'text-green-400' : 'text-yellow-400'}`}>
+              {health ? '● Online' : '○ ...'}
+            </span>
+            <span className="hidden md:inline text-gray-500 truncate max-w-[150px]" title={health?.projectRoot || ''}>
+              {health?.projectRoot?.split('/').pop() || ''}
+            </span>
           </div>
         </div>
       </header>
@@ -612,9 +573,9 @@ function App() {
         {view === 'chat' ? (
           <>
             {/* Chat Area - shown on desktop always, on mobile only when mobilePanel is 'chat' */}
-            <div className={`flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden ${isMobile && mobilePanel !== 'chat' ? 'hidden' : ''}`}>
+            {/* Desktop: 2/3 width, Mobile: full width */}
+            <div className={`flex flex-col min-w-0 min-h-0 overflow-hidden ${isMobile ? (mobilePanel === 'chat' ? 'flex-1' : 'hidden') : 'w-2/3'}`}>
               <ChatUI
-                provider="anthropic"
                 projectRoot={health?.projectRoot}
                 skillIds={selectedSkillIds}
                 allowedRoots={health?.allowedRoots}
@@ -634,9 +595,9 @@ function App() {
             {!isMobile && <ResizableDivider onResize={handleFeedResize} />}
 
             {/* System Feed - shown on desktop always, on mobile only when mobilePanel is 'feed' */}
+            {/* Desktop: 1/3 width, Mobile: full width */}
             <aside
-              className={`min-h-0 overflow-hidden ${isMobile ? (mobilePanel === 'feed' ? 'flex-1' : 'hidden') : 'flex-shrink-0'}`}
-              style={{ width: isMobile ? '100%' : feedWidth }}
+              className={`min-h-0 overflow-hidden ${isMobile ? (mobilePanel === 'feed' ? 'flex-1' : 'hidden') : 'w-1/3 flex-shrink-0'}`}
             >
               <SystemFeed events={feedEvents} isLoading={chatLoading} onClear={handleClearFeed} />
             </aside>
@@ -683,24 +644,8 @@ function App() {
         </div>
       )}
 
-      {/* Status Bar - hidden on mobile */}
-      {!isMobile && (
-        <footer className="bg-gray-800 border-t border-gray-700 px-6 py-2 text-xs text-gray-500" style={{ marginLeft: LEFT_SIDEBAR_WIDTH }}>
-          <div className="max-w-6xl mx-auto flex justify-between">
-            <span>
-              Status: {health ? (
-                <span className="text-green-400">Connected</span>
-              ) : (
-                <span className="text-yellow-400">Connecting...</span>
-              )}
-            </span>
-            <span>
-              Environment: {health?.environment || 'unknown'}
-            </span>
-          </div>
-        </footer>
-      )}
     </div>
+    </ErrorBoundary>
   );
 }
 

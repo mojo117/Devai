@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Action, ActionStatus } from '../types';
 import { ActionCard } from './ActionCard';
+import { EmptyState } from './EmptyState';
 
 interface ActionsPageProps {
   actions: Action[];
@@ -22,15 +23,31 @@ const FILTERS: Array<{ key: 'all' | ActionStatus; label: string }> = [
 
 export function ActionsPage({ actions, onApprove, onReject, onRetry, onRefresh }: ActionsPageProps) {
   const [filter, setFilter] = useState<'all' | ActionStatus>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const counts = useMemo(() => ({
+    all: actions.length,
+    pending: actions.filter((a) => a.status === 'pending').length,
+    approved: actions.filter((a) => a.status === 'approved').length,
+    executing: actions.filter((a) => a.status === 'executing').length,
+    done: actions.filter((a) => a.status === 'done').length,
+    failed: actions.filter((a) => a.status === 'failed').length,
+    rejected: actions.filter((a) => a.status === 'rejected').length,
+  }), [actions]);
 
   const sortedActions = useMemo(() => (
     [...actions].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   ), [actions]);
 
   const filtered = useMemo(() => {
-    if (filter === 'all') return sortedActions;
-    return sortedActions.filter((a) => a.status === filter);
-  }, [filter, sortedActions]);
+    return sortedActions.filter((a) => {
+      const matchesStatus = filter === 'all' || a.status === filter;
+      const matchesSearch = searchQuery === '' ||
+        a.toolName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        a.description.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesStatus && matchesSearch;
+    });
+  }, [filter, searchQuery, sortedActions]);
 
   return (
     <div className="flex-1 flex flex-col px-6 py-6 max-w-6xl mx-auto w-full">
@@ -59,12 +76,29 @@ export function ActionsPage({ actions, onApprove, onReject, onRetry, onRefresh }
             }`}
           >
             {item.label}
+            <span className="ml-1 opacity-60">({counts[item.key]})</span>
           </button>
         ))}
       </div>
 
+      <input
+        type="text"
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        placeholder="Search actions by tool name or description..."
+        className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 mb-4"
+      />
+
       {filtered.length === 0 ? (
-        <div className="text-sm text-gray-500">No actions found.</div>
+        <EmptyState
+          icon={searchQuery || filter !== 'all' ? '🔍' : '✨'}
+          title={searchQuery || filter !== 'all' ? 'No matching actions' : 'No actions yet'}
+          description={
+            searchQuery || filter !== 'all'
+              ? 'Try adjusting your search or filters'
+              : 'Actions will appear here when tools require approval'
+          }
+        />
       ) : (
         <div className="grid gap-3">
           {filtered.map((action) => (

@@ -7,7 +7,9 @@ import * as bashTools from './bash.js';
 import * as sshTools from './ssh.js';
 import * as pm2Tools from './pm2.js';
 import * as webTools from './web.js';
+import * as contextTools from './context.js';
 import { config } from '../config.js';
+import { mcpManager } from '../mcp/index.js';
 
 export interface ToolExecutionResult {
   success: boolean;
@@ -125,11 +127,14 @@ export async function executeTool(
           return logsTools.getStagingLogs(args.lines as number | undefined);
 
         // Web Tools (SCOUT agent)
-        case 'web_search':
-          return webTools.webSearch(args.query as string, {
-            limit: args.limit as number | undefined,
-            freshness: args.freshness as 'day' | 'week' | 'month' | undefined,
+        case 'web_search': {
+          const result = await webTools.webSearch(args.query as string, {
+            complexity: args.complexity as 'simple' | 'detailed' | 'deep' | undefined,
+            recency: args.recency as 'day' | 'week' | 'month' | 'year' | undefined,
           });
+          // Format the result with citations for display
+          return webTools.formatWebSearchResult(result);
+        }
 
         case 'web_fetch':
           return webTools.webFetch(args.url as string, {
@@ -199,7 +204,27 @@ export async function executeTool(
             args.cwd as string | undefined
           );
 
+        // Context Tools (read-only document access)
+        case 'context_listDocuments':
+          return contextTools.listDocuments(config.allowedRoots[0]);
+
+        case 'context_readDocument':
+          return contextTools.readDocument(
+            config.allowedRoots[0],
+            args.path as string
+          );
+
+        case 'context_searchDocuments':
+          return contextTools.searchDocuments(
+            config.allowedRoots[0],
+            args.query as string
+          );
+
         default:
+          // Route MCP tools to the MCP manager
+          if (mcpManager.isMcpTool(toolName)) {
+            return mcpManager.executeTool(toolName, args).then((r) => r.result);
+          }
           throw new Error(`Unknown tool: ${toolName}`);
       }
     })();
@@ -259,6 +284,9 @@ const READ_ONLY_TOOLS = new Set([
   'pm2_logs',
   'web_search',
   'web_fetch',
+  'context_listDocuments',
+  'context_readDocument',
+  'context_searchDocuments',
 ]);
 
 /**

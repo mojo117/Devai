@@ -38,6 +38,7 @@ import * as stateManager from './stateManager.js';
 import { llmRouter } from '../llm/router.js';
 import { executeTool } from '../tools/executor.js';
 import { getToolsForLLM, toolRequiresConfirmation } from '../tools/registry.js';
+import { mcpManager } from '../mcp/index.js';
 import { createAction } from '../actions/manager.js';
 import { buildActionPreview } from '../actions/preview.js';
 import type { LLMMessage, ToolCall } from '../llm/types.js';
@@ -48,6 +49,9 @@ import { KODA_AGENT } from './koda.js';
 import { DEVO_AGENT } from './devo.js';
 import { SCOUT_AGENT } from './scout.js';
 import { loadClaudeMdContext, formatClaudeMdBlock } from '../scanner/claudeMdLoader.js';
+import { processRequestNew } from './newRouter.js';
+import { config } from '../config.js';
+import { getMessages } from '../db/queries.js';
 import {
   classifyTaskComplexity,
   selectModel,
@@ -66,6 +70,40 @@ const AGENTS: Record<AgentName, AgentDefinition> = {
   scout: SCOUT_AGENT,
 };
 
+function parseYesNo(input: string): boolean | null {
+  const raw = input.trim().toLowerCase().replace(/[.!?,;:]+$/g, '');
+  if (!raw) return null;
+
+  const yes = new Set([
+    'y', 'yes', 'yeah', 'yep', 'ok', 'okay', 'sure', 'continue', 'proceed', 'go ahead',
+    'ja', 'j', 'klar', 'weiter', 'mach weiter', 'bitte weiter',
+  ]);
+  const no = new Set([
+    'n', 'no', 'nope', 'stop', 'cancel', 'abort',
+    'nein', 'nee', 'stopp', 'abbrechen',
+  ]);
+
+  if (yes.has(raw)) return true;
+  if (no.has(raw)) return false;
+  return null;
+}
+
+function looksLikeContinuePrompt(text: string): boolean {
+  const t = (text || '').toLowerCase();
+  return t.includes('required more steps than allowed') || t.includes('should i continue?');
+}
+
+async function loadRecentConversationHistory(sessionId: string): Promise<Array<{ role: string; content: string }>> {
+  const messages = await getMessages(sessionId);
+  return messages.slice(-30).map((m) => ({ role: m.role, content: m.content }));
+}
+
+function getProjectRootFromState(sessionId: string): string | null {
+  const state = stateManager.getState(sessionId);
+  const value = state?.taskContext.gatheredInfo['projectRoot'];
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
 function buildToolResultContent(result: { success: boolean; result?: unknown; error?: string }): { content: string; isError: boolean } {
   if (result.success) {
     const value = result.result === undefined ? '' : JSON.stringify(result.result);
@@ -80,14 +118,16 @@ export function getAgent(name: AgentName): AgentDefinition {
   return AGENTS[name];
 }
 
-// Get tools for a specific agent
+// Get tools for a specific agent (native + MCP)
 export function getToolsForAgent(agent: AgentName): string[] {
-  return AGENTS[agent].tools;
+  const nativeTools = AGENTS[agent].tools;
+  const mcpTools = mcpManager.getToolsForAgent(agent);
+  return [...nativeTools, ...mcpTools];
 }
 
 // Check if an agent can use a specific tool
 export function canAgentUseTool(agent: AgentName, toolName: string): boolean {
-  return AGENTS[agent].tools.includes(toolName);
+  return getToolsForAgent(agent).includes(toolName);
 }
 
 /**
@@ -96,9 +136,46 @@ export function canAgentUseTool(agent: AgentName, toolName: string): boolean {
 export async function processRequest(
   sessionId: string,
   userMessage: string,
+  conversationHistory: Array<{ role: string; content: string }> | undefined,
   projectRoot: string | null,
   sendEvent: SendEventFn
 ): Promise<string> {
+  await stateManager.ensureStateLoaded(sessionId);
+  // Default to empty array if not provided
+  const history = conversationHistory ?? [];
+
+  // If the user typed a simple yes/no while we're waiting on an approval, treat it as the approval decision.
+  // This prevents "yes is too vague" when the new router asks "Should I continue?".
+  const decision = parseYesNo(userMessage);
+  const gateState = stateManager.getOrCreateState(sessionId);
+  const pendingApprovals = gateState.pendingApprovals ?? [];
+  if (decision !== null && pendingApprovals.length > 0) {
+    const latest = pendingApprovals[pendingApprovals.length - 1];
+    return handleUserApproval(sessionId, latest.approvalId, decision, sendEvent);
+  }
+
+  // Fallback: if state was lost (restart) but the last assistant prompt was a "continue?" gate,
+  // interpret "yes" as "continue the previous request".
+  if (decision === true && pendingApprovals.length === 0) {
+    const lastAssistant = [...history].reverse().find((m) => m.role === 'assistant')?.content || '';
+    if (looksLikeContinuePrompt(lastAssistant)) {
+      const lastUser = [...history].reverse().find((m) => m.role === 'user')?.content || '';
+      if (lastUser.trim()) {
+        stateManager.setOriginalRequest(sessionId, lastUser);
+        userMessage = lastUser;
+      }
+    }
+  }
+
+  // Keep the last actual request for approval/resume flows.
+  stateManager.setOriginalRequest(sessionId, userMessage);
+
+  // New capability-based router (feature-flagged)
+  if (config.useNewAgentRouter) {
+    console.info('[agents] Using NEW capability-based router');
+    return processRequestNew({ sessionId, userMessage, projectRoot, sendEvent, conversationHistory: history });
+  }
+
   // FAST PATH: Early task classification (no LLM call!)
   const taskComplexity = classifyTaskComplexity(userMessage);
   const modelSelection = selectModel(taskComplexity);
@@ -129,7 +206,7 @@ export async function processRequest(
     // FAST PATH: Skip qualification for trivial/simple tasks
     if (shouldSkipQualification(taskComplexity)) {
       console.info('[agents] FAST PATH: Skipping qualification', { taskComplexity });
-      return executeSimpleTask(sessionId, userMessage, projectRoot, taskComplexity, modelSelection, sendEvent);
+      return executeSimpleTask(sessionId, userMessage, history, projectRoot, taskComplexity, modelSelection, sendEvent);
     }
 
     // STANDARD PATH: Full qualification for moderate/complex tasks
@@ -141,6 +218,7 @@ export async function processRequest(
     const qualification = await runChapoQualification(
       sessionId,
       userMessage,
+      history,
       projectRoot,
       sendEvent,
       modelSelection
@@ -292,6 +370,7 @@ export async function processRequest(
 async function executeSimpleTask(
   sessionId: string,
   userMessage: string,
+  conversationHistory: Array<{ role: string; content: string }>,
   projectRoot: string | null,
   taskComplexity: TaskComplexityLevel,
   modelSelection: ModelSelection,
@@ -311,7 +390,8 @@ async function executeSimpleTask(
   sendEvent({ type: 'agent_start', agent: targetAgent, phase: 'execution' });
 
   const agent = getAgent(targetAgent);
-  const tools = getToolsForLLM().filter((t) => agent.tools.includes(t.name));
+  const agentToolNames = getToolsForAgent(targetAgent);
+  const tools = getToolsForLLM().filter((t) => agentToolNames.includes(t.name));
 
   // Get CLAUDE.md project instructions from state
   const state = stateManager.getState(sessionId);
@@ -324,6 +404,12 @@ ${projectRoot ? `Working Directory: ${projectRoot}` : ''}
 WICHTIG: Dies ist eine einfache Anfrage. Führe sie DIREKT aus ohne zu fragen.`;
 
   const messages: LLMMessage[] = [
+    ...conversationHistory
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content
+      })),
     { role: 'user', content: userMessage },
   ];
 
@@ -385,6 +471,7 @@ WICHTIG: Dies ist eine einfache Anfrage. Führe sie DIREKT aus ohne zu fragen.`;
 async function runChapoQualification(
   sessionId: string,
   userMessage: string,
+  conversationHistory: Array<{ role: string; content: string }>,
   projectRoot: string | null,
   sendEvent: SendEventFn,
   modelSelection?: ModelSelection
@@ -392,7 +479,8 @@ async function runChapoQualification(
   sendEvent({ type: 'agent_thinking', agent: 'chapo', status: 'Analysiere Task...' });
 
   const chapo = getAgent('chapo');
-  const tools = getToolsForLLM().filter((t) => chapo.tools.includes(t.name));
+  const chapoToolNames = getToolsForAgent('chapo');
+  const tools = getToolsForLLM().filter((t) => chapoToolNames.includes(t.name));
 
   // Use provided model or default to agent's model
   const provider = (modelSelection?.provider || 'anthropic') as 'anthropic' | 'openai' | 'gemini';
@@ -422,6 +510,12 @@ Falls Delegation nötig:
 \`\`\``;
 
   const messages: LLMMessage[] = [
+    ...conversationHistory
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content
+      })),
     { role: 'user', content: userMessage },
   ];
 
@@ -464,6 +558,7 @@ Falls Delegation nötig:
     const toolResults: { toolUseId: string; result: string; isError: boolean }[] = [];
 
     // Execute tools (read-only for CHAPO)
+    // Meta-tools (delegation) are handled specially
     for (const toolCall of response.toolCalls) {
       sendEvent({
         type: 'tool_call',
@@ -472,6 +567,101 @@ Falls Delegation nötig:
         args: toolCall.arguments,
       });
 
+      // Handle delegation meta-tools specially
+      if (toolCall.name === 'delegateToScout') {
+        // CHAPO wants to spawn SCOUT for exploration/web search
+        const query = toolCall.arguments.query as string;
+        const scope = (toolCall.arguments.scope as ScoutScope) || 'both';
+        const context = toolCall.arguments.context as string | undefined;
+
+        sendEvent({
+          type: 'agent_thinking',
+          agent: 'chapo',
+          status: `Spawne SCOUT für: ${query}`,
+        });
+
+        try {
+          const scoutResult = await spawnScout(sessionId, query, { scope, context, sendEvent });
+          sendEvent({
+            type: 'tool_result',
+            agent: 'chapo',
+            toolName: toolCall.name,
+            result: scoutResult,
+            success: true,
+          });
+          toolResults.push({
+            toolUseId: toolCall.id,
+            result: JSON.stringify(scoutResult, null, 2),
+            isError: false,
+          });
+        } catch (error) {
+          const errMsg = error instanceof Error ? error.message : 'SCOUT spawn failed';
+          sendEvent({
+            type: 'tool_result',
+            agent: 'chapo',
+            toolName: toolCall.name,
+            result: { error: errMsg },
+            success: false,
+          });
+          toolResults.push({
+            toolUseId: toolCall.id,
+            result: `Error: ${errMsg}`,
+            isError: true,
+          });
+        }
+        continue;
+      }
+
+      if (toolCall.name === 'delegateToKoda' || toolCall.name === 'delegateToDevo') {
+        // These require proper delegation via the main flow - return qualification result
+        const targetAgent = toolCall.name === 'delegateToKoda' ? 'koda' : 'devo';
+        const taskDesc = toolCall.arguments.task as string;
+
+        sendEvent({
+          type: 'tool_result',
+          agent: 'chapo',
+          toolName: toolCall.name,
+          result: { delegating: true, targetAgent, task: taskDesc },
+          success: true,
+        });
+
+        // Return early with delegation result
+        return {
+          taskType: targetAgent === 'koda' ? 'code_change' : 'devops',
+          riskLevel: 'medium',
+          complexity: 'moderate',
+          targetAgent,
+          requiresApproval: false,
+          requiresClarification: false,
+          gatheredContext: {
+            ...gatheredContext,
+            delegationTask: taskDesc,
+            delegationContext: toolCall.arguments.context,
+            delegationFiles: toolCall.arguments.files as string[] | undefined,
+          },
+          reasoning: `CHAPO delegiert an ${targetAgent.toUpperCase()}: ${taskDesc}`,
+        };
+      }
+
+      if (toolCall.name === 'askUser' || toolCall.name === 'requestApproval') {
+        // Handle user questions and approval requests
+        const question = toolCall.arguments.question || toolCall.arguments.description;
+        toolResults.push({
+          toolUseId: toolCall.id,
+          result: `Frage an User: ${question}`,
+          isError: false,
+        });
+        sendEvent({
+          type: 'tool_result',
+          agent: 'chapo',
+          toolName: toolCall.name,
+          result: { question },
+          success: true,
+        });
+        continue;
+      }
+
+      // Regular tool execution
       const result = await executeTool(toolCall.name, toolCall.arguments);
 
       sendEvent({
@@ -566,7 +756,8 @@ async function delegateToAgent(
   sendEvent({ type: 'delegation', from: 'chapo', to: targetAgent, task });
 
   const agent = getAgent(targetAgent);
-  const tools = getToolsForLLM().filter((t) => agent.tools.includes(t.name));
+  const agentToolNames = getToolsForAgent(targetAgent);
+  const tools = getToolsForLLM().filter((t) => agentToolNames.includes(t.name));
 
   // Get CLAUDE.md project instructions from state
   const state = stateManager.getState(sessionId);
@@ -1056,10 +1247,16 @@ export async function handleUserResponse(
   answer: string,
   sendEvent: SendEventFn
 ): Promise<string> {
+  await stateManager.ensureStateLoaded(sessionId);
   const question = stateManager.removePendingQuestion(sessionId, questionId);
   if (!question) {
     return 'Frage nicht gefunden.';
   }
+
+  const historyAgent: AgentName =
+    question.fromAgent === 'chapo' || question.fromAgent === 'koda' || question.fromAgent === 'devo' || question.fromAgent === 'scout'
+      ? question.fromAgent
+      : 'chapo';
 
   const userResponse: UserResponse = {
     questionId,
@@ -1069,7 +1266,7 @@ export async function handleUserResponse(
 
   stateManager.addHistoryEntry(
     sessionId,
-    'chapo',
+    historyAgent,
     'respond',
     question,
     userResponse,
@@ -1079,10 +1276,13 @@ export async function handleUserResponse(
   // Continue processing with the new information
   const state = stateManager.getState(sessionId);
   if (state) {
+    const history = await loadRecentConversationHistory(sessionId);
+    const projectRoot = getProjectRootFromState(sessionId);
     return processRequest(
       sessionId,
       `${state.taskContext.originalRequest}\n\nZusätzliche Info: ${answer}`,
-      null,
+      history,
+      projectRoot,
       sendEvent
     );
   }
@@ -1099,6 +1299,7 @@ export async function handleUserApproval(
   approved: boolean,
   sendEvent: SendEventFn
 ): Promise<string> {
+  await stateManager.ensureStateLoaded(sessionId);
   console.info('[agents] handleUserApproval', { sessionId, approvalId, approved });
   const approval = stateManager.removePendingApproval(sessionId, approvalId);
   if (!approval) {
@@ -1111,15 +1312,28 @@ export async function handleUserApproval(
     return 'Task abgebrochen durch User.';
   }
 
-  // Grant approval and continue
-  stateManager.grantApproval(sessionId);
+  // Some approvals are not "risk approvals" but a "continue" gate (e.g. new router step-limit).
+  // Store a one-shot override in state so the next run can adjust its budget.
+  const ctx = approval.context;
+  if (ctx && typeof ctx === 'object' && ctx.kind === 'new_router_continue') {
+    const maxTurns = (ctx as Record<string, unknown>).maxTurns;
+    if (typeof maxTurns === 'number' && Number.isFinite(maxTurns) && maxTurns > 0) {
+      stateManager.setGatheredInfo(sessionId, 'newRouterMaxTurnsOverride', maxTurns);
+    }
+  } else {
+    // Only grant "global approval" for real risk approvals. Continue-gates should not disable future approval checks.
+    stateManager.grantApproval(sessionId);
+  }
 
   const state = stateManager.getState(sessionId);
   if (state) {
+    const history = await loadRecentConversationHistory(sessionId);
+    const projectRoot = getProjectRootFromState(sessionId);
     return processRequest(
       sessionId,
       state.taskContext.originalRequest,
-      null,
+      history,
+      projectRoot,
       sendEvent
     );
   }
@@ -1950,7 +2164,8 @@ export async function spawnScout(
   sendEvent?.({ type: 'scout_start', query, scope });
 
   const scout = getAgent('scout');
-  const tools = getToolsForLLM().filter((t) => scout.tools.includes(t.name));
+  const scoutToolNames = getToolsForAgent('scout');
+  const tools = getToolsForLLM().filter((t) => scoutToolNames.includes(t.name));
 
   // Build focused prompt based on scope
   let prompt = `EXPLORE: ${query}`;

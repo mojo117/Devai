@@ -7,8 +7,8 @@
 
 import { useMemo } from 'react';
 
-export type AgentName = 'chapo' | 'koda' | 'devo';
-export type AgentPhase = 'qualification' | 'execution' | 'review' | 'error' | 'idle';
+export type AgentName = 'chapo' | 'koda' | 'devo' | 'scout';
+export type AgentPhase = 'qualification' | 'thinking' | 'execution' | 'executing' | 'review' | 'error' | 'idle';
 
 interface AgentStatusProps {
   activeAgent: AgentName | null;
@@ -36,11 +36,19 @@ const agentInfo: Record<AgentName, { name: string; role: string; color: string; 
     color: 'text-green-400 border-green-500 bg-green-900/20',
     icon: '🔧',
   },
+  scout: {
+    name: 'SCOUT',
+    role: 'Explorer & Researcher',
+    color: 'text-orange-400 border-orange-500 bg-orange-900/20',
+    icon: '🔍',
+  },
 };
 
 const phaseLabels: Record<AgentPhase, string> = {
   qualification: 'Analyzing request...',
+  thinking: 'Thinking...',
   execution: 'Executing task...',
+  executing: 'Executing task...',
   review: 'Reviewing results...',
   error: 'Error occurred',
   idle: 'Ready',
@@ -143,7 +151,7 @@ interface AgentWorkflowProps {
 }
 
 export function AgentWorkflow({ activeAgent, completedSteps }: AgentWorkflowProps) {
-  const agents: AgentName[] = ['chapo', 'koda', 'devo'];
+  const agents: AgentName[] = ['chapo', 'koda', 'devo', 'scout'];
 
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">

@@ -332,3 +332,136 @@ export async function deleteOldActions(maxAgeMs: number = 24 * 60 * 60 * 1000): 
 
   return data?.length || 0;
 }
+
+/**
+ * Get the current trust mode setting
+ */
+export async function getTrustMode(): Promise<'default' | 'trusted'> {
+  const value = await getSetting('trustMode');
+  if (value === 'trusted') {
+    return 'trusted';
+  }
+  return 'default';
+}
+
+/**
+ * Set the trust mode
+ */
+export async function setTrustMode(mode: 'default' | 'trusted'): Promise<void> {
+  await setSetting('trustMode', mode);
+}
+
+// ============================================
+// Agent State Persistence (multi-agent router)
+// ============================================
+
+export interface DbAgentStateRow {
+  session_id: string;
+  state: unknown;
+  updated_at: string;
+}
+
+export async function getAgentState(sessionId: string): Promise<DbAgentStateRow | null> {
+  const { data, error } = await getSupabase()
+    .from('agent_states')
+    .select('session_id, state, updated_at')
+    .eq('session_id', sessionId)
+    .single();
+
+  if (error) {
+    // PGRST116 = row not found
+    if (error.code === 'PGRST116') return null;
+    console.error('Failed to get agent state:', error);
+    return null;
+  }
+
+  return data as DbAgentStateRow;
+}
+
+export async function upsertAgentState(sessionId: string, state: unknown): Promise<void> {
+  const now = new Date().toISOString();
+  const { error } = await getSupabase()
+    .from('agent_states')
+    .upsert({
+      session_id: sessionId,
+      state,
+      updated_at: now,
+    }, { onConflict: 'session_id' });
+
+  if (error) {
+    console.error('Failed to upsert agent state:', error);
+  }
+}
+
+export async function deleteAgentState(sessionId: string): Promise<void> {
+  const { error } = await getSupabase()
+    .from('agent_states')
+    .delete()
+    .eq('session_id', sessionId);
+  if (error) {
+    console.error('Failed to delete agent state:', error);
+  }
+}
+
+// ============================================
+// Looper Persistence
+// ============================================
+
+export interface DbLooperStateRow {
+  session_id: string;
+  provider: string;
+  config: unknown;
+  snapshot: unknown;
+  status: string;
+  updated_at: string;
+}
+
+export async function getLooperState(sessionId: string): Promise<DbLooperStateRow | null> {
+  const { data, error } = await getSupabase()
+    .from('looper_states')
+    .select('session_id, provider, config, snapshot, status, updated_at')
+    .eq('session_id', sessionId)
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') return null;
+    console.error('Failed to get looper state:', error);
+    return null;
+  }
+
+  return data as DbLooperStateRow;
+}
+
+export async function upsertLooperState(input: {
+  sessionId: string;
+  provider: string;
+  config: unknown;
+  snapshot: unknown;
+  status: string;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  const { error } = await getSupabase()
+    .from('looper_states')
+    .upsert({
+      session_id: input.sessionId,
+      provider: input.provider,
+      config: input.config,
+      snapshot: input.snapshot,
+      status: input.status,
+      updated_at: now,
+    }, { onConflict: 'session_id' });
+
+  if (error) {
+    console.error('Failed to upsert looper state:', error);
+  }
+}
+
+export async function deleteLooperState(sessionId: string): Promise<void> {
+  const { error } = await getSupabase()
+    .from('looper_states')
+    .delete()
+    .eq('session_id', sessionId);
+  if (error) {
+    console.error('Failed to delete looper state:', error);
+  }
+}

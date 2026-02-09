@@ -1,18 +1,20 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import { sendMessage, sendMultiAgentMessage, sendAgentApproval, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction, globProjectFiles, fetchPendingActions, batchApproveActions, batchRejectActions, fetchAgentState } from '../api';
+import ReactMarkdown from 'react-markdown';
+import { sendMessage, sendMultiAgentMessage, sendAgentApproval, sendAgentQuestionResponse, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction, globProjectFiles, fetchPendingActions, batchApproveActions, batchRejectActions, fetchAgentState } from '../api';
 import type { ChatStreamEvent } from '../api';
-import type { ChatMessage, ContextStats, LLMProvider, SessionSummary, Action } from '../types';
+import type { ChatMessage, ContextStats, SessionSummary, Action } from '../types';
 import type { AgentHistoryEntry } from '../api';
 import { InlineAction, type PendingAction } from './InlineAction';
 import { InlineApproval, type PendingApproval } from './InlineApproval';
+import { InlineQuestion, type PendingQuestion } from './InlineQuestion';
 import { AgentStatus, type AgentName, type AgentPhase } from './AgentStatus';
 import { AgentHistory, AgentTimeline } from './AgentHistory';
 import { useActionWebSocket } from '../hooks/useActionWebSocket';
 
 export interface ToolEvent {
   id: string;
-  type: 'status' | 'tool_call' | 'tool_result';
+  type: 'status' | 'tool_call' | 'tool_result' | 'thinking';
   name?: string;
   arguments?: unknown;
   result?: unknown;
@@ -31,7 +33,6 @@ interface ToolEventUpdate {
 }
 
 interface ChatUIProps {
-  provider: LLMProvider;
   projectRoot?: string | null;
   skillIds?: string[];
   allowedRoots?: string[];
@@ -46,10 +47,11 @@ interface ChatUIProps {
   clearFeedTrigger?: number; // Increment to trigger feed clear
 }
 
-export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFiles, ignorePatterns, projectContextOverride, onPinFile, onContextUpdate, onToolEvent, onLoadingChange, onAgentChange, clearFeedTrigger }: ChatUIProps) {
+export function ChatUI({ projectRoot, skillIds, allowedRoots, pinnedFiles, ignorePatterns, projectContextOverride, onPinFile, onContextUpdate, onToolEvent, onLoadingChange, onAgentChange, clearFeedTrigger }: ChatUIProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoadingInternal] = useState(false);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   // Wrapper to emit loading changes
   const setIsLoading = (loading: boolean) => {
@@ -62,14 +64,21 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
+  const [pendingQuestions, setPendingQuestions] = useState<PendingQuestion[]>([]);
 
-  // Debug: log pendingActions changes
+  const debug = import.meta.env.DEV && Boolean((window as any).__DEVAI_DEBUG);
   useEffect(() => {
+    if (!debug) return;
     console.log('[ChatUI] pendingActions changed:', pendingActions.length, pendingActions);
-  }, [pendingActions]);
+  }, [debug, pendingActions]);
   useEffect(() => {
+    if (!debug) return;
     console.log('[ChatUI] pendingApprovals changed:', pendingApprovals.length, pendingApprovals);
-  }, [pendingApprovals]);
+  }, [debug, pendingApprovals]);
+  useEffect(() => {
+    if (!debug) return;
+    console.log('[ChatUI] pendingQuestions changed:', pendingQuestions.length, pendingQuestions);
+  }, [debug, pendingQuestions]);
 
   const [fileHints, setFileHints] = useState<string[]>([]);
   const [fileHintsLoading, setFileHintsLoading] = useState(false);
@@ -139,41 +148,17 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
   useEffect(() => {
     if (!sessionId || !multiAgentMode) {
       setPendingApprovals([]);
+      setPendingQuestions([]);
       return;
     }
-    try {
-      const stored = localStorage.getItem(`devai_pending_approvals_${sessionId}`);
-      if (stored) {
-        const parsed = JSON.parse(stored) as PendingApproval[];
-        if (Array.isArray(parsed)) {
-          setPendingApprovals(parsed);
-          return;
-        }
-      }
-    } catch {
-      // Ignore localStorage errors.
-    }
     setPendingApprovals([]);
+    setPendingQuestions([]);
   }, [sessionId, multiAgentMode]);
-
-  useEffect(() => {
-    if (!sessionId || !multiAgentMode) return;
-    try {
-      const key = `devai_pending_approvals_${sessionId}`;
-      if (pendingApprovals.length === 0) {
-        localStorage.removeItem(key);
-      } else {
-        localStorage.setItem(key, JSON.stringify(pendingApprovals));
-      }
-    } catch {
-      // Ignore localStorage errors.
-    }
-  }, [pendingApprovals, sessionId, multiAgentMode]);
 
   useEffect(() => {
     if (!multiAgentMode || !sessionId) return;
     let cancelled = false;
-    const loadApprovals = async () => {
+    const loadApprovalsAndQuestions = async () => {
       try {
         const state = await fetchAgentState(sessionId);
         if (cancelled) return;
@@ -183,12 +168,27 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
             sessionId,
           }));
           setPendingApprovals(approvals);
+        } else {
+          setPendingApprovals([]);
+        }
+        if (Array.isArray(state.pendingQuestions)) {
+          const questions = (state.pendingQuestions as PendingQuestion[]).map((q) => ({
+            ...q,
+            sessionId,
+          }));
+          setPendingQuestions(questions);
+        } else {
+          setPendingQuestions([]);
         }
       } catch {
-        // Ignore state load errors for now.
+        // Agent state can disappear on server restarts; don't keep stale UI prompts.
+        if (!cancelled) {
+          setPendingApprovals([]);
+          setPendingQuestions([]);
+        }
       }
     };
-    loadApprovals();
+    loadApprovalsAndQuestions();
     return () => {
       cancelled = true;
     };
@@ -249,7 +249,7 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
 
   // WebSocket handlers for real-time action updates
   const handleActionPending = useCallback((action: Action) => {
-    console.log('[ChatUI] handleActionPending called:', action);
+    if (debug) console.log('[ChatUI] handleActionPending called:', action);
     setPendingActions((prev) => {
       // Check if action already exists
       if (prev.some((a) => a.actionId === action.id)) {
@@ -399,6 +399,16 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
         break;
       case 'agent_thinking':
         setAgentPhase('thinking');
+        // Add thinking event to feed for debugging
+        setToolEvents((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            type: 'thinking',
+            result: event.status,
+            agent: event.agent as AgentName | undefined,
+          },
+        ]);
         break;
       case 'agent_complete':
         setAgentPhase('idle');
@@ -427,83 +437,106 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
       handleAgentEvent(event);
     }
 
-    // Handle common events
-    // Get agent from event if available (multi-agent mode)
-    const eventAgent = event.agent as AgentName | undefined;
+    const eventAgent = (event.agent as AgentName | undefined) || activeAgent || undefined;
+    const type = String(event.type || '');
 
-    if (event.type === 'status') {
-      setToolEvents((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          type: 'status',
-          result: event.status,
-          agent: eventAgent || activeAgent || undefined,
-        },
-      ]);
-    }
-    if (event.type === 'tool_call') {
-      const id = String(event.id || crypto.randomUUID());
-      upsertToolEvent(setToolEvents, id, {
-        type: 'tool_call',
-        name: event.name as string | undefined,
-        arguments: event.arguments,
-        agent: eventAgent || activeAgent || undefined,
-      });
-    }
-    if (event.type === 'tool_result_chunk') {
-      const id = String(event.id || crypto.randomUUID());
-      const chunk = typeof event.chunk === 'string' ? event.chunk : '';
-      upsertToolEvent(setToolEvents, id, {
-        type: 'tool_result',
-        name: event.name as string | undefined,
-        chunk,
-        agent: eventAgent || activeAgent || undefined,
-      });
-    }
-    if (event.type === 'tool_result') {
-      const id = String(event.id || crypto.randomUUID());
-      upsertToolEvent(setToolEvents, id, {
-        type: 'tool_result',
-        name: event.name as string | undefined,
-        result: event.result,
-        completed: Boolean(event.completed),
-        agent: eventAgent || activeAgent || undefined,
-      });
-    }
-    if (event.type === 'action_pending') {
-      console.log('[ChatUI] Stream action_pending event:', event);
-      const pendingAction: PendingAction = {
-        actionId: event.actionId as string,
-        toolName: event.toolName as string,
-        toolArgs: event.toolArgs as Record<string, unknown>,
-        description: event.description as string,
-        preview: event.preview as PendingAction['preview'],
-      };
-      // Check for duplicates (action might also come via WebSocket)
-      setPendingActions((prev) => {
-        if (prev.some((a) => a.actionId === pendingAction.actionId)) {
-          return prev;
-        }
-        return [...prev, pendingAction];
-      });
-    }
-        if (event.type === 'approval_request') {
-          const request = event.request as PendingApproval | undefined;
-          if (!request?.approvalId) return;
-          const requestSessionId = typeof event.sessionId === 'string' ? event.sessionId : sessionId || undefined;
-          setPendingApprovals((prev) => {
-            if (prev.some((a) => a.approvalId === request.approvalId)) {
-              return prev;
-            }
-            return [...prev, { ...request, sessionId: requestSessionId }];
-          });
-        }
-    if (event.type === 'context_stats' && onContextUpdate) {
-      const stats = event.stats as ContextStats | undefined;
-      if (stats) {
-        onContextUpdate(stats);
+    switch (type) {
+      case 'status': {
+        setToolEvents((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            type: 'status',
+            result: (event as any).status,
+            agent: eventAgent,
+          },
+        ]);
+        break;
       }
+      case 'tool_call': {
+        const id = String((event as any).id || crypto.randomUUID());
+        const name = ((event as any).toolName as string | undefined) || ((event as any).name as string | undefined);
+        const args = (event as any).args ?? (event as any).arguments;
+        upsertToolEvent(setToolEvents, id, {
+          type: 'tool_call',
+          name,
+          arguments: args,
+          agent: eventAgent,
+        });
+        break;
+      }
+      case 'tool_result_chunk': {
+        const id = String((event as any).id || crypto.randomUUID());
+        const name = ((event as any).toolName as string | undefined) || ((event as any).name as string | undefined);
+        const chunk = typeof (event as any).chunk === 'string' ? (event as any).chunk : '';
+        upsertToolEvent(setToolEvents, id, {
+          type: 'tool_result',
+          name,
+          chunk,
+          agent: eventAgent,
+        });
+        break;
+      }
+      case 'tool_result': {
+        const id = String((event as any).id || crypto.randomUUID());
+        const name = ((event as any).toolName as string | undefined) || ((event as any).name as string | undefined);
+        const result = (event as any).result ?? { result: (event as any).result, success: (event as any).success };
+        upsertToolEvent(setToolEvents, id, {
+          type: 'tool_result',
+          name,
+          result,
+          completed: Boolean((event as any).completed),
+          agent: eventAgent,
+        });
+        break;
+      }
+      case 'action_pending': {
+        if (debug) console.log('[ChatUI] Stream action_pending event:', event);
+        const pendingAction: PendingAction = {
+          actionId: (event as any).actionId as string,
+          toolName: (event as any).toolName as string,
+          toolArgs: (event as any).toolArgs as Record<string, unknown>,
+          description: (event as any).description as string,
+          preview: (event as any).preview as PendingAction['preview'],
+        };
+        setPendingActions((prev) => {
+          if (prev.some((a) => a.actionId === pendingAction.actionId)) {
+            return prev;
+          }
+          return [...prev, pendingAction];
+        });
+        break;
+      }
+      case 'approval_request': {
+        const request = (event as any).request as PendingApproval | undefined;
+        if (!request?.approvalId) break;
+        const requestSessionId = typeof (event as any).sessionId === 'string' ? ((event as any).sessionId as string) : sessionId || undefined;
+        setPendingApprovals((prev) => {
+          if (prev.some((a) => a.approvalId === request.approvalId)) {
+            return prev;
+          }
+          return [...prev, { ...request, sessionId: requestSessionId }];
+        });
+        break;
+      }
+      case 'user_question': {
+        const q = (event as any).question as PendingQuestion | undefined;
+        if (!q?.questionId) break;
+        setPendingQuestions((prev) => {
+          if (prev.some((x) => x.questionId === q.questionId)) return prev;
+          return [...prev, { ...q, sessionId: sessionId || q.sessionId }];
+        });
+        break;
+      }
+      case 'context_stats': {
+        if (onContextUpdate) {
+          const stats = (event as any).stats as ContextStats | undefined;
+          if (stats) onContextUpdate(stats);
+        }
+        break;
+      }
+      default:
+        break;
     }
   };
 
@@ -553,7 +586,7 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
       } else {
         const response = await sendMessage(
           currentMessages,
-          provider,
+          'anthropic', // Default provider for legacy single-agent mode
           projectRoot || undefined,
           skillIds,
           pinnedFiles,
@@ -773,6 +806,38 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
     }, 1000);
   };
 
+  const handleSubmitQuestion = async (questionId: string, answer: string) => {
+    const q = pendingQuestions.find((item) => item.questionId === questionId);
+    const qSessionId = q?.sessionId || sessionId;
+    if (!qSessionId) {
+      throw new Error('Missing session for question');
+    }
+
+    // Echo the user's answer into the chat log for clarity.
+    const userMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: answer,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMessage]);
+
+    const response = await sendAgentQuestionResponse(qSessionId, questionId, answer, handleStreamEvent);
+
+    if (response.message) {
+      setMessages((prev) => [...prev, response.message]);
+    }
+    if (response.sessionId) {
+      setSessionId(response.sessionId);
+      await saveSetting('lastSessionId', response.sessionId);
+    }
+    await refreshSessions(response.sessionId || qSessionId);
+
+    setTimeout(() => {
+      setPendingQuestions((prev) => prev.filter((x) => x.questionId !== questionId));
+    }, 500);
+  };
+
   const handleBatchApprove = async () => {
     if (pendingActions.length === 0) return;
 
@@ -856,6 +921,24 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
         timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, errorMessage]);
+    }
+  };
+
+  const handleCopyMessage = async (messageId: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedMessageId(messageId);
+      setTimeout(() => setCopiedMessageId(null), 2000);
+    } catch {
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = content;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setCopiedMessageId(messageId);
+      setTimeout(() => setCopiedMessageId(null), 2000);
     }
   };
 
@@ -971,13 +1054,34 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
             }`}
           >
             <div
-              className={`max-w-[80%] rounded-lg px-4 py-2 ${
+              className={`group relative max-w-[80%] rounded-lg px-4 py-2 ${
                 message.role === 'user'
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-700 text-gray-100'
               }`}
             >
-              {renderMessageContent(message.content)}
+              <button
+                onClick={() => handleCopyMessage(message.id, message.content)}
+                className={`absolute top-2 right-2 p-1 rounded transition-all ${
+                  copiedMessageId === message.id
+                    ? 'opacity-100 text-green-400'
+                    : 'opacity-0 group-hover:opacity-100 text-gray-400 hover:text-white'
+                }`}
+                title={copiedMessageId === message.id ? 'Copied!' : 'Copy message'}
+              >
+                {copiedMessageId === message.id ? (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                )}
+              </button>
+              <div className="pr-6">
+                {renderMessageContent(message.content)}
+              </div>
               <p className="text-xs opacity-50 mt-1">
                 {new Date(message.timestamp).toLocaleTimeString()}
               </p>
@@ -997,8 +1101,21 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
           </div>
         )}
 
-        <div ref={messagesEndRef} />
-      </div>
+      <div ref={messagesEndRef} />
+    </div>
+
+      {/* Pending Questions - Fixed above input, always visible */}
+      {pendingQuestions.length > 0 && (
+        <div className="border-t border-gray-700 px-4 py-2 space-y-2">
+          {pendingQuestions.map((q) => (
+            <InlineQuestion
+              key={q.questionId}
+              question={q}
+              onSubmit={handleSubmitQuestion}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Pending Approvals - Fixed above input, always visible */}
       {pendingApprovals.length > 0 && (
@@ -1116,46 +1233,40 @@ export function ChatUI({ provider, projectRoot, skillIds, allowedRoots, pinnedFi
 }
 
 function renderMessageContent(content: string) {
-  if (!content.includes('```')) {
-    return <p className="whitespace-pre-wrap">{content}</p>;
-  }
-
-  const segments = content.split('```');
-
   return (
-    <div className="space-y-2">
-      {segments.map((segment, index) => {
-        if (index % 2 === 1) {
-          const lines = segment.split('\n');
-          let language = '';
-          if (lines.length > 1 && /^[a-zA-Z0-9+-]+$/.test(lines[0].trim())) {
-            language = lines.shift() || '';
-          }
-          const code = lines.join('\n');
-          return (
-            <div key={`code-${index}`} className="bg-gray-900 rounded">
-              {language && (
-                <div className="px-2 py-1 text-[10px] text-gray-400 border-b border-gray-700 uppercase tracking-wide">
-                  {language}
-                </div>
-              )}
-              <pre className="text-xs p-2 overflow-x-auto font-mono text-gray-200 whitespace-pre-wrap">
-                {code}
-              </pre>
-            </div>
-          );
-        }
-
-        if (!segment.trim()) {
-          return null;
-        }
-
-        return (
-          <p key={`text-${index}`} className="whitespace-pre-wrap">
-            {segment}
-          </p>
-        );
-      })}
+    <div className="prose prose-invert prose-sm max-w-none">
+      <ReactMarkdown
+        components={{
+          // Style code blocks
+          pre: ({ children }) => (
+            <pre className="bg-gray-900 rounded p-2 overflow-x-auto text-xs my-2">
+              {children}
+            </pre>
+          ),
+          code: ({ className, children }) => {
+            const isBlock = className?.includes('language-');
+            return isBlock ? (
+              <code className="font-mono text-gray-200">{children}</code>
+            ) : (
+              <code className="bg-gray-800 px-1 rounded text-sm">{children}</code>
+            );
+          },
+          // Ensure proper text styling
+          p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+          ul: ({ children }) => <ul className="list-disc pl-4 mb-2">{children}</ul>,
+          ol: ({ children }) => <ol className="list-decimal pl-4 mb-2">{children}</ol>,
+          li: ({ children }) => <li className="mb-1">{children}</li>,
+          strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+          em: ({ children }) => <em className="italic">{children}</em>,
+          a: ({ href, children }) => (
+            <a href={href} className="text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }

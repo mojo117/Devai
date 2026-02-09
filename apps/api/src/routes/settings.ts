@@ -1,6 +1,6 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { getSetting, setSetting } from '../db/queries.js';
+import { getSetting, setSetting, getTrustMode, setTrustMode } from '../db/queries.js';
 import {
   getPermissionPatterns,
   addPermissionPattern,
@@ -12,6 +12,12 @@ import {
 const UpdateSettingSchema = z.object({
   key: z.string(),
   value: z.unknown(),
+});
+
+// Global Context schema
+const GlobalContextSchema = z.object({
+  content: z.string(),
+  enabled: z.boolean().default(true),
 });
 
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
@@ -102,5 +108,73 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
   app.delete('/settings/permissions', async () => {
     await clearPermissionPatterns();
     return { success: true };
+  });
+
+  // ============ Global Context Endpoints ============
+
+  // Get global context
+  app.get('/settings/global-context', async () => {
+    const value = await getSetting('globalContext');
+    if (value === null) {
+      return { content: '', enabled: true };
+    }
+    try {
+      const parsed = JSON.parse(value);
+      return {
+        content: typeof parsed.content === 'string' ? parsed.content : '',
+        enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : true,
+      };
+    } catch {
+      return { content: '', enabled: true };
+    }
+  });
+
+  // Update global context
+  app.post('/settings/global-context', async (request, reply) => {
+    const parseResult = GlobalContextSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: 'Invalid request',
+        details: parseResult.error.issues,
+      });
+    }
+
+    try {
+      await setSetting('globalContext', JSON.stringify(parseResult.data));
+      return parseResult.data;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      return reply.status(500).send({ error: message });
+    }
+  });
+
+  // ============ Trust Mode Endpoints ============
+
+  // Get trust mode
+  app.get('/settings/trust-mode', async (_request, reply) => {
+    try {
+      const mode = await getTrustMode();
+      return reply.send({ mode });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return reply.status(500).send({ error: message });
+    }
+  });
+
+  // Set trust mode
+  app.post('/settings/trust-mode', async (request, reply) => {
+    const body = request.body as { mode?: string };
+
+    if (body.mode !== 'default' && body.mode !== 'trusted') {
+      return reply.status(400).send({ error: 'Mode must be "default" or "trusted"' });
+    }
+
+    try {
+      await setTrustMode(body.mode);
+      return reply.send({ mode: body.mode, success: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return reply.status(500).send({ error: message });
+    }
   });
 };

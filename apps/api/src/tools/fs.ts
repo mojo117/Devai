@@ -159,7 +159,7 @@ async function validatePath(path: string): Promise<string> {
     }
   }
 
-  throw new Error(`Path not found. Available roots: ${allowedRoots.join(', ')}. Try listing "projects" or a specific project like "projects/Devai".`);
+  throw new Error(`Path "${path}" not found. You have access to /opt/Klyde/projects. Try: fs.listFiles("/opt/Klyde/projects") to see available projects.`);
 }
 
 function isAllowedExtension(path: string): boolean {

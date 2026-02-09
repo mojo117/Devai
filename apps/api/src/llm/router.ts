@@ -6,6 +6,24 @@ import { GeminiProvider } from './providers/gemini.js';
 // Default fallback chain
 const DEFAULT_FALLBACK_CHAIN: LLMProvider[] = ['anthropic', 'openai', 'gemini'];
 
+// Default models per provider (used when falling back to a different provider)
+const DEFAULT_MODELS: Record<LLMProvider, string> = {
+  anthropic: 'claude-sonnet-4-20250514',
+  openai: 'gpt-4o',
+  gemini: 'gemini-2.0-flash',
+};
+
+// Check if a model belongs to a specific provider
+function isModelForProvider(model: string, provider: LLMProvider): boolean {
+  const providerPrefixes: Record<LLMProvider, string[]> = {
+    anthropic: ['claude'],
+    openai: ['gpt', 'o1', 'o3'],
+    gemini: ['gemini'],
+  };
+  const prefixes = providerPrefixes[provider] || [];
+  return prefixes.some(prefix => model.toLowerCase().startsWith(prefix));
+}
+
 // Helper for exponential backoff
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -101,7 +119,8 @@ export class LLMRouter {
    * Generate with fallback across multiple providers
    *
    * Tries the preferred provider first, then falls back to alternatives.
-   * Useful for reliability and cost optimization.
+   * When falling back to a different provider, the model is automatically
+   * adjusted to a compatible model for that provider.
    */
   async generateWithFallback(
     preferredProvider: LLMProvider,
@@ -113,14 +132,23 @@ export class LLMRouter {
     const uniqueProviders = [...new Set(providers)];
 
     const errors: Array<{ provider: LLMProvider; error: string }> = [];
+    const originalModel = request.model;
 
     for (const providerName of uniqueProviders) {
       if (!this.isProviderConfigured(providerName)) {
         continue;
       }
 
+      // Adjust model if it doesn't match the current provider
+      let adjustedRequest = request;
+      if (originalModel && !isModelForProvider(originalModel, providerName)) {
+        const fallbackModel = DEFAULT_MODELS[providerName];
+        console.info(`[llm] Adjusting model from ${originalModel} to ${fallbackModel} for provider ${providerName}`);
+        adjustedRequest = { ...request, model: fallbackModel };
+      }
+
       try {
-        const response = await this.generateWithRetry(providerName, request);
+        const response = await this.generateWithRetry(providerName, adjustedRequest);
         return { ...response, usedProvider: providerName };
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);

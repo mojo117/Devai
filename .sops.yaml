@@ -1,0 +1,15 @@
+# SOPS configuration for DevAI project
+# Creation rules define which keys to use for encryption
+
+creation_rules:
+  # Encrypt all .env files (including templates)
+  - path_regex: \.env($|\.enc$|\.local$|\.production$|\.development$)
+    age: age1dpc0fp0ts28m65zgsxzx2tmes7uc2fpjwvkdp7j6xp4q5w377g4s7cmd44,age1d5554vm5qq9ge8377hez7hfncajr7e99qyzer6p3840q0aga353sn987l4
+  
+  # Encrypt template files
+  - path_regex: secrets/templates/.*\.env
+    age: age1dpc0fp0ts28m65zgsxzx2tmes7uc2fpjwvkdp7j6xp4q5w377g4s7cmd44,age1d5554vm5qq9ge8377hez7hfncajr7e99qyzer6p3840q0aga353sn987l4
+  
+  # Encrypt any .env.enc files (for rotation)
+  - path_regex: \.env\.enc$
+    age: age1dpc0fp0ts28m65zgsxzx2tmes7uc2fpjwvkdp7j6xp4q5w377g4s7cmd44,age1d5554vm5qq9ge8377hez7hfncajr7e99qyzer6p3840q0aga353sn987l4

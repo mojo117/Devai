@@ -6,6 +6,7 @@
  */
 
 import { nanoid } from 'nanoid';
+import { getAgentState, upsertAgentState } from '../db/queries.js';
 import type {
   AgentName,
   AgentPhase,
@@ -37,6 +38,11 @@ import type {
 
 // In-memory state storage (per session)
 const stateStore = new Map<string, ConversationState>();
+
+// Persistence: avoid duplicate loads / debounce writes per session
+const loadPromises = new Map<string, Promise<ConversationState>>();
+const persistTimers = new Map<string, NodeJS.Timeout>();
+const lastPersisted = new Map<string, string>();
 
 // Auto-cleanup after 24 hours
 const STATE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -188,7 +194,26 @@ export function getCacheStats(sessionId: string): {
 }
 
 export function createState(sessionId: string): ConversationState {
-  const state: ConversationState = {
+  const state: ConversationState = buildDefaultState(sessionId);
+  stateStore.set(sessionId, state);
+
+  scheduleMemoryCleanup(sessionId);
+
+  return state;
+}
+
+function scheduleMemoryCleanup(sessionId: string): void {
+  // Best-effort memory hygiene; persistence lives in DB.
+  const t = setTimeout(() => {
+    stateStore.delete(sessionId);
+    persistTimers.delete(sessionId);
+    lastPersisted.delete(sessionId);
+  }, STATE_TTL_MS);
+  t.unref?.();
+}
+
+function buildDefaultState(sessionId: string): ConversationState {
+  return {
     sessionId,
     currentPhase: 'qualification',
     activeAgent: 'chapo',
@@ -209,15 +234,6 @@ export function createState(sessionId: string): ConversationState {
     tasks: [],
     taskOrder: [],
   };
-
-  stateStore.set(sessionId, state);
-
-  // Schedule cleanup
-  setTimeout(() => {
-    stateStore.delete(sessionId);
-  }, STATE_TTL_MS);
-
-  return state;
 }
 
 export function getState(sessionId: string): ConversationState | undefined {
@@ -228,6 +244,94 @@ export function getOrCreateState(sessionId: string): ConversationState {
   return getState(sessionId) || createState(sessionId);
 }
 
+function normalizeLoadedState(sessionId: string, raw: unknown): ConversationState {
+  const base = buildDefaultState(sessionId);
+  if (!raw || typeof raw !== 'object') return base;
+  const r = raw as Partial<ConversationState>;
+
+  const merged: ConversationState = {
+    ...base,
+    ...r,
+    sessionId,
+    taskContext: {
+      ...base.taskContext,
+      ...(r.taskContext || {}),
+      gatheredFiles: Array.isArray(r.taskContext?.gatheredFiles) ? r.taskContext!.gatheredFiles : base.taskContext.gatheredFiles,
+      gatheredInfo: (r.taskContext?.gatheredInfo && typeof r.taskContext.gatheredInfo === 'object')
+        ? (r.taskContext.gatheredInfo as Record<string, unknown>)
+        : base.taskContext.gatheredInfo,
+    },
+    agentHistory: Array.isArray(r.agentHistory) ? r.agentHistory : base.agentHistory,
+    pendingApprovals: Array.isArray(r.pendingApprovals) ? r.pendingApprovals : base.pendingApprovals,
+    pendingQuestions: Array.isArray(r.pendingQuestions) ? r.pendingQuestions : base.pendingQuestions,
+    parallelExecutions: Array.isArray(r.parallelExecutions) ? r.parallelExecutions : base.parallelExecutions,
+    planHistory: Array.isArray(r.planHistory) ? r.planHistory : base.planHistory,
+    tasks: Array.isArray(r.tasks) ? r.tasks : base.tasks,
+    taskOrder: Array.isArray(r.taskOrder) ? r.taskOrder : base.taskOrder,
+  };
+
+  return merged;
+}
+
+function schedulePersist(sessionId: string): void {
+  if (persistTimers.has(sessionId)) return;
+  const t = setTimeout(() => {
+    persistTimers.delete(sessionId);
+    void persistNow(sessionId);
+  }, 300);
+  t.unref?.();
+  persistTimers.set(sessionId, t);
+}
+
+async function persistNow(sessionId: string): Promise<void> {
+  const state = stateStore.get(sessionId);
+  if (!state) return;
+
+  let encoded = '';
+  try {
+    encoded = JSON.stringify(state);
+  } catch (err) {
+    console.warn('[state] Failed to serialize state', { sessionId, err });
+    return;
+  }
+
+  if (lastPersisted.get(sessionId) === encoded) return;
+  lastPersisted.set(sessionId, encoded);
+
+  try {
+    await upsertAgentState(sessionId, JSON.parse(encoded));
+  } catch (err) {
+    console.warn('[state] Failed to persist state', { sessionId, err });
+  }
+}
+
+/**
+ * Ensure a session's ConversationState is available and loaded from the DB.
+ * Call this at the start of request handlers to make approvals/questions persistent across restarts.
+ */
+export async function ensureStateLoaded(sessionId: string): Promise<ConversationState> {
+  const existing = stateStore.get(sessionId);
+  if (existing) return existing;
+
+  const pending = loadPromises.get(sessionId);
+  if (pending) return pending;
+
+  const p = (async () => {
+    const row = await getAgentState(sessionId);
+    const state = row ? normalizeLoadedState(sessionId, row.state) : createState(sessionId);
+    stateStore.set(sessionId, state);
+    scheduleMemoryCleanup(sessionId);
+    // Persist immediately for newly created sessions or to normalize stored state shape.
+    schedulePersist(sessionId);
+    return state;
+  })().finally(() => {
+    loadPromises.delete(sessionId);
+  });
+
+  loadPromises.set(sessionId, p);
+  return p;
+}
+
 export function updateState(
   sessionId: string,
   updates: Partial<ConversationState>
@@ -235,6 +339,7 @@ export function updateState(
   const state = getOrCreateState(sessionId);
   Object.assign(state, updates);
   stateStore.set(sessionId, state);
+  schedulePersist(sessionId);
   return state;
 }
 
@@ -246,17 +351,20 @@ export function deleteState(sessionId: string): void {
 export function setPhase(sessionId: string, phase: AgentPhase): void {
   const state = getOrCreateState(sessionId);
   state.currentPhase = phase;
+  schedulePersist(sessionId);
 }
 
 export function setActiveAgent(sessionId: string, agent: AgentName): void {
   const state = getOrCreateState(sessionId);
   state.activeAgent = agent;
+  schedulePersist(sessionId);
 }
 
 // Task Context
 export function setOriginalRequest(sessionId: string, request: string): void {
   const state = getOrCreateState(sessionId);
   state.taskContext.originalRequest = request;
+  schedulePersist(sessionId);
 }
 
 export function setQualificationResult(
@@ -265,12 +373,14 @@ export function setQualificationResult(
 ): void {
   const state = getOrCreateState(sessionId);
   state.taskContext.qualificationResult = result;
+  schedulePersist(sessionId);
 }
 
 export function addGatheredFile(sessionId: string, filePath: string): void {
   const state = getOrCreateState(sessionId);
   if (!state.taskContext.gatheredFiles.includes(filePath)) {
     state.taskContext.gatheredFiles.push(filePath);
+    schedulePersist(sessionId);
   }
 }
 
@@ -281,12 +391,14 @@ export function setGatheredInfo(
 ): void {
   const state = getOrCreateState(sessionId);
   state.taskContext.gatheredInfo[key] = value;
+  schedulePersist(sessionId);
 }
 
 export function grantApproval(sessionId: string): void {
   const state = getOrCreateState(sessionId);
   state.taskContext.approvalGranted = true;
   state.taskContext.approvalTimestamp = new Date().toISOString();
+  schedulePersist(sessionId);
 }
 
 export function isApprovalGranted(sessionId: string): boolean {
@@ -322,6 +434,7 @@ export function addHistoryEntry(
   };
 
   state.agentHistory.push(entry);
+  schedulePersist(sessionId);
   return entry;
 }
 
@@ -353,6 +466,7 @@ export function addPendingApproval(
 ): void {
   const state = getOrCreateState(sessionId);
   state.pendingApprovals.push(approval);
+  schedulePersist(sessionId);
 }
 
 export function removePendingApproval(
@@ -366,7 +480,9 @@ export function removePendingApproval(
     (a) => a.approvalId === approvalId
   );
   if (index !== -1) {
-    return state.pendingApprovals.splice(index, 1)[0];
+    const removed = state.pendingApprovals.splice(index, 1)[0];
+    schedulePersist(sessionId);
+    return removed;
   }
   return undefined;
 }
@@ -383,6 +499,7 @@ export function addPendingQuestion(
 ): void {
   const state = getOrCreateState(sessionId);
   state.pendingQuestions.push(question);
+  schedulePersist(sessionId);
 }
 
 export function removePendingQuestion(
@@ -396,7 +513,9 @@ export function removePendingQuestion(
     (q) => q.questionId === questionId
   );
   if (index !== -1) {
-    return state.pendingQuestions.splice(index, 1)[0];
+    const removed = state.pendingQuestions.splice(index, 1)[0];
+    schedulePersist(sessionId);
+    return removed;
   }
   return undefined;
 }
@@ -424,6 +543,7 @@ export function startParallelExecution(
   };
 
   state.parallelExecutions.push(execution);
+  schedulePersist(sessionId);
   return execution;
 }
 
@@ -447,6 +567,7 @@ export function addParallelResult(
       execution.status = hasFailure ? 'partial_failure' : 'completed';
       execution.endTime = new Date().toISOString();
     }
+    schedulePersist(sessionId);
   }
 }
 
@@ -503,6 +624,8 @@ export function exportState(sessionId: string): ConversationState | null {
 // Import state (for resuming sessions)
 export function importState(state: ConversationState): void {
   stateStore.set(state.sessionId, state);
+  scheduleMemoryCleanup(state.sessionId);
+  schedulePersist(state.sessionId);
 }
 
 // ============================================
@@ -532,6 +655,7 @@ export function createPlan(
 
   state.currentPlan = plan;
   state.currentPhase = 'planning';
+  schedulePersist(sessionId);
   return plan;
 }
 
@@ -546,6 +670,7 @@ export function addKodaPerspective(
   if (!state?.currentPlan) return undefined;
 
   state.currentPlan.kodaPerspective = perspective;
+  schedulePersist(sessionId);
   return state.currentPlan;
 }
 
@@ -560,6 +685,7 @@ export function addDevoPerspective(
   if (!state?.currentPlan) return undefined;
 
   state.currentPlan.devoPerspective = perspective;
+  schedulePersist(sessionId);
   return state.currentPlan;
 }
 
@@ -603,6 +729,7 @@ export function finalizePlan(
   state.tasks = tasks;
   state.taskOrder = tasks.map((t) => t.taskId);
 
+  schedulePersist(sessionId);
   return state.currentPlan;
 }
 
@@ -618,6 +745,7 @@ export function approvePlan(sessionId: string): ExecutionPlan | undefined {
   state.currentPlan.approvedAt = new Date().toISOString();
   state.currentPhase = 'execution';
 
+  schedulePersist(sessionId);
   return state.currentPlan;
 }
 
@@ -644,6 +772,7 @@ export function rejectPlan(
   state.tasks = [];
   state.taskOrder = [];
 
+  schedulePersist(sessionId);
   return state.planHistory[state.planHistory.length - 1];
 }
 
@@ -673,6 +802,7 @@ export function startPlanExecution(sessionId: string): ExecutionPlan | undefined
 
   state.currentPlan.status = 'executing';
   state.currentPhase = 'execution';
+  schedulePersist(sessionId);
   return state.currentPlan;
 }
 
@@ -690,6 +820,7 @@ export function completePlan(sessionId: string): ExecutionPlan | undefined {
   state.currentPlan = undefined;
   state.currentPhase = 'review';
 
+  schedulePersist(sessionId);
   return completedPlan;
 }
 
@@ -742,6 +873,7 @@ export function createTask(
     }
   }
 
+  schedulePersist(sessionId);
   return task;
 }
 
@@ -844,6 +976,7 @@ export function updateTaskStatus(
     task.completedAt = new Date().toISOString();
   }
 
+  schedulePersist(sessionId);
   return task;
 }
 
@@ -876,6 +1009,7 @@ export function addTaskDependency(
     blockerTask.blocks.push(taskId);
   }
 
+  schedulePersist(sessionId);
   return true;
 }
 
@@ -896,6 +1030,7 @@ export function addExecutedTool(
   }
 
   task.toolsExecuted.push(tool);
+  schedulePersist(sessionId);
   return task;
 }
 

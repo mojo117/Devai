@@ -1,5 +1,19 @@
 import type { Action } from '../types';
 
+function formatRelativeTime(dateString: string): string {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return 'just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${diffDays}d ago`;
+}
+
 interface ActionCardProps {
   action: Action;
   onApprove: () => void;
@@ -35,6 +49,13 @@ export function ActionCard({ action, onApprove, onReject, onRetry }: ActionCardP
 
       {/* Description */}
       <p className="text-sm text-gray-300 mb-2">{action.description}</p>
+
+      {/* Timestamps */}
+      <div className="text-xs text-gray-500 mt-1">
+        Created: {formatRelativeTime(action.createdAt)}
+        {action.approvedAt && ` • Approved: ${formatRelativeTime(action.approvedAt)}`}
+        {action.executedAt && ` • Executed: ${formatRelativeTime(action.executedAt)}`}
+      </div>
 
       {/* Arguments */}
       <details className="mb-3">

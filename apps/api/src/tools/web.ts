@@ -1,23 +1,31 @@
 /**
  * Web Tools - Search and Fetch
  *
- * Provides web search via Brave Search API and URL content fetching.
+ * Provides web search via Perplexity API and URL content fetching.
  * Used by SCOUT agent for research tasks.
  */
+
+import {
+  getPerplexityClient,
+  isPerplexityConfigured,
+  complexityToModel,
+  formatSearchResponse,
+  type PerplexitySearchResponse,
+} from '../llm/perplexity.js';
 
 // ============================================
 // TYPES
 // ============================================
 
 export interface WebSearchResult {
-  title: string;
-  url: string;
-  snippet: string;
+  answer: string;
+  citations: { url: string; title?: string }[];
+  model: string;
 }
 
 export interface WebSearchOptions {
-  limit?: number;
-  freshness?: 'day' | 'week' | 'month';
+  complexity?: 'simple' | 'detailed' | 'deep';
+  recency?: 'day' | 'week' | 'month' | 'year';
 }
 
 export interface WebFetchResult {
@@ -34,77 +42,71 @@ export interface WebFetchOptions {
 }
 
 // ============================================
-// WEB SEARCH (Brave Search API)
+// WEB SEARCH (Perplexity API)
 // ============================================
 
 /**
- * Search the web using Brave Search API
+ * Search the web using Perplexity API
  *
  * @param query - Search query string
- * @param options - Search options (limit, freshness)
- * @returns Array of search results
+ * @param options - Search options (complexity, recency)
+ * @returns Search result with answer and citations
  */
 export async function webSearch(
   query: string,
   options: WebSearchOptions = {}
-): Promise<WebSearchResult[]> {
-  const apiKey = process.env.BRAVE_API_KEY;
-
-  if (!apiKey) {
+): Promise<WebSearchResult> {
+  if (!isPerplexityConfigured()) {
     throw new Error(
-      'BRAVE_API_KEY not configured. Please set it in your environment variables.\n' +
-        'Get an API key from: https://brave.com/search/api/'
+      'PERPLEXITY_API_KEY not configured. Please set it in your environment variables.\n' +
+        'Get an API key from: https://www.perplexity.ai/settings/api'
     );
   }
 
-  const { limit = 5, freshness } = options;
-
-  // Build query parameters
-  const params = new URLSearchParams({
-    q: query,
-    count: String(Math.min(Math.max(limit, 1), 10)), // Clamp between 1-10
-  });
-
-  if (freshness) {
-    params.set('freshness', freshness);
+  const client = getPerplexityClient();
+  if (!client) {
+    throw new Error('Failed to initialize Perplexity client');
   }
+
+  const { complexity = 'simple', recency } = options;
+  const model = complexityToModel(complexity);
 
   try {
-    const response = await fetch(
-      `https://api.search.brave.com/res/v1/web/search?${params}`,
-      {
-        headers: {
-          'X-Subscription-Token': apiKey,
-          Accept: 'application/json',
-        },
-      }
-    );
+    const response = await client.search({
+      query,
+      model,
+      searchRecencyFilter: recency,
+    });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Brave Search API error (${response.status}): ${errorText}`);
-    }
-
-    const data = await response.json();
-
-    // Extract and format results
-    const results: WebSearchResult[] = (data.web?.results ?? []).map(
-      (r: { title: string; url: string; description: string }) => ({
-        title: r.title,
-        url: r.url,
-        snippet: r.description,
-      })
-    );
-
-    return results;
+    return {
+      answer: response.answer,
+      citations: response.citations,
+      model: response.model,
+    };
   } catch (error) {
-    if (error instanceof Error && error.message.includes('Brave Search API')) {
+    if (error instanceof Error && error.message.includes('Perplexity API')) {
       throw error;
     }
     throw new Error(
       `Web search failed: ${error instanceof Error ? error.message : String(error)}`
     );
   }
+}
+
+/**
+ * Format web search result for display
+ */
+export function formatWebSearchResult(result: WebSearchResult): string {
+  let output = result.answer;
+
+  if (result.citations.length > 0) {
+    output += '\n\nQuellen:\n';
+    output += result.citations
+      .map((c) => `- [${c.title || c.url}](${c.url})`)
+      .join('\n');
+  }
+
+  return output;
 }
 
 // ============================================

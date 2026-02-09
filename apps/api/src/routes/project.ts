@@ -4,6 +4,8 @@ import { config } from '../config.js';
 import { getProjectContext, clearProjectCache } from '../scanner/projectScanner.js';
 import { listFiles, readFile, grepFiles, globFiles } from '../tools/fs.js';
 import fg from 'fast-glob';
+// minimatch is currently installed as a CJS default export in prod (Baso). Use default import for runtime compatibility.
+import minimatch from 'minimatch';
 import type { ProjectContext } from '@devai/shared';
 
 // Validate that a path is within allowed roots
@@ -93,11 +95,11 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
       const filtered = result.files.filter((entry) => {
         const baseName = entry.name;
         const relativePath = path.trim() === '.' ? entry.name : `${path.trim()}/${entry.name}`;
-        if (fg.isMatch(baseName, ignorePatterns)) return false;
-        if (fg.isMatch(relativePath, ignorePatterns)) return false;
+        if (ignorePatterns.some(p => minimatch(baseName, p))) return false;
+        if (ignorePatterns.some(p => minimatch(relativePath, p))) return false;
         if (entry.type === 'directory') {
-          if (fg.isMatch(`${baseName}/**`, ignorePatterns)) return false;
-          if (fg.isMatch(`${relativePath}/**`, ignorePatterns)) return false;
+          if (ignorePatterns.some(p => minimatch(`${baseName}/**`, p))) return false;
+          if (ignorePatterns.some(p => minimatch(`${relativePath}/**`, p))) return false;
         }
         return true;
       });

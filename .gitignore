@@ -1,13 +1,24 @@
 # Dependencies
 node_modules/
+node_modules
 
 # Build output
 dist/
+dist
 
-# Environment files (keep .env.example)
+# Environment files - NEVER commit unencrypted .env files
 .env
 .env.local
 .env.*.local
+.env.production
+.env.development
+
+# DO commit encrypted versions:
+# .env.enc
+# secrets/*.env.enc
+
+# BUT NOT unencrypted templates with real secrets:
+secrets/templates/*.env
 
 # Logs
 *.log
@@ -21,6 +32,10 @@ apps/api/var/audit.log
 .vscode/
 *.swp
 *.swo
+
+# Local agent / editor artifacts (never commit)
+.claude/
+.klyde-history/
 
 # OS files
 .DS_Store

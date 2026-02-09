@@ -15,17 +15,20 @@ import { config } from '../config.js';
 import { getProjectContext } from '../scanner/projectScanner.js';
 import { loadClaudeMdContext, formatClaudeMdBlock } from '../scanner/claudeMdLoader.js';
 import { checkPermission } from '../permissions/checker.js';
+import { shouldRequireConfirmation } from '../config/trust.js';
+import { getTrustMode } from '../db/queries.js';
 import { getSkillById, getSkillLoadState, refreshSkills } from '../skills/registry.js';
 import type { SkillManifest } from '@devai/shared';
-import { createSession, saveMessage, updateSessionTitleIfEmpty } from '../db/queries.js';
+import { createSession, saveMessage, updateSessionTitleIfEmpty, getMessages, getSetting } from '../db/queries.js';
 import {
   processRequest as processMultiAgentRequest,
   handleUserApproval,
+  handleUserResponse,
   handlePlanApproval,
   getCurrentPlan,
   getTasks,
 } from '../agents/router.js';
-import { getState, getOrCreateState, getTaskProgress } from '../agents/stateManager.js';
+import { getState, getOrCreateState, getTaskProgress, ensureStateLoaded } from '../agents/stateManager.js';
 import type { AgentStreamEvent } from '../agents/types.js';
 
 const ChatRequestSchema = z.object({
@@ -50,6 +53,12 @@ const AgentApprovalSchema = z.object({
   sessionId: z.string(),
   approvalId: z.string(),
   approved: z.boolean(),
+});
+
+const AgentQuestionResponseSchema = z.object({
+  sessionId: z.string(),
+  questionId: z.string(),
+  answer: z.string().min(1),
 });
 
 const PlanApprovalSchema = z.object({
@@ -87,6 +96,14 @@ GITHUB:
 LOGS:
 - logs.getStagingLogs(lines): Get staging environment logs
 
+CONTEXT (Read-Only Document Access):
+- context.listDocuments(): List all documents in the context folder
+- context.readDocument(path): Read a specific document by filename
+- context.searchDocuments(query): Search for text across all documents
+
+The context folder contains reference materials you can use to inform your responses.
+When relevant to the user's question, check if there are helpful documents available.
+
 CONFIRMATION:
 - askForConfirmation(toolName, toolArgs, description): Request approval for a tool that requires confirmation
 
@@ -102,22 +119,30 @@ askForConfirmation("fs.delete", {"path": "/path/to/archive", "recursive": true},
 
 When exploring a codebase, use fs.glob to find files and fs.grep to search for specific code. This is more efficient than listing directories manually.
 
-PATH HANDLING (CRITICAL - FOLLOW THESE STEPS):
-- Your working directory is provided in "Project Context" above - use it as the base for all paths
+FILE ACCESS:
+- You have FULL access to /opt/Klyde/projects and all subdirectories
+- Each project is at /opt/Klyde/projects/<project-name> (e.g., /opt/Klyde/projects/Devai)
+- Your working directory is in "Project Context" above - but you can access ANY project
 - Linux is CASE SENSITIVE: /Test and /test are DIFFERENT directories
 
-BEFORE any file/directory operation, you MUST:
-1. Use fs.listFiles on the working directory or parent to verify the path exists
-2. Check the EXACT case of directory/file names - use what fs.listFiles returns
-3. If the path doesn't exist, use fs.glob to search for alternatives
-4. If still uncertain, ASK the user to clarify before proceeding
+IF USER MENTIONS A GITHUB REPO OR URL:
+- Extract the repo name from the URL (e.g., "mojo117/Devai" → "Devai")
+- The repo is likely at /opt/Klyde/projects/<repo-name>
+- Use fs.listFiles("/opt/Klyde/projects") to see all available projects
+- DO NOT say "I cannot access" - TRY to find the project first!
+
+BEFORE any file/directory operation:
+1. Use fs.listFiles to verify the path exists
+2. Check the EXACT case of directory/file names
+3. If not found, use fs.glob or try /opt/Klyde/projects/<name>
+4. If still uncertain, ASK the user - but NEVER claim you "cannot access"
 
 Examples:
-- User says "create folder in /test" but fs.listFiles shows "Test" exists → use "Test" not "test"
+- User gives GitHub link → extract repo name, check /opt/Klyde/projects/<repo-name>
 - User says "here" or "this folder" → use the working directory from Project Context
-- Path not found → search with fs.glob("**/similar*") and ask user which they meant
+- Path error → try fs.listFiles on parent dir, then search with fs.glob
 
-NEVER guess or assume paths exist. ALWAYS verify first with fs.listFiles or fs.glob.
+NEVER say "access denied" or "cannot access" for paths under /opt/Klyde/projects - you CAN access them.
 
 Focus on solving the user's problem efficiently while being transparent about any changes you want to make.`;
 
@@ -187,6 +212,20 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         claudeMdBlock = formatClaudeMdBlock(claudeMdContext);
       }
 
+      // Load Global Context
+      let globalContextBlock = '';
+      try {
+        const globalContextValue = await getSetting('globalContext');
+        if (globalContextValue) {
+          const parsed = JSON.parse(globalContextValue);
+          if (parsed.enabled && parsed.content?.trim()) {
+            globalContextBlock = `\n\nGlobal Context:\n${parsed.content.trim()}`;
+          }
+        }
+      } catch {
+        // Ignore errors - global context is optional
+      }
+
       const selectedSkills = await resolveSkills(skillIds);
       const { allowedToolNames, skillsPrompt } = summarizeSkills(selectedSkills);
       const pinnedFilesBlock = await buildPinnedFilesBlock(parseResult.data.pinnedFiles);
@@ -208,13 +247,16 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       let finalContent = '';
       const conversationMessages: LLMMessage[] = [...llmMessages];
 
+      // Get trust mode setting
+      const trustMode = await getTrustMode();
+
       while (turn < MAX_TURNS) {
         turn++;
         sendEvent({ type: 'status', status: 'thinking', turn });
 
       const llmResponse = await llmRouter.generate(provider, {
           messages: conversationMessages,
-          systemPrompt: SYSTEM_PROMPT + projectContextBlock + claudeMdBlock + skillsPrompt + pinnedFilesBlock,
+          systemPrompt: SYSTEM_PROMPT + projectContextBlock + claudeMdBlock + globalContextBlock + skillsPrompt + pinnedFilesBlock,
           toolsEnabled: true,
           tools,
         });
@@ -241,7 +283,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
             arguments: toolCall.arguments,
           });
 
-          const result = await handleToolCall(toolCall, allowedToolNames, sendEvent);
+          const result = await handleToolCall(toolCall, allowedToolNames, sendEvent, trustMode);
           const isError = result.startsWith('Error');
           const safeResult = isError && !result.trim()
             ? 'Error: Tool failed without a message.'
@@ -295,11 +337,13 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       await saveMessage(activeSessionId, responseMessage);
 
       // Get current pending actions
-      const pendingActions = getPendingActions();
+      const pendingActions = await getPendingActions();
 
       const contextStats = buildContextStats({
         systemPrompt: SYSTEM_PROMPT,
         projectContextBlock,
+        claudeMdBlock,
+        globalContextBlock,
         skillsPrompt,
         pinnedFilesBlock,
         messages: conversationMessages,
@@ -356,7 +400,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const { message, sessionId: requestedSessionId, projectRoot } = parseResult.data;
+      const { message, sessionId: requestedSessionId, projectRoot } = parseResult.data;
 
     // Validate project root
     let validatedProjectRoot: string | null = null;
@@ -374,10 +418,22 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     try {
       const activeSessionId = requestedSessionId || (await createSession()).id;
 
+      // Load/persist agent state so approvals/questions survive API restarts.
+      await ensureStateLoaded(activeSessionId);
+
+      // Load conversation history (last 30 messages)
+      const historyMessages = await getMessages(activeSessionId);
+      const recentHistory = historyMessages.slice(-30).map(m => ({
+        role: m.role,
+        content: m.content
+      }));
+
       // Initialize or get state
       const state = getOrCreateState(activeSessionId);
+      // Keep the last request for approval/resume flows (independent of projectRoot).
+      state.taskContext.originalRequest = message;
       if (validatedProjectRoot) {
-        state.taskContext.originalRequest = message;
+        state.taskContext.gatheredInfo['projectRoot'] = validatedProjectRoot;
       }
 
       const sendEvent = (event: AgentStreamEvent | Record<string, unknown>) => {
@@ -395,6 +451,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       const result = await processMultiAgentRequest(
         activeSessionId,
         message,
+        recentHistory,
         validatedProjectRoot || config.allowedRoots[0],
         sendEvent
       );
@@ -425,7 +482,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
       // Get final state for response
       const finalState = getState(activeSessionId);
-      const pendingActions = getPendingActions();
+      const pendingActions = await getPendingActions();
 
       sendEvent({
         type: 'response',
@@ -465,9 +522,10 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { sessionId, approvalId, approved } = parseResult.data;
-    app.log.info('[agents] approval decision', { sessionId, approvalId, approved });
+    app.log.info(`[agents] approval decision sessionId=${sessionId} approvalId=${approvalId} approved=${approved}`);
 
     try {
+      await ensureStateLoaded(sessionId);
       const sendEvent = (event: AgentStreamEvent | Record<string, unknown>) => {
         reply.raw.write(`${JSON.stringify(event)}\n`);
       };
@@ -486,11 +544,12 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         await saveMessage(sessionId, responseMessage);
       }
 
+      const pendingActions = await getPendingActions();
       sendEvent({
         type: 'response',
         response: {
           message: responseMessage,
-          pendingActions: getPendingActions(),
+          pendingActions,
           sessionId,
           agentHistory: state?.agentHistory || [],
         },
@@ -508,14 +567,80 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  // Handle user responses to agent questions (clarifications)
+  app.post('/chat/agents/question', {
+    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
+    app.log.info('[agents] question response endpoint hit');
+    reply.raw.setHeader('Content-Type', 'application/x-ndjson');
+
+    const parseResult = AgentQuestionResponseSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: 'Invalid request',
+        details: parseResult.error.issues,
+      });
+    }
+
+    const { sessionId, questionId, answer } = parseResult.data;
+
+    try {
+      await ensureStateLoaded(sessionId);
+      const sendEvent = (event: AgentStreamEvent | Record<string, unknown>) => {
+        reply.raw.write(`${JSON.stringify(event)}\n`);
+      };
+
+      const result = await handleUserResponse(sessionId, questionId, answer, sendEvent);
+
+      const responseMessage: ChatMessage = {
+        id: nanoid(),
+        role: 'assistant',
+        content: result,
+        timestamp: new Date().toISOString(),
+      };
+
+      const state = getState(sessionId);
+      if (state) {
+        // Persist the user's clarification as a real message for session history.
+        const userMsg: ChatMessage = {
+          id: nanoid(),
+          role: 'user',
+          content: answer,
+          timestamp: new Date().toISOString(),
+        };
+        await saveMessage(sessionId, userMsg);
+        await saveMessage(sessionId, responseMessage);
+      }
+
+      const pendingActions = await getPendingActions();
+      sendEvent({
+        type: 'response',
+        response: {
+          message: responseMessage,
+          pendingActions,
+          sessionId,
+          agentHistory: state?.agentHistory || [],
+        },
+      });
+
+      reply.raw.end();
+      return reply;
+    } catch (error) {
+      app.log.error(error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return reply.status(500).send({
+        error: 'Multi-agent question response failed',
+        details: errorMessage,
+      });
+    }
+  });
+
   // Get agent state for a session
   app.get('/chat/agents/:sessionId/state', async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };
+    await ensureStateLoaded(sessionId);
     const state = getState(sessionId);
-
-    if (!state) {
-      return reply.status(404).send({ error: 'Session not found' });
-    }
+    if (!state) return reply.status(404).send({ error: 'Session not found' });
 
     return reply.send({
       sessionId,
@@ -545,9 +670,10 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { sessionId, planId, approved, reason } = parseResult.data;
-    app.log.info('[agents] plan decision', { sessionId, planId, approved, reason });
+    app.log.info(`[agents] plan decision sessionId=${sessionId} planId=${planId} approved=${approved} reason=${reason}`);
 
     try {
+      await ensureStateLoaded(sessionId);
       const sendEvent = (event: AgentStreamEvent | Record<string, unknown>) => {
         reply.raw.write(`${JSON.stringify(event)}\n`);
       };
@@ -566,11 +692,12 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         await saveMessage(sessionId, responseMessage);
       }
 
+      const pendingActions = await getPendingActions();
       sendEvent({
         type: 'response',
         response: {
           message: responseMessage,
-          pendingActions: getPendingActions(),
+          pendingActions,
           sessionId,
           agentHistory: state?.agentHistory || [],
         },
@@ -591,6 +718,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
   // Get current plan for a session
   app.get('/chat/agents/:sessionId/plan', async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };
+    await ensureStateLoaded(sessionId);
     const plan = getCurrentPlan(sessionId);
 
     if (!plan) {
@@ -606,6 +734,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
   // Get tasks for a session
   app.get('/chat/agents/:sessionId/tasks', async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };
+    await ensureStateLoaded(sessionId);
     const tasks = getTasks(sessionId);
     const progress = getTaskProgress(sessionId);
 
@@ -619,7 +748,8 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 export async function handleToolCall(
   toolCall: ToolCall,
   allowedToolNames: Set<string> | null,
-  sendEvent?: (event: Record<string, unknown>) => void
+  sendEvent?: (event: Record<string, unknown>) => void,
+  trustMode?: 'default' | 'trusted'
 ): Promise<string> {
   const toolName = toolCall.name;
   const toolArgs = toolCall.arguments;
@@ -688,12 +818,30 @@ export async function handleToolCall(
       return `Error: Tool "${toolName}" is denied by permission pattern: ${permCheck.reason}`;
     }
 
-    if (permCheck.requiresConfirmation) {
+    // Check trust mode for confirmation bypass
+    const effectiveTrustMode = trustMode || 'default';
+    const trustCheck = shouldRequireConfirmation(
+      toolName,
+      toolArgs,
+      effectiveTrustMode,
+      true
+    );
+
+    if (trustCheck.requiresConfirmation && permCheck.requiresConfirmation) {
       return `Error: Tool "${toolName}" requires confirmation. Use askForConfirmation first.`;
     }
 
+    // Log trusted mode execution
+    if (effectiveTrustMode === 'trusted' && sendEvent) {
+      sendEvent({
+        type: 'trusted_execution',
+        toolName,
+        reason: 'Trust mode enabled',
+      });
+    }
+
     // Permission pattern grants this tool - execute directly
-    if (sendEvent) {
+    if (sendEvent && !trustCheck.requiresConfirmation) {
       sendEvent({
         type: 'permission_granted',
         toolName,
@@ -809,11 +957,13 @@ function buildSessionTitle(content: string): string | null {
 function buildContextStats(input: {
   systemPrompt: string;
   projectContextBlock: string;
+  claudeMdBlock: string;
+  globalContextBlock: string;
   skillsPrompt: string;
   pinnedFilesBlock: string;
   messages: LLMMessage[];
 }): { tokensUsed: number; tokenBudget: number; note: string } {
-  const combinedPrompt = input.systemPrompt + input.projectContextBlock + input.skillsPrompt + input.pinnedFilesBlock;
+  const combinedPrompt = input.systemPrompt + input.projectContextBlock + input.claudeMdBlock + input.globalContextBlock + input.skillsPrompt + input.pinnedFilesBlock;
   const messageText = input.messages.map((m) => m.content || '').join('\n');
   const tokensUsed = estimateTokens(combinedPrompt + messageText);
   const tokenBudget = 16000;

@@ -13,7 +13,7 @@ import { notifyActionPending, notifyActionUpdated } from '../websocket/actionBro
 
 // In-memory cache for fast access (synced with database)
 const actionsCache = new Map<string, Action>();
-let cacheInitialized = false;
+let cachePromise: Promise<void> | null = null;
 
 // Convert DB action to API action
 function dbToAction(db: DbAction): Action {
@@ -33,21 +33,22 @@ function dbToAction(db: DbAction): Action {
   };
 }
 
-// Initialize cache from database on first use
+// Initialize cache from database on first use (Promise pattern prevents race conditions)
 async function ensureCache(): Promise<void> {
-  if (cacheInitialized) return;
-
-  try {
-    const dbActions = await getAllActionsFromDb();
-    for (const dbAction of dbActions) {
-      actionsCache.set(dbAction.id, dbToAction(dbAction));
-    }
-    cacheInitialized = true;
-  } catch (error) {
-    console.error('[Action Cache] Failed to initialize from DB:', error);
-    // Continue with empty cache - will work in memory-only mode
-    cacheInitialized = true;
+  if (!cachePromise) {
+    cachePromise = (async () => {
+      try {
+        const dbActions = await getAllActionsFromDb();
+        for (const dbAction of dbActions) {
+          actionsCache.set(dbAction.id, dbToAction(dbAction));
+        }
+      } catch (error) {
+        console.error('[Action Cache] Failed to initialize from DB:', error);
+        // Continue with empty cache - will work in memory-only mode
+      }
+    })();
   }
+  return cachePromise;
 }
 
 export async function createAction(params: CreateActionParams): Promise<Action> {
@@ -343,5 +344,5 @@ export async function clearOldActions(maxAge: number = 24 * 60 * 60 * 1000): Pro
 
 export function clearActionsForTests(): void {
   actionsCache.clear();
-  cacheInitialized = false;
+  cachePromise = null;
 }

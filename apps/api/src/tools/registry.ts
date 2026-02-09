@@ -45,17 +45,26 @@ export type ToolName =
   | 'escalateToChapo'
   | 'askUser'
   | 'requestApproval'
-  | 'askForConfirmation';
+  | 'askForConfirmation'
+  // Context Tools (read-only document access)
+  | 'context_listDocuments'
+  | 'context_readDocument'
+  | 'context_searchDocuments';
+
+export interface ToolPropertyDefinition {
+  type: string;
+  description: string;
+  items?: { type: string };  // For array types
+  enum?: string[];           // For enum types
+  default?: unknown;         // For default values
+}
 
 export interface ToolDefinition {
   name: ToolName;
   description: string;
   parameters: {
     type: 'object';
-    properties: Record<string, {
-      type: string;
-      description: string;
-    }>;
+    properties: Record<string, ToolPropertyDefinition>;
     required?: string[];
   };
   requiresConfirmation: boolean;
@@ -409,21 +418,21 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
   // Web Tools (SCOUT agent)
   {
     name: 'web_search',
-    description: 'Search the web for documentation, examples, or solutions using Brave Search API',
+    description: 'Search the web for current information using Perplexity AI. Use for: weather, news, documentation, best practices, tutorials, comparisons.',
     parameters: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'Search query string',
+          description: 'Search query string (e.g., "Wetter Berlin", "React 19 new features")',
         },
-        limit: {
-          type: 'number',
-          description: 'Maximum number of results (1-10, default: 5)',
-        },
-        freshness: {
+        complexity: {
           type: 'string',
-          description: 'Limit results to recent content: "day", "week", or "month"',
+          description: 'Search depth: "simple" for quick facts, "detailed" for explanations, "deep" for thorough analysis',
+        },
+        recency: {
+          type: 'string',
+          description: 'Limit to recent content: "day", "week", "month", or "year"',
         },
       },
       required: ['query'],
@@ -800,16 +809,76 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     },
     requiresConfirmation: false,
   },
+
+  // Context Tools (read-only document access)
+  {
+    name: 'context_listDocuments',
+    description: 'List all documents in the context folder. Returns filenames, sizes, and modification dates.',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'context_readDocument',
+    description: 'Read the contents of a document from the context folder. Accepts filename or path.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'The document filename or path (e.g., "notes.md" or "context/documents/notes.md")',
+        },
+      },
+      required: ['path'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'context_searchDocuments',
+    description: 'Search for text across all documents in the context folder. Returns matching lines.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'The text to search for (case-insensitive)',
+        },
+      },
+      required: ['query'],
+    },
+    requiresConfirmation: false,
+  },
 ];
+
+// Dynamic MCP tools (registered at runtime by McpManager)
+let MCP_TOOLS: ToolDefinition[] = [];
+
+/**
+ * Register MCP tools discovered from MCP servers.
+ * Called by McpManager during initialization.
+ */
+export function registerMcpTools(tools: ToolDefinition[]): void {
+  MCP_TOOLS = tools;
+  console.info(`[registry] Registered ${tools.length} MCP tool(s)`);
+}
+
+/**
+ * Get all tool definitions (native + MCP)
+ */
+function getAllTools(): ToolDefinition[] {
+  return [...TOOL_REGISTRY, ...MCP_TOOLS];
+}
 
 // Get tool definition by name
 export function getToolDefinition(name: string): ToolDefinition | undefined {
-  return TOOL_REGISTRY.find((t) => t.name === name);
+  return getAllTools().find((t) => t.name === name);
 }
 
 // Check if a tool is whitelisted
 export function isToolWhitelisted(name: string): boolean {
-  return TOOL_REGISTRY.some((t) => t.name === name);
+  return getAllTools().some((t) => t.name === name);
 }
 
 // Check if a tool requires confirmation
@@ -820,7 +889,7 @@ export function toolRequiresConfirmation(name: string): boolean {
 
 // Convert to LLM tool format
 export function getToolsForLLM(): LLMToolDefinition[] {
-  return TOOL_REGISTRY.map((tool) => ({
+  return getAllTools().map((tool) => ({
     name: tool.name,
     description: tool.description,
     parameters: tool.parameters,
