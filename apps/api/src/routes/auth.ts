@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { config } from '../config.js';
 
 interface LoginBody {
   username: string;
@@ -31,11 +32,17 @@ function getRequiredEnv(name: string): string {
 }
 
 function getSupabaseClient(): SupabaseClient {
-  if (!_supabase) {
-    const url = getRequiredEnv('SUPABASE_URL');
-    const serviceRoleKey = getRequiredEnv('SUPABASE_SERVICE_ROLE_KEY');
-    _supabase = createClient(url, serviceRoleKey, { auth: { persistSession: false } });
+  if (_supabase) return _supabase;
+
+  // Accept both DEVAI_SUPABASE_* and SUPABASE_* names via config.
+  // If these are missing, surface a consistent error to callers.
+  const url = config.supabaseUrl;
+  const serviceRoleKey = config.supabaseServiceKey;
+  if (!url || !serviceRoleKey) {
+    throw new Error('Supabase auth is not configured (missing URL and/or service role key).');
   }
+
+  _supabase = createClient(url, serviceRoleKey, { auth: { persistSession: false } });
   return _supabase;
 }
 
@@ -81,7 +88,13 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const normalizedUsername = username.trim().toLowerCase();
-    const supabase = getSupabaseClient();
+    let supabase: SupabaseClient;
+    try {
+      supabase = getSupabaseClient();
+    } catch (err) {
+      app.log.error({ err }, 'Auth is misconfigured (Supabase env missing)');
+      return reply.status(500).send({ error: 'Authentication unavailable' });
+    }
 
     const { data, error } = await supabase
       .from('admin_users')
@@ -105,11 +118,17 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(401).send({ error: 'Invalid credentials' });
     }
 
-    const token = jwt.sign(
-      { username: normalizedUsername },
-      getJwtSecret(),
-      { expiresIn: getJwtExpiresIn() as jwt.SignOptions['expiresIn'] }
-    );
+    let token: string;
+    try {
+      token = jwt.sign(
+        { username: normalizedUsername },
+        getJwtSecret(),
+        { expiresIn: getJwtExpiresIn() as jwt.SignOptions['expiresIn'] }
+      );
+    } catch (err) {
+      app.log.error({ err }, 'Failed to sign JWT');
+      return reply.status(500).send({ error: 'Authentication unavailable' });
+    }
 
     return reply.send({
       success: true,
