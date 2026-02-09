@@ -69,8 +69,8 @@ await app.register(projectRoutes, { prefix: '/api' });
 await app.register(skillsRoutes, { prefix: '/api' });
 await app.register(sessionsRoutes, { prefix: '/api' });
 await app.register(settingsRoutes, { prefix: '/api' });
-await app.register(looperRoutes, { prefix: /api });
-await app.register(websocketRoutes, { prefix: /api });
+await app.register(looperRoutes, { prefix: '/api' });
+await app.register(websocketRoutes, { prefix: '/api' });
 
 // Start server
 const start = async () => {

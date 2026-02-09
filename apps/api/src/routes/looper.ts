@@ -55,7 +55,7 @@ export const looperRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const sessionId = reqSessionId || createSession().id;
+    const sessionId = reqSessionId || (await createSession()).id;
 
     const sendEvent = (event: LooperStreamEvent) => {
       reply.raw.write(`${JSON.stringify(event)}\n`);

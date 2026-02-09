@@ -330,7 +330,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       await saveMessage(activeSessionId, responseMessage);
 
       // Get current pending actions
-      const pendingActions = getPendingActions();
+      const pendingActions = await getPendingActions();
 
       const contextStats = buildContextStats({
         systemPrompt: SYSTEM_PROMPT,
@@ -470,7 +470,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
       // Get final state for response
       const finalState = getState(activeSessionId);
-      const pendingActions = getPendingActions();
+      const pendingActions = await getPendingActions();
 
       sendEvent({
         type: 'response',
