@@ -51,6 +51,7 @@ import { SCOUT_AGENT } from './scout.js';
 import { loadClaudeMdContext, formatClaudeMdBlock } from '../scanner/claudeMdLoader.js';
 import { processRequestNew } from './newRouter.js';
 import { config } from '../config.js';
+import { getMessages } from '../db/queries.js';
 import {
   classifyTaskComplexity,
   selectModel,
@@ -92,6 +93,17 @@ function looksLikeContinuePrompt(text: string): boolean {
   return t.includes('required more steps than allowed') || t.includes('should i continue?');
 }
 
+async function loadRecentConversationHistory(sessionId: string): Promise<Array<{ role: string; content: string }>> {
+  const messages = await getMessages(sessionId);
+  return messages.slice(-30).map((m) => ({ role: m.role, content: m.content }));
+}
+
+function getProjectRootFromState(sessionId: string): string | null {
+  const state = stateManager.getState(sessionId);
+  const value = state?.taskContext.gatheredInfo['projectRoot'];
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
 function buildToolResultContent(result: { success: boolean; result?: unknown; error?: string }): { content: string; isError: boolean } {
   if (result.success) {
     const value = result.result === undefined ? '' : JSON.stringify(result.result);
@@ -128,14 +140,15 @@ export async function processRequest(
   projectRoot: string | null,
   sendEvent: SendEventFn
 ): Promise<string> {
+  await stateManager.ensureStateLoaded(sessionId);
   // Default to empty array if not provided
   const history = conversationHistory ?? [];
 
   // If the user typed a simple yes/no while we're waiting on an approval, treat it as the approval decision.
   // This prevents "yes is too vague" when the new router asks "Should I continue?".
   const decision = parseYesNo(userMessage);
-  const state = stateManager.getOrCreateState(sessionId);
-  const pendingApprovals = state.pendingApprovals ?? [];
+  const gateState = stateManager.getOrCreateState(sessionId);
+  const pendingApprovals = gateState.pendingApprovals ?? [];
   if (decision !== null && pendingApprovals.length > 0) {
     const latest = pendingApprovals[pendingApprovals.length - 1];
     return handleUserApproval(sessionId, latest.approvalId, decision, sendEvent);
@@ -1234,6 +1247,7 @@ export async function handleUserResponse(
   answer: string,
   sendEvent: SendEventFn
 ): Promise<string> {
+  await stateManager.ensureStateLoaded(sessionId);
   const question = stateManager.removePendingQuestion(sessionId, questionId);
   if (!question) {
     return 'Frage nicht gefunden.';
@@ -1257,11 +1271,13 @@ export async function handleUserResponse(
   // Continue processing with the new information
   const state = stateManager.getState(sessionId);
   if (state) {
+    const history = await loadRecentConversationHistory(sessionId);
+    const projectRoot = getProjectRootFromState(sessionId);
     return processRequest(
       sessionId,
       `${state.taskContext.originalRequest}\n\nZusätzliche Info: ${answer}`,
-      [],
-      null,
+      history,
+      projectRoot,
       sendEvent
     );
   }
@@ -1278,6 +1294,7 @@ export async function handleUserApproval(
   approved: boolean,
   sendEvent: SendEventFn
 ): Promise<string> {
+  await stateManager.ensureStateLoaded(sessionId);
   console.info('[agents] handleUserApproval', { sessionId, approvalId, approved });
   const approval = stateManager.removePendingApproval(sessionId, approvalId);
   if (!approval) {
@@ -1305,11 +1322,13 @@ export async function handleUserApproval(
 
   const state = stateManager.getState(sessionId);
   if (state) {
+    const history = await loadRecentConversationHistory(sessionId);
+    const projectRoot = getProjectRootFromState(sessionId);
     return processRequest(
       sessionId,
       state.taskContext.originalRequest,
-      [],
-      null,
+      history,
+      projectRoot,
       sendEvent
     );
   }

@@ -31,7 +31,7 @@ export async function processRequestNew(options: NewProcessRequestOptions): Prom
   const { sessionId, userMessage, projectRoot, sendEvent, conversationHistory = [] } = options;
 
   // Keep state in sync even when using the new router (used by approval flows / persistence).
-  stateManager.getOrCreateState(sessionId);
+  await stateManager.ensureStateLoaded(sessionId);
   stateManager.setOriginalRequest(sessionId, userMessage);
 
   // Filter history to only valid roles (user/assistant) like legacy router
@@ -134,14 +134,21 @@ export async function processRequestNew(options: NewProcessRequestOptions): Prom
       if (result.uncertain) {
         const reason = result.uncertaintyReason ?? 'Ich bin unsicher, wie ich fortfahren soll. Kannst du mir mehr Kontext geben?';
 
-        // Special-case: executor hit internal tool-turn budget. Treat as an approval so "yes" can resume.
-        if (/required more steps than allowed/i.test(reason) || /should i continue\\?/i.test(reason)) {
+        // Special-case: executor hit an internal budget. Treat as an approval so "yes" can resume.
+        if (result.budgetHit) {
+          const budget = result.budgetHit;
+          const budgetLabel =
+            budget.type === 'turns' ? 'LLM turns' :
+            budget.type === 'tool_calls' ? 'tool calls' :
+            'time';
+          const budgetValue = budget.type === 'time' ? `${budget.used}/${budget.limit}ms` : `${budget.used}/${budget.limit}`;
+
           const approval: ApprovalRequest = {
             approvalId: nanoid(),
             description:
-              `The agent hit the internal step limit (${effectiveMaxTurns} turns) while working on:\n` +
+              `The agent hit an internal budget (${budgetLabel}: ${budgetValue}) while working on:\n` +
               `- ${task.description}\n\n` +
-              `Approve to retry this request with a higher limit (${config.newAgentExecutorMaxTurnsOnContinue} turns).`,
+              `Approve to retry this request with a higher limit.`,
             riskLevel: 'low',
             actions: [],
             fromAgent: task.agent,
@@ -149,6 +156,7 @@ export async function processRequestNew(options: NewProcessRequestOptions): Prom
             context: {
               kind: 'new_router_continue',
               maxTurns: config.newAgentExecutorMaxTurnsOnContinue,
+              budget,
               taskIndex: task.index,
             },
           };
@@ -157,7 +165,7 @@ export async function processRequestNew(options: NewProcessRequestOptions): Prom
           stateManager.setPhase(sessionId, 'waiting_user');
           sendEvent({ type: 'approval_request', request: approval, sessionId });
 
-          return reason;
+          return `I hit an internal budget while working on "${task.description}". Use the Continue prompt below to proceed.`;
         }
 
         const q: UserQuestion = {

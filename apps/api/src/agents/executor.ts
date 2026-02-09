@@ -19,6 +19,8 @@ export interface ExecuteTaskOptions {
   sendEvent: SendEventFn;
   conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
   maxTurns?: number;
+  maxToolCalls?: number;
+  maxDurationMs?: number;
 }
 
 /**
@@ -29,7 +31,7 @@ export async function executeAgentTask(
   dependencyData: unknown,
   options: ExecuteTaskOptions
 ): Promise<AgentExecutionResult> {
-  const { sessionId, projectRoot, sendEvent, conversationHistory = [], maxTurns } = options;
+  const { sessionId, projectRoot, sendEvent, conversationHistory = [], maxTurns, maxToolCalls, maxDurationMs } = options;
   const agent = getAgent(task.agent);
   const agentToolNames = getToolsForAgent(task.agent);
   const tools = getToolsForLLM().filter(t => agentToolNames.includes(t.name));
@@ -47,8 +49,11 @@ export async function executeAgentTask(
   ];
 
   // Run agent with tool use
+  const startedAt = Date.now();
   let turn = 0;
   const MAX_TURNS = Math.max(1, maxTurns ?? 5);
+  const MAX_TOOL_CALLS = maxToolCalls;
+  const MAX_DURATION_MS = maxDurationMs;
   let finalResult: unknown = null;
   let completedNormally = false;
   let lastError: string | undefined;
@@ -56,6 +61,19 @@ export async function executeAgentTask(
   let failedToolCalls = 0;
 
   while (turn < MAX_TURNS) {
+    if (typeof MAX_DURATION_MS === 'number' && MAX_DURATION_MS > 0) {
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= MAX_DURATION_MS) {
+        return {
+          success: false,
+          data: finalResult,
+          error: `Task exceeded time budget (${MAX_DURATION_MS}ms)`,
+          uncertain: true,
+          uncertaintyReason: 'The task exceeded the allowed time budget. Should I continue?',
+          budgetHit: { type: 'time', limit: MAX_DURATION_MS, used: elapsed },
+        };
+      }
+    }
     turn++;
 
     const response = await llmRouter.generate('anthropic', {
@@ -71,6 +89,20 @@ export async function executeAgentTask(
       finalResult = response.content;
       completedNormally = true;
       break;
+    }
+
+    if (typeof MAX_TOOL_CALLS === 'number' && MAX_TOOL_CALLS >= 0) {
+      const nextToolCalls = successfulToolCalls + failedToolCalls + response.toolCalls.length;
+      if (nextToolCalls > MAX_TOOL_CALLS) {
+        return {
+          success: false,
+          data: finalResult,
+          error: `Task exceeded tool-call budget (${MAX_TOOL_CALLS})`,
+          uncertain: true,
+          uncertaintyReason: 'The task required more tool calls than allowed. Should I continue?',
+          budgetHit: { type: 'tool_calls', limit: MAX_TOOL_CALLS, used: successfulToolCalls + failedToolCalls },
+        };
+      }
     }
 
     // Add assistant message
@@ -136,6 +168,7 @@ export async function executeAgentTask(
       error: `Task did not complete within ${MAX_TURNS} turns`,
       uncertain: true,
       uncertaintyReason: 'The task required more steps than allowed. Should I continue?',
+      budgetHit: { type: 'turns', limit: MAX_TURNS, used: turn },
     };
   }
 

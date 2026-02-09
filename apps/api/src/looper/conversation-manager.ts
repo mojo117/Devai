@@ -6,6 +6,12 @@
 
 import type { LLMMessage } from '../llm/types.js';
 
+export interface ConversationSnapshot {
+  systemPrompt: string;
+  maxTokens: number;
+  messages: LLMMessage[];
+}
+
 /**
  * Very rough token estimation: ~4 characters per token.
  * This avoids pulling in a full tokenizer dependency while still
@@ -30,6 +36,21 @@ export class ConversationManager {
 
   getSystemPrompt(): string {
     return this.systemPrompt;
+  }
+
+  snapshot(): ConversationSnapshot {
+    return {
+      systemPrompt: this.systemPrompt,
+      maxTokens: this.maxTokens,
+      messages: this.getMessages(),
+    };
+  }
+
+  restore(snapshot: ConversationSnapshot): void {
+    this.systemPrompt = snapshot.systemPrompt || '';
+    this.maxTokens = typeof snapshot.maxTokens === 'number' && snapshot.maxTokens > 0 ? snapshot.maxTokens : this.maxTokens;
+    this.messages = Array.isArray(snapshot.messages) ? snapshot.messages.map((m) => ({ role: m.role, content: m.content })) : [];
+    this.trimToTokenBudget();
   }
 
   addMessage(msg: LLMMessage): void {

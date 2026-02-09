@@ -15,6 +15,12 @@ export interface LooperError {
 
 type ErrorCallback = (error: LooperError) => void;
 
+export interface LooperErrorHandlerSnapshot {
+  maxRetries: number;
+  retryCounts: Array<[string, number]>;
+  errorLog: Array<Omit<LooperError, 'originalError'>>;
+}
+
 export class LooperErrorHandler {
   private retryCounts = new Map<string, number>();
   private errorLog: LooperError[] = [];
@@ -107,6 +113,32 @@ export class LooperErrorHandler {
   clear(): void {
     this.retryCounts.clear();
     this.errorLog = [];
+  }
+
+  snapshot(): LooperErrorHandlerSnapshot {
+    return {
+      maxRetries: this.maxRetries,
+      retryCounts: Array.from(this.retryCounts.entries()),
+      errorLog: this.errorLog.map((e) => ({
+        code: e.code,
+        message: e.message,
+        recoverable: e.recoverable,
+        context: e.context,
+        retryCount: e.retryCount,
+        maxRetries: e.maxRetries,
+      })),
+    };
+  }
+
+  restore(snapshot: LooperErrorHandlerSnapshot): void {
+    if (!snapshot || typeof snapshot !== 'object') return;
+    if (typeof snapshot.maxRetries === 'number' && snapshot.maxRetries >= 0) {
+      this.maxRetries = snapshot.maxRetries;
+    }
+    this.retryCounts = new Map(Array.isArray(snapshot.retryCounts) ? snapshot.retryCounts : []);
+    this.errorLog = Array.isArray(snapshot.errorLog)
+      ? snapshot.errorLog.map((e) => ({ ...e, originalError: undefined }))
+      : [];
   }
 
   private classifyError(err: unknown): string {

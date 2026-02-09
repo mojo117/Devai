@@ -22,6 +22,8 @@ import { LooperErrorHandler } from './error-handler.js';
 import { createAgents, type LooperAgent, type AgentResult } from './agents/index.js';
 import { getProjectContext } from '../scanner/projectScanner.js';
 import { config as appConfig } from '../config.js';
+import type { ConversationSnapshot } from './conversation-manager.js';
+import type { LooperErrorHandlerSnapshot } from './error-handler.js';
 
 /** Default configuration values. */
 const DEFAULTS: LooperConfig = {
@@ -39,6 +41,15 @@ export interface LoopRunResult {
   steps: LooperStep[];
   totalIterations: number;
   status: LooperStatus;
+}
+
+export interface LooperEngineSnapshot {
+  provider: LLMProvider;
+  cfg: LooperConfig;
+  conversation: ConversationSnapshot;
+  steps: LooperStep[];
+  status: LooperStatus;
+  errorHandler: LooperErrorHandlerSnapshot;
 }
 
 /**
@@ -72,6 +83,26 @@ export class LooperEngine {
     this.validator = new SelfValidator(provider);
     this.errorHandler = new LooperErrorHandler(this.cfg.maxToolRetries);
     this.agents = createAgents(provider);
+  }
+
+  snapshot(): LooperEngineSnapshot {
+    return {
+      provider: this.provider,
+      cfg: this.cfg,
+      conversation: this.conversation.snapshot(),
+      steps: this.steps,
+      status: this.status,
+      errorHandler: this.errorHandler.snapshot(),
+    };
+  }
+
+  static fromSnapshot(snapshot: LooperEngineSnapshot): LooperEngine {
+    const engine = new LooperEngine(snapshot.provider, snapshot.cfg);
+    engine.conversation.restore(snapshot.conversation);
+    engine.steps = Array.isArray(snapshot.steps) ? snapshot.steps : [];
+    engine.status = snapshot.status || 'idle';
+    engine.errorHandler.restore(snapshot.errorHandler);
+    return engine;
   }
 
   /** Register a streaming callback for real-time events. */

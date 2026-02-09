@@ -5,8 +5,6 @@
  * discovers available tools, and can call them.
  */
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { McpServerConfig } from './config.js';
 
 export interface McpToolInfo {
@@ -23,17 +21,16 @@ export interface McpToolInfo {
 }
 
 export class McpClient {
-  private client: Client;
-  private transport: StdioClientTransport | null = null;
+  // Lazy-loaded to keep the API usable even when MCP deps are absent in some environments (e.g. unit tests).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private client: any | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private transport: any | null = null;
   private connected = false;
   readonly config: McpServerConfig;
 
   constructor(config: McpServerConfig) {
     this.config = config;
-    this.client = new Client(
-      { name: `devai-${config.name}`, version: '1.0.0' },
-      { capabilities: {} }
-    );
   }
 
   /**
@@ -43,6 +40,22 @@ export class McpClient {
     if (this.connected) return;
 
     console.info(`[mcp:${this.config.name}] Connecting via stdio: ${this.config.command} ${this.config.args.join(' ')}`);
+
+    const { Client } = await import(/* @vite-ignore */ '@modelcontextprotocol/sdk/client/index.js')
+      .catch((err) => {
+        throw new Error(`MCP SDK not available (missing @modelcontextprotocol/sdk). ${err instanceof Error ? err.message : String(err)}`);
+      });
+    const { StdioClientTransport } = await import(/* @vite-ignore */ '@modelcontextprotocol/sdk/client/stdio.js')
+      .catch((err) => {
+        throw new Error(`MCP stdio transport not available. ${err instanceof Error ? err.message : String(err)}`);
+      });
+
+    if (!this.client) {
+      this.client = new Client(
+        { name: `devai-${this.config.name}`, version: '1.0.0' },
+        { capabilities: {} }
+      );
+    }
 
     this.transport = new StdioClientTransport({
       command: this.config.command,

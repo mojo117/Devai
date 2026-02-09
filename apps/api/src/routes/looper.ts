@@ -9,7 +9,7 @@ import { nanoid } from 'nanoid';
 import { LooperEngine } from '../looper/index.js';
 import { llmRouter } from '../llm/router.js';
 import { config } from '../config.js';
-import { createSession, saveMessage, updateSessionTitleIfEmpty } from '../db/queries.js';
+import { createSession, saveMessage, updateSessionTitleIfEmpty, getLooperState, upsertLooperState, deleteLooperState } from '../db/queries.js';
 import type { ChatMessage } from '@devai/shared';
 import type { LooperStreamEvent } from '@devai/shared';
 
@@ -71,17 +71,41 @@ export const looperRoutes: FastifyPluginAsync = async (app) => {
         engine.setStreamCallback(sendEvent);
         result = await engine.continueWithClarification(message);
       } else {
-        // Start a new loop
-        engine = new LooperEngine(provider, looperCfg);
-        engine.setStreamCallback(sendEvent);
-        result = await engine.run(message, config.projectRoot);
+        // Try to resume from persisted snapshot (survives API restart)
+        const persisted = await getLooperState(sessionId);
+        if (persisted && persisted.status === 'waiting_for_user' && persisted.snapshot) {
+          try {
+            engine = LooperEngine.fromSnapshot(persisted.snapshot as any);
+            engine.setStreamCallback(sendEvent);
+            result = await engine.continueWithClarification(message);
+          } catch (err) {
+            app.log.warn({ err }, '[looper] Failed to restore persisted engine snapshot, starting new loop');
+            engine = new LooperEngine(provider, looperCfg);
+            engine.setStreamCallback(sendEvent);
+            result = await engine.run(message, config.projectRoot);
+          }
+        } else {
+          // Start a new loop
+          engine = new LooperEngine(provider, looperCfg);
+          engine.setStreamCallback(sendEvent);
+          result = await engine.run(message, config.projectRoot);
+        }
       }
 
       // If waiting for user, keep the engine alive
       if (result.status === 'waiting_for_user') {
         activeEngines.set(sessionId, engine);
+        // Persist snapshot so clarification can resume later.
+        await upsertLooperState({
+          sessionId,
+          provider,
+          config: looperCfg || {},
+          snapshot: engine.snapshot(),
+          status: 'waiting_for_user',
+        });
       } else {
         activeEngines.delete(sessionId);
+        await deleteLooperState(sessionId);
       }
 
       // Persist messages

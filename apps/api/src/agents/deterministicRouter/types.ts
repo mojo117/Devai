@@ -11,6 +11,11 @@ export interface AgentExecutionResult {
   error?: string;
   uncertain?: boolean;
   uncertaintyReason?: string;
+  budgetHit?: {
+    type: 'turns' | 'tool_calls' | 'time';
+    limit: number;
+    used: number;
+  };
 }
 
 /**
