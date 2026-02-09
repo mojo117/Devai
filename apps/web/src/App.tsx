@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ChatUI, type ToolEvent } from './components/ChatUI';
 import { type AgentName, type AgentPhase } from './components/AgentStatus';
-import { ProjectInfo } from './components/ProjectInfo';
 import { LeftSidebar, LEFT_SIDEBAR_WIDTH } from './components/LeftSidebar';
 import { ActionsPage } from './components/ActionsPage';
 import { SystemFeed, type FeedEvent, toolEventToFeedEvent } from './components/SystemFeed';
@@ -448,9 +447,6 @@ function App() {
   }
 
   const sortedActions = [...actions].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const pendingActions = sortedActions.filter((a) => a.status === 'pending');
-  const activeActions = sortedActions.filter((a) => a.status === 'approved' || a.status === 'executing');
-  const completedActions = sortedActions.filter((a) => a.status === 'done' || a.status === 'failed' || a.status === 'rejected');
 
   return (
     <ErrorBoundary>
@@ -574,7 +570,7 @@ function App() {
           <>
             {/* Chat Area - shown on desktop always, on mobile only when mobilePanel is 'chat' */}
             {/* Desktop: 2/3 width, Mobile: full width */}
-            <div className={`flex flex-col min-w-0 min-h-0 overflow-hidden ${isMobile ? (mobilePanel === 'chat' ? 'flex-1' : 'hidden') : 'w-2/3'}`}>
+            <div className={`flex flex-col min-w-0 min-h-0 overflow-hidden ${isMobile ? (mobilePanel === 'chat' ? 'flex-1' : 'hidden') : 'flex-1'}`}>
               <ChatUI
                 projectRoot={health?.projectRoot}
                 skillIds={selectedSkillIds}
@@ -597,7 +593,8 @@ function App() {
             {/* System Feed - shown on desktop always, on mobile only when mobilePanel is 'feed' */}
             {/* Desktop: 1/3 width, Mobile: full width */}
             <aside
-              className={`min-h-0 overflow-hidden ${isMobile ? (mobilePanel === 'feed' ? 'flex-1' : 'hidden') : 'w-1/3 flex-shrink-0'}`}
+              className={`min-h-0 overflow-hidden ${isMobile ? (mobilePanel === 'feed' ? 'flex-1' : 'hidden') : 'flex-shrink-0'}`}
+              style={isMobile ? undefined : { width: feedWidth }}
             >
               <SystemFeed events={feedEvents} isLoading={chatLoading} onClear={handleClearFeed} />
             </aside>
