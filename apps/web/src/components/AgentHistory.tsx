@@ -7,21 +7,15 @@
 
 import { useState } from 'react';
 import { AgentBadge, type AgentName } from './AgentStatus';
+import type { AgentHistoryEntry } from '../api';
 
-export interface AgentHistoryEntry {
-  id: string;
-  timestamp: string;
-  agent: AgentName;
-  action: string;
-  input?: unknown;
-  output?: unknown;
-  toolCalls?: Array<{
-    name: string;
-    arguments: Record<string, unknown>;
-    result?: string;
-  }>;
-  duration: number;
-  status: 'success' | 'error' | 'escalated';
+function renderValue(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2) ?? '';
+  } catch {
+    return String(value);
+  }
 }
 
 interface AgentHistoryProps {
@@ -34,12 +28,14 @@ const statusStyles: Record<string, string> = {
   success: 'border-green-600 bg-green-900/10',
   error: 'border-red-600 bg-red-900/10',
   escalated: 'border-yellow-600 bg-yellow-900/10',
+  waiting: 'border-blue-600 bg-blue-900/10',
 };
 
 const statusLabels: Record<string, string> = {
   success: 'Completed',
   error: 'Failed',
   escalated: 'Escalated',
+  waiting: 'Waiting',
 };
 
 export function AgentHistory({
@@ -83,23 +79,24 @@ export function AgentHistory({
 
       <div className="overflow-y-auto" style={{ maxHeight: `calc(${maxHeight} - 40px)` }}>
         {entries.map((entry, index) => {
-          const isExpanded = expandedEntries.has(entry.id);
+          const id = entry.entryId;
+          const isExpanded = expandedEntries.has(id);
           const time = new Date(entry.timestamp).toLocaleTimeString();
 
           return (
             <div
-              key={entry.id}
+              key={id}
               className={`border-l-2 ${statusStyles[entry.status]} ${
                 index < entries.length - 1 ? 'border-b border-gray-700' : ''
               }`}
             >
               {/* Header */}
               <button
-                onClick={() => toggleExpanded(entry.id)}
+                onClick={() => toggleExpanded(id)}
                 className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-gray-700/30 transition-colors"
               >
                 <span className="text-xs text-gray-500 w-16 shrink-0">{time}</span>
-                <AgentBadge agent={entry.agent} size="sm" />
+                <AgentBadge agent={entry.agent as AgentName} size="sm" />
                 <span className="text-sm text-gray-300 flex-1 truncate">
                   {entry.action}
                 </span>
@@ -112,6 +109,8 @@ export function AgentHistory({
                       ? 'bg-green-600/30 text-green-400'
                       : entry.status === 'error'
                       ? 'bg-red-600/30 text-red-400'
+                      : entry.status === 'waiting'
+                      ? 'bg-blue-600/30 text-blue-300'
                       : 'bg-yellow-600/30 text-yellow-400'
                   }`}
                 >
@@ -138,25 +137,23 @@ export function AgentHistory({
               {isExpanded && (
                 <div className="px-3 pb-3 space-y-2">
                   {/* Input */}
-                  {entry.input && (
+                  {entry.input != null && (
                     <div>
                       <div className="text-xs text-gray-500 mb-1">Input</div>
                       <pre className="text-xs bg-gray-900 p-2 rounded overflow-x-auto text-gray-300">
-                        {typeof entry.input === 'string'
-                          ? entry.input
-                          : JSON.stringify(entry.input, null, 2)}
+                        {renderValue(entry.input)}
                       </pre>
                     </div>
                   )}
 
                   {/* Tool Calls */}
-                  {showToolCalls && entry.toolCalls && entry.toolCalls.length > 0 && (
+                  {showToolCalls && (entry.toolCalls?.length ?? 0) > 0 && (
                     <div>
                       <div className="text-xs text-gray-500 mb-1">
-                        Tool Calls ({entry.toolCalls.length})
+                        Tool Calls ({entry.toolCalls!.length})
                       </div>
                       <div className="space-y-1">
-                        {entry.toolCalls.map((tc, i) => (
+                        {entry.toolCalls!.map((tc, i) => (
                           <div
                             key={i}
                             className="bg-gray-900 rounded p-2 text-xs"
@@ -186,13 +183,11 @@ export function AgentHistory({
                   )}
 
                   {/* Output */}
-                  {entry.output && (
+                  {entry.output != null && (
                     <div>
                       <div className="text-xs text-gray-500 mb-1">Output</div>
                       <pre className="text-xs bg-gray-900 p-2 rounded overflow-x-auto text-gray-300 max-h-48 overflow-y-auto">
-                        {typeof entry.output === 'string'
-                          ? entry.output
-                          : JSON.stringify(entry.output, null, 2)}
+                        {renderValue(entry.output)}
                       </pre>
                     </div>
                   )}
@@ -219,13 +214,15 @@ export function AgentTimeline({ entries }: AgentTimelineProps) {
   return (
     <div className="flex items-center gap-1 overflow-x-auto py-2">
       {entries.map((entry, i) => (
-        <div key={entry.id} className="flex items-center">
+        <div key={entry.entryId} className="flex items-center">
           <div
             className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${
               entry.status === 'success'
                 ? 'bg-green-600/30 text-green-400 border border-green-600'
                 : entry.status === 'error'
                 ? 'bg-red-600/30 text-red-400 border border-red-600'
+                : entry.status === 'waiting'
+                ? 'bg-blue-600/30 text-blue-300 border border-blue-600'
                 : 'bg-yellow-600/30 text-yellow-400 border border-yellow-600'
             }`}
             title={`${entry.agent}: ${entry.action}`}

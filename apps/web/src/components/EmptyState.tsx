@@ -1,5 +1,3 @@
-import React from 'react';
-
 interface EmptyStateProps {
   icon?: string;
   title: string;

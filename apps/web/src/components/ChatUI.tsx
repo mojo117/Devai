@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import ReactMarkdown from 'react-markdown';
 import { sendMessage, sendMultiAgentMessage, sendAgentApproval, sendAgentQuestionResponse, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction, globProjectFiles, fetchPendingActions, batchApproveActions, batchRejectActions, fetchAgentState } from '../api';
 import type { ChatStreamEvent } from '../api';
 import type { ChatMessage, ContextStats, SessionSummary, Action } from '../types';
@@ -9,7 +8,7 @@ import { InlineAction, type PendingAction } from './InlineAction';
 import { InlineApproval, type PendingApproval } from './InlineApproval';
 import { InlineQuestion, type PendingQuestion } from './InlineQuestion';
 import { AgentStatus, type AgentName, type AgentPhase } from './AgentStatus';
-import { AgentHistory, AgentTimeline } from './AgentHistory';
+import { AgentTimeline } from './AgentHistory';
 import { useActionWebSocket } from '../hooks/useActionWebSocket';
 
 export interface ToolEvent {
@@ -1019,7 +1018,6 @@ export function ChatUI({ projectRoot, skillIds, allowedRoots, pinnedFiles, ignor
             <AgentStatus
               activeAgent={activeAgent}
               phase={agentPhase}
-              compact={false}
             />
             {agentHistory.length > 0 && (
               <button
@@ -1234,39 +1232,8 @@ export function ChatUI({ projectRoot, skillIds, allowedRoots, pinnedFiles, ignor
 
 function renderMessageContent(content: string) {
   return (
-    <div className="prose prose-invert prose-sm max-w-none">
-      <ReactMarkdown
-        components={{
-          // Style code blocks
-          pre: ({ children }) => (
-            <pre className="bg-gray-900 rounded p-2 overflow-x-auto text-xs my-2">
-              {children}
-            </pre>
-          ),
-          code: ({ className, children }) => {
-            const isBlock = className?.includes('language-');
-            return isBlock ? (
-              <code className="font-mono text-gray-200">{children}</code>
-            ) : (
-              <code className="bg-gray-800 px-1 rounded text-sm">{children}</code>
-            );
-          },
-          // Ensure proper text styling
-          p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-          ul: ({ children }) => <ul className="list-disc pl-4 mb-2">{children}</ul>,
-          ol: ({ children }) => <ol className="list-decimal pl-4 mb-2">{children}</ol>,
-          li: ({ children }) => <li className="mb-1">{children}</li>,
-          strong: ({ children }) => <strong className="font-bold">{children}</strong>,
-          em: ({ children }) => <em className="italic">{children}</em>,
-          a: ({ href, children }) => (
-            <a href={href} className="text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">
-              {children}
-            </a>
-          ),
-        }}
-      >
-        {content}
-      </ReactMarkdown>
+    <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+      {content}
     </div>
   );
 }
@@ -1328,16 +1295,4 @@ function upsertToolEvent(
     copy[index] = next;
     return copy;
   });
-}
-
-function formatToolPayload(payload: unknown): string {
-  try {
-    const text = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
-    if (text.length > 400) {
-      return `${text.slice(0, 400)}\n...`;
-    }
-    return text;
-  } catch {
-    return String(payload);
-  }
 }
