@@ -1,5 +1,3 @@
-import React from 'react';
-
 interface McpServer {
   name: string;
   status: 'connected' | 'disconnected' | 'error';
