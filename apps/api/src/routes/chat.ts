@@ -420,8 +420,10 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
       // Initialize or get state
       const state = getOrCreateState(activeSessionId);
+      // Keep the last request for approval/resume flows (independent of projectRoot).
+      state.taskContext.originalRequest = message;
       if (validatedProjectRoot) {
-        state.taskContext.originalRequest = message;
+        state.taskContext.gatheredInfo['projectRoot'] = validatedProjectRoot;
       }
 
       const sendEvent = (event: AgentStreamEvent | Record<string, unknown>) => {

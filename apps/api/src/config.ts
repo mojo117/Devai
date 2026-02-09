@@ -56,6 +56,10 @@ export interface Config {
   looperMaxToolRetries: number;
   looperMinValidationConfidence: number;
   looperSelfValidationEnabled: boolean;
+
+  // New Agent Router (capability-based)
+  newAgentExecutorMaxTurns: number;
+  newAgentExecutorMaxTurnsOnContinue: number;
 }
 
 export function loadConfig(): Config {
@@ -102,6 +106,11 @@ export function loadConfig(): Config {
     looperMaxToolRetries: parseInt(process.env.LOOPER_MAX_TOOL_RETRIES || "3", 10),
     looperMinValidationConfidence: parseFloat(process.env.LOOPER_MIN_VALIDATION_CONFIDENCE || "0.7"),
     looperSelfValidationEnabled: process.env.LOOPER_SELF_VALIDATION !== "false",
+
+    // New Agent Router (capability-based)
+    // 5 turns was too low for real-world tasks (often needs multiple tool calls + synthesis).
+    newAgentExecutorMaxTurns: parseInt(process.env.NEW_AGENT_EXECUTOR_MAX_TURNS || "20", 10),
+    newAgentExecutorMaxTurnsOnContinue: parseInt(process.env.NEW_AGENT_EXECUTOR_MAX_TURNS_ON_CONTINUE || "40", 10),
   };
 }
 

@@ -18,6 +18,7 @@ export interface ExecuteTaskOptions {
   projectRoot: string | null;
   sendEvent: SendEventFn;
   conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  maxTurns?: number;
 }
 
 /**
@@ -28,7 +29,7 @@ export async function executeAgentTask(
   dependencyData: unknown,
   options: ExecuteTaskOptions
 ): Promise<AgentExecutionResult> {
-  const { sessionId, projectRoot, sendEvent, conversationHistory = [] } = options;
+  const { sessionId, projectRoot, sendEvent, conversationHistory = [], maxTurns } = options;
   const agent = getAgent(task.agent);
   const agentToolNames = getToolsForAgent(task.agent);
   const tools = getToolsForLLM().filter(t => agentToolNames.includes(t.name));
@@ -47,7 +48,7 @@ export async function executeAgentTask(
 
   // Run agent with tool use
   let turn = 0;
-  const MAX_TURNS = 5;
+  const MAX_TURNS = Math.max(1, maxTurns ?? 5);
   let finalResult: unknown = null;
   let completedNormally = false;
   let lastError: string | undefined;

@@ -142,34 +142,8 @@ export function ChatUI({ projectRoot, skillIds, allowedRoots, pinnedFiles, ignor
       setPendingApprovals([]);
       return;
     }
-    try {
-      const stored = localStorage.getItem(`devai_pending_approvals_${sessionId}`);
-      if (stored) {
-        const parsed = JSON.parse(stored) as PendingApproval[];
-        if (Array.isArray(parsed)) {
-          setPendingApprovals(parsed);
-          return;
-        }
-      }
-    } catch {
-      // Ignore localStorage errors.
-    }
     setPendingApprovals([]);
   }, [sessionId, multiAgentMode]);
-
-  useEffect(() => {
-    if (!sessionId || !multiAgentMode) return;
-    try {
-      const key = `devai_pending_approvals_${sessionId}`;
-      if (pendingApprovals.length === 0) {
-        localStorage.removeItem(key);
-      } else {
-        localStorage.setItem(key, JSON.stringify(pendingApprovals));
-      }
-    } catch {
-      // Ignore localStorage errors.
-    }
-  }, [pendingApprovals, sessionId, multiAgentMode]);
 
   useEffect(() => {
     if (!multiAgentMode || !sessionId) return;
@@ -184,9 +158,12 @@ export function ChatUI({ projectRoot, skillIds, allowedRoots, pinnedFiles, ignor
             sessionId,
           }));
           setPendingApprovals(approvals);
+        } else {
+          setPendingApprovals([]);
         }
       } catch {
-        // Ignore state load errors for now.
+        // Agent state is in-memory on the server; if it's gone (restart), don't keep stale UI approvals.
+        if (!cancelled) setPendingApprovals([]);
       }
     };
     loadApprovals();

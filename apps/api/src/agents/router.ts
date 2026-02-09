@@ -69,6 +69,29 @@ const AGENTS: Record<AgentName, AgentDefinition> = {
   scout: SCOUT_AGENT,
 };
 
+function parseYesNo(input: string): boolean | null {
+  const raw = input.trim().toLowerCase().replace(/[.!?,;:]+$/g, '');
+  if (!raw) return null;
+
+  const yes = new Set([
+    'y', 'yes', 'yeah', 'yep', 'ok', 'okay', 'sure', 'continue', 'proceed', 'go ahead',
+    'ja', 'j', 'klar', 'weiter', 'mach weiter', 'bitte weiter',
+  ]);
+  const no = new Set([
+    'n', 'no', 'nope', 'stop', 'cancel', 'abort',
+    'nein', 'nee', 'stopp', 'abbrechen',
+  ]);
+
+  if (yes.has(raw)) return true;
+  if (no.has(raw)) return false;
+  return null;
+}
+
+function looksLikeContinuePrompt(text: string): boolean {
+  const t = (text || '').toLowerCase();
+  return t.includes('required more steps than allowed') || t.includes('should i continue?');
+}
+
 function buildToolResultContent(result: { success: boolean; result?: unknown; error?: string }): { content: string; isError: boolean } {
   if (result.success) {
     const value = result.result === undefined ? '' : JSON.stringify(result.result);
@@ -107,6 +130,33 @@ export async function processRequest(
 ): Promise<string> {
   // Default to empty array if not provided
   const history = conversationHistory ?? [];
+
+  // If the user typed a simple yes/no while we're waiting on an approval, treat it as the approval decision.
+  // This prevents "yes is too vague" when the new router asks "Should I continue?".
+  const decision = parseYesNo(userMessage);
+  const state = stateManager.getOrCreateState(sessionId);
+  const pendingApprovals = state.pendingApprovals ?? [];
+  if (decision !== null && pendingApprovals.length > 0) {
+    const latest = pendingApprovals[pendingApprovals.length - 1];
+    return handleUserApproval(sessionId, latest.approvalId, decision, sendEvent);
+  }
+
+  // Fallback: if state was lost (restart) but the last assistant prompt was a "continue?" gate,
+  // interpret "yes" as "continue the previous request".
+  if (decision === true && pendingApprovals.length === 0) {
+    const lastAssistant = [...history].reverse().find((m) => m.role === 'assistant')?.content || '';
+    if (looksLikeContinuePrompt(lastAssistant)) {
+      const lastUser = [...history].reverse().find((m) => m.role === 'user')?.content || '';
+      if (lastUser.trim()) {
+        stateManager.setOriginalRequest(sessionId, lastUser);
+        userMessage = lastUser;
+      }
+    }
+  }
+
+  // Keep the last actual request for approval/resume flows.
+  stateManager.setOriginalRequest(sessionId, userMessage);
+
   // New capability-based router (feature-flagged)
   if (config.useNewAgentRouter) {
     console.info('[agents] Using NEW capability-based router');
@@ -1238,6 +1288,16 @@ export async function handleUserApproval(
   if (!approved) {
     stateManager.setPhase(sessionId, 'error');
     return 'Task abgebrochen durch User.';
+  }
+
+  // Some approvals are not "risk approvals" but a "continue" gate (e.g. new router step-limit).
+  // Store a one-shot override in state so the next run can adjust its budget.
+  const ctx = approval.context;
+  if (ctx && typeof ctx === 'object' && ctx.kind === 'new_router_continue') {
+    const maxTurns = (ctx as Record<string, unknown>).maxTurns;
+    if (typeof maxTurns === 'number' && Number.isFinite(maxTurns) && maxTurns > 0) {
+      stateManager.setGatheredInfo(sessionId, 'newRouterMaxTurnsOverride', maxTurns);
+    }
   }
 
   // Grant approval and continue

@@ -180,6 +180,11 @@ export interface ApprovalRequest {
   actions: PlannedAction[];
   fromAgent: AgentName;
   timestamp: string;
+  /**
+   * Optional machine-readable metadata for non-risk approvals (e.g. "continue").
+   * Safe to ignore in the UI.
+   */
+  context?: Record<string, unknown>;
 }
 
 export interface PlannedAction {
