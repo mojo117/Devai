@@ -33,6 +33,28 @@ export interface McpConfig {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = resolve(__dirname, '../../mcp-servers.json');
 
+function expandEnvInString(value: string): string {
+  return value.replace(/\$\{([A-Z0-9_]+)\}/g, (_m, key: string) => process.env[key] || '');
+}
+
+function resolveProjectPath(path: string): string {
+  const candidates: string[] = [
+    path,
+    // Common cross-host mappings:
+    path === '/opt/Klyde/projects' ? '/mnt/klyde-projects' : '',
+    path === '/mnt/klyde-projects' ? '/opt/Klyde/projects' : '',
+    // Last-resort locations (Baso runtime)
+    '/mnt/klyde-projects',
+    '/opt/Klyde/projects',
+    '/opt/shared-repos',
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return path;
+}
+
 /**
  * Expand environment variable references in env config
  * Supports syntax: ${ENV_VAR_NAME}
@@ -49,6 +71,15 @@ function expandEnvVars(env: Record<string, string> | undefined): Record<string, 
     }
   }
   return result;
+}
+
+function rewriteArgAfterFlag(args: string[], flag: string, value: string): string[] {
+  const idx = args.findIndex(a => a === flag);
+  if (idx === -1) return args;
+  if (idx + 1 >= args.length) return args;
+  const out = [...args];
+  out[idx + 1] = value;
+  return out;
 }
 
 /**
@@ -71,10 +102,29 @@ export function loadMcpConfig(): McpConfig {
 
     // Expand environment variables in each server config
     const expandedConfig: McpConfig = {
-      mcpServers: config.mcpServers.map((server) => ({
-        ...server,
-        env: expandEnvVars(server.env),
-      })),
+      mcpServers: config.mcpServers.map((server) => {
+        const expandedArgs = (server.args || []).map(a => expandEnvInString(a));
+
+        let normalizedArgs = expandedArgs;
+        if (server.name === 'serena') {
+          const projectIdx = normalizedArgs.findIndex(a => a === '--project');
+          if (projectIdx !== -1 && projectIdx + 1 < normalizedArgs.length) {
+            normalizedArgs = rewriteArgAfterFlag(normalizedArgs, '--project', resolveProjectPath(normalizedArgs[projectIdx + 1]));
+          }
+        }
+        if (server.name === 'filesystem') {
+          // Shape: ["-y", "@modelcontextprotocol/server-filesystem", <dir>...]
+          const head = normalizedArgs.slice(0, 2);
+          const dirs = normalizedArgs.slice(2).map(resolveProjectPath).filter(d => existsSync(d));
+          normalizedArgs = dirs.length > 0 ? [...head, ...dirs] : normalizedArgs;
+        }
+
+        return {
+          ...server,
+          args: normalizedArgs,
+          env: expandEnvVars(server.env),
+        };
+      }),
     };
 
     console.info(`[mcp] Loaded ${expandedConfig.mcpServers.length} MCP server config(s)`);

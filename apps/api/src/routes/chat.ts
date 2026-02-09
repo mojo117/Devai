@@ -120,8 +120,10 @@ askForConfirmation("fs.delete", {"path": "/path/to/archive", "recursive": true},
 When exploring a codebase, use fs.glob to find files and fs.grep to search for specific code. This is more efficient than listing directories manually.
 
 FILE ACCESS:
-- You have FULL access to /opt/Klyde/projects and all subdirectories
+- You have FULL access to /opt/Klyde/projects (canonical path)
+- On Baso, /opt/Klyde/projects is mounted at /mnt/klyde-projects (use this path when a tool requires a real on-disk path)
 - Each project is at /opt/Klyde/projects/<project-name> (e.g., /opt/Klyde/projects/Devai)
+- On Baso: /mnt/klyde-projects/<project-name> (e.g., /mnt/klyde-projects/Devai)
 - Your working directory is in "Project Context" above - but you can access ANY project
 - Linux is CASE SENSITIVE: /Test and /test are DIFFERENT directories
 
