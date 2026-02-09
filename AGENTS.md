@@ -11,6 +11,7 @@
 - Pipeline: dev -> staging -> main. Never push directly to staging or main.
 - Auto-deploy: Yes (GitHub Actions on push to dev or staging).
 - Promote via Klyde deploy scripts (repo-level), do not push to staging/main directly.
+- Default workflow: make code changes on branch `dev` in `/opt/Klyde/projects/Devai` (this Klyde worktree). Only switch branches/worktrees if the user explicitly asks.
 
 ## Servers and SSH (Standard)
 - Baso (77.42.90.193, private 10.0.0.4): central repos + PM2 dev/staging servers.
@@ -26,6 +27,7 @@
 - Edit files in /opt/Klyde/projects/Devai/ (Klyde server).
 - Mutagen syncs to /opt/shared-repos/Devai/worktree-preview on Baso.
 - Check preview at https://devai.klyde.tech.
+- Do not develop inside Baso `/opt/shared-repos/Devai/*` worktrees unless explicitly requested (those are deployment/runtime worktrees).
 
 ## Do Not Do
 - Do not change ports or PM2 configs.
