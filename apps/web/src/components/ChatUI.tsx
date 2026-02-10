@@ -19,6 +19,23 @@ export interface ToolEvent {
   agent?: AgentName;
 }
 
+export interface ChatSessionState {
+  sessionId: string | null;
+  sessions: SessionSummary[];
+  sessionsLoading: boolean;
+  hasMessages: boolean;
+}
+
+export type ChatSessionCommand =
+  | { type: 'select'; sessionId: string }
+  | { type: 'new' }
+  | { type: 'restart' };
+
+export interface ChatSessionCommandEnvelope {
+  nonce: number;
+  command: ChatSessionCommand;
+}
+
 interface ToolEventUpdate {
   type: ToolEvent['type'];
   name?: string;
@@ -42,9 +59,29 @@ interface ChatUIProps {
   onLoadingChange?: (loading: boolean) => void;
   onAgentChange?: (agent: AgentName | null, phase: AgentPhase) => void;
   clearFeedTrigger?: number; // Increment to trigger feed clear
+  /** When true, session controls are expected to live in the global header. */
+  showSessionControls?: boolean;
+  sessionCommand?: ChatSessionCommandEnvelope | null;
+  onSessionStateChange?: (state: ChatSessionState) => void;
 }
 
-export function ChatUI({ projectRoot, skillIds, allowedRoots, pinnedFiles, ignorePatterns, projectContextOverride, onPinFile, onContextUpdate, onToolEvent, onLoadingChange, onAgentChange, clearFeedTrigger }: ChatUIProps) {
+export function ChatUI({
+  projectRoot,
+  skillIds,
+  allowedRoots,
+  pinnedFiles,
+  ignorePatterns,
+  projectContextOverride,
+  onPinFile,
+  onContextUpdate,
+  onToolEvent,
+  onLoadingChange,
+  onAgentChange,
+  clearFeedTrigger,
+  showSessionControls = true,
+  sessionCommand,
+  onSessionStateChange,
+}: ChatUIProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoadingInternal] = useState(false);
@@ -142,6 +179,16 @@ export function ChatUI({ projectRoot, skillIds, allowedRoots, pinnedFiles, ignor
   useEffect(() => {
     onToolEvent?.(toolEvents);
   }, [toolEvents, onToolEvent]);
+
+  // Emit session state to parent (for header controls)
+  useEffect(() => {
+    onSessionStateChange?.({
+      sessionId,
+      sessions,
+      sessionsLoading,
+      hasMessages: messages.length > 0,
+    });
+  }, [sessionId, sessions, sessionsLoading, messages.length, onSessionStateChange]);
 
   // Persist tool events to localStorage (keyed by sessionId)
   useEffect(() => {
@@ -826,47 +873,66 @@ export function ChatUI({ projectRoot, skillIds, allowedRoots, pinnedFiles, ignor
     }
   };
 
+  // Accept session commands from the global header.
+  const lastSessionCommandNonceRef = useRef<number>(0);
+  useEffect(() => {
+    if (!sessionCommand) return;
+    if (sessionCommand.nonce === lastSessionCommandNonceRef.current) return;
+    lastSessionCommandNonceRef.current = sessionCommand.nonce;
+
+    const cmd = sessionCommand.command;
+    if (cmd.type === 'select') {
+      void handleSelectSession(cmd.sessionId);
+    } else if (cmd.type === 'new') {
+      void handleNewChat();
+    } else if (cmd.type === 'restart') {
+      void handleRestartChat();
+    }
+  }, [sessionCommand, handleSelectSession, handleNewChat, handleRestartChat]);
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
-        <div className="flex items-center justify-between text-xs text-gray-400">
-          <div className="flex items-center gap-2">
-            <span>Session</span>
-            <select
-              value={sessionId || ''}
-              onChange={(e) => handleSelectSession(e.target.value)}
-              disabled={sessionsLoading || sessions.length === 0}
-              className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200"
-            >
-              {sessions.length === 0 && (
-                <option value="">No sessions</option>
-              )}
-              {sessions.map((session) => (
-                <option key={session.id} value={session.id}>
-                  {session.title ? session.title : session.id.slice(0, 8)}
-                </option>
-              ))}
-            </select>
+        {showSessionControls && (
+          <div className="flex items-center justify-between text-xs text-gray-400">
+            <div className="flex items-center gap-2">
+              <span>Session</span>
+              <select
+                value={sessionId || ''}
+                onChange={(e) => handleSelectSession(e.target.value)}
+                disabled={sessionsLoading || sessions.length === 0}
+                className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200"
+              >
+                {sessions.length === 0 && (
+                  <option value="">No sessions</option>
+                )}
+                {sessions.map((session) => (
+                  <option key={session.id} value={session.id}>
+                    {session.title ? session.title : session.id.slice(0, 8)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleRestartChat}
+                disabled={sessionsLoading || messages.length === 0}
+                className="text-[11px] text-orange-400 hover:text-orange-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Save current conversation to history and start fresh"
+              >
+                {sessionsLoading ? 'Loading...' : 'Restart Chat'}
+              </button>
+              <button
+                onClick={handleNewChat}
+                disabled={sessionsLoading}
+                className="text-[11px] text-gray-300 hover:text-white disabled:opacity-50"
+              >
+                {sessionsLoading ? 'Loading...' : 'New Chat'}
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleRestartChat}
-              disabled={sessionsLoading || messages.length === 0}
-              className="text-[11px] text-orange-400 hover:text-orange-300 disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Save current conversation to history and start fresh"
-            >
-              {sessionsLoading ? 'Loading...' : 'Restart Chat'}
-            </button>
-            <button
-              onClick={handleNewChat}
-              disabled={sessionsLoading}
-              className="text-[11px] text-gray-300 hover:text-white disabled:opacity-50"
-            >
-              {sessionsLoading ? 'Loading...' : 'New Chat'}
-            </button>
-          </div>
-        </div>
+        )}
 
         {/* Agent Status - show when multi-agent mode is active */}
         {multiAgentMode && (

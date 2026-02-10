@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ChatUI, type ToolEvent } from './components/ChatUI';
+import { ChatUI, type ToolEvent, type ChatSessionState, type ChatSessionCommand, type ChatSessionCommandEnvelope } from './components/ChatUI';
 import { type AgentName, type AgentPhase } from './components/AgentStatus';
 import { LeftSidebar, LEFT_SIDEBAR_WIDTH } from './components/LeftSidebar';
 import { ActionsPage } from './components/ActionsPage';
@@ -71,6 +71,15 @@ function App() {
   const [isMobile, setIsMobile] = useState(false);
   const [activeAgent, setActiveAgent] = useState<AgentName | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>('idle');
+  const [chatSessionState, setChatSessionState] = useState<ChatSessionState | null>(null);
+  const [sessionCommand, setSessionCommand] = useState<ChatSessionCommandEnvelope | null>(null);
+
+  const issueSessionCommand = useCallback((command: ChatSessionCommand) => {
+    setSessionCommand((prev) => ({
+      nonce: (prev?.nonce ?? 0) + 1,
+      command,
+    }));
+  }, []);
 
   // Handle agent state changes from ChatUI
   const handleAgentChange = useCallback((agent: AgentName | null, phase: AgentPhase) => {
@@ -447,6 +456,26 @@ function App() {
   }
 
   const sortedActions = [...actions].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const agentIcon = activeAgent === 'chapo'
+    ? '🎯'
+    : activeAgent === 'koda'
+    ? '💻'
+    : activeAgent === 'devo'
+    ? '🔧'
+    : activeAgent === 'scout'
+    ? '🔍'
+    : '🤖';
+  const agentPhaseShort = agentPhase === 'thinking'
+    ? 'Thinking'
+    : (agentPhase === 'execution' || agentPhase === 'executing')
+    ? 'Exec'
+    : agentPhase === 'error'
+    ? 'Error'
+    : agentPhase === 'qualification'
+    ? '...'
+    : agentPhase === 'review'
+    ? 'Review'
+    : 'Ready';
 
   return (
     <ErrorBoundary>
@@ -509,8 +538,9 @@ function App() {
             </div>
           </div>
 
-          {/* Center: Agent Status (compact) */}
-          <div className="hidden sm:flex items-center gap-1 text-[11px]">
+          {/* Center: Multi-Agent + Sessions */}
+          <div className="hidden sm:flex flex-1 items-center justify-center gap-3">
+            <div className="flex items-center gap-1 text-[11px]">
             <span className={`px-1.5 py-0.5 rounded ${activeAgent === 'chapo' ? 'bg-purple-600/30 text-purple-300' : 'text-gray-500'}`} title="CHAPO - Coordinator">
               🎯
             </span>
@@ -537,13 +567,99 @@ function App() {
                 {agentPhase === 'idle' && '✓'}
               </span>
             )}
+            </div>
+
+            {view === 'chat' && (
+              <div className="flex items-center gap-2 text-[11px] text-gray-400">
+                <span className="hidden md:inline">Session</span>
+                <select
+                  value={chatSessionState?.sessionId || chatSessionState?.sessions[0]?.id || ''}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!v) return;
+                    issueSessionCommand({ type: 'select', sessionId: v });
+                  }}
+                  disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState || chatSessionState.sessions.length === 0}
+                  className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 max-w-[220px]"
+                  title={chatSessionState?.sessionId || ''}
+                >
+                  {!chatSessionState || chatSessionState.sessionsLoading ? (
+                    <option value="">Loading...</option>
+                  ) : chatSessionState.sessions.length === 0 ? (
+                    <option value="">No sessions</option>
+                  ) : (
+                    chatSessionState.sessions.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.title ? s.title : s.id.slice(0, 8)}
+                      </option>
+                    ))
+                  )}
+                </select>
+                <button
+                  onClick={() => issueSessionCommand({ type: 'restart' })}
+                  disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState?.hasMessages}
+                  className="hidden md:inline text-[11px] text-orange-400 hover:text-orange-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Save current conversation to history and start fresh"
+                >
+                  Restart
+                </button>
+                <button
+                  onClick={() => issueSessionCommand({ type: 'new' })}
+                  disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState}
+                  className="hidden md:inline text-[11px] text-gray-300 hover:text-white disabled:opacity-50"
+                >
+                  New
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Right: Status + Project */}
           <div className="flex items-center gap-3 text-[11px]">
+            <span
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border ${
+                agentPhase === 'error'
+                  ? 'border-red-700 bg-red-900/20 text-red-300'
+                  : agentPhase === 'thinking'
+                  ? 'border-cyan-700 bg-cyan-900/10 text-cyan-300'
+                  : (agentPhase === 'execution' || agentPhase === 'executing')
+                  ? 'border-yellow-700 bg-yellow-900/10 text-yellow-300'
+                  : 'border-gray-700 bg-gray-900/20 text-gray-300'
+              }`}
+              title="Multi-agent status"
+            >
+              <span>{agentIcon}</span>
+              <span className="hidden md:inline">MA</span>
+              <span className="text-[10px] opacity-80">{agentPhaseShort}</span>
+            </span>
             <span className={`${health ? 'text-green-400' : 'text-yellow-400'}`}>
               {health ? '● Online' : '○ ...'}
             </span>
+            {view === 'chat' && (
+              <select
+                value={chatSessionState?.sessionId || chatSessionState?.sessions[0]?.id || ''}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (!v) return;
+                  issueSessionCommand({ type: 'select', sessionId: v });
+                }}
+                disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState || chatSessionState.sessions.length === 0}
+                className="sm:hidden bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 max-w-[170px]"
+                title={chatSessionState?.sessionId || ''}
+              >
+                {!chatSessionState || chatSessionState.sessionsLoading ? (
+                  <option value="">Loading...</option>
+                ) : chatSessionState.sessions.length === 0 ? (
+                  <option value="">No sessions</option>
+                ) : (
+                  chatSessionState.sessions.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.title ? s.title : s.id.slice(0, 8)}
+                    </option>
+                  ))
+                )}
+              </select>
+            )}
             <span className="hidden md:inline text-gray-500 truncate max-w-[150px]" title={health?.projectRoot || ''}>
               {health?.projectRoot?.split('/').pop() || ''}
             </span>
@@ -584,6 +700,9 @@ function App() {
                 onLoadingChange={setChatLoading}
                 onAgentChange={handleAgentChange}
                 clearFeedTrigger={clearFeedTrigger}
+                showSessionControls={false}
+                sessionCommand={sessionCommand}
+                onSessionStateChange={setChatSessionState}
               />
             </div>
 
