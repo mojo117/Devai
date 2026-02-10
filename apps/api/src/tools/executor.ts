@@ -10,6 +10,9 @@ import * as webTools from './web.js';
 import * as contextTools from './context.js';
 import { config } from '../config.js';
 import { mcpManager } from '../mcp/index.js';
+import { join } from 'path';
+import { stat } from 'fs/promises';
+import { toRuntimePath } from '../utils/pathMapping.js';
 
 export interface ToolExecutionResult {
   success: boolean;
@@ -35,6 +38,19 @@ export async function executeTool(
   const start = Date.now();
 
   try {
+    const pickContextRoot = async (): Promise<string> => {
+      for (const root of config.allowedRoots) {
+        const runtimeRoot = await toRuntimePath(root);
+        try {
+          const s = await stat(join(runtimeRoot, 'context/documents'));
+          if (s.isDirectory()) return runtimeRoot;
+        } catch {
+          // ignore
+        }
+      }
+      return await toRuntimePath(config.allowedRoots[0]);
+    };
+
     const execution = (async () => {
       switch (toolName) {
         // File System Tools
@@ -206,17 +222,17 @@ export async function executeTool(
 
         // Context Tools (read-only document access)
         case 'context_listDocuments':
-          return contextTools.listDocuments(config.allowedRoots[0]);
+          return contextTools.listDocuments(await pickContextRoot());
 
         case 'context_readDocument':
           return contextTools.readDocument(
-            config.allowedRoots[0],
+            await pickContextRoot(),
             args.path as string
           );
 
         case 'context_searchDocuments':
           return contextTools.searchDocuments(
-            config.allowedRoots[0],
+            await pickContextRoot(),
             args.query as string
           );
 

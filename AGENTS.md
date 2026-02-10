@@ -32,9 +32,12 @@
 ## Filesystem Access Policy (DevAI)
 - Allowed roots (only):
   - `/opt/Klyde/projects/DeviSpace`
+  - `/opt/Klyde/projects/Devai`
 - For other repos/paths: ask the user to copy files into `DeviSpace` or explicitly expand access.
 
-DevAI MUST NOT modify the Devai repo. Use Codex/Claude Code for repo changes, or explicitly expand DevAI's allowedRoots.
+Default behavior:
+- New demo projects (e.g. Hello World sites) go into `DeviSpace`.
+- Do not overwrite DevAI UI entrypoints unless the user explicitly requests modifying DevAI itself.
 
 ## Do Not Do
 - Do not change ports or PM2 configs.

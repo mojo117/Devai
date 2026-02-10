@@ -78,10 +78,15 @@ function parseYesNo(input: string): boolean | null {
   const yes = new Set([
     'y', 'yes', 'yeah', 'yep', 'ok', 'okay', 'sure', 'continue', 'proceed', 'go ahead',
     'ja', 'j', 'klar', 'weiter', 'mach weiter', 'bitte weiter',
+    // Common typos / near-misses
+    'yess', 'yees', 'yas',
+    'contine', 'contiune', 'contnue', 'conitnue', 'continoue', 'continu', 'cntinue',
   ]);
   const no = new Set([
     'n', 'no', 'nope', 'stop', 'cancel', 'abort',
     'nein', 'nee', 'stopp', 'abbrechen',
+    // Common typos / near-misses
+    'cancell', 'abor', 'abrt',
   ]);
 
   if (yes.has(raw)) return true;

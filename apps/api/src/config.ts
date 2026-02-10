@@ -8,6 +8,7 @@ loadEnv({ path: resolve(process.cwd(), "../../.env") });
 // These paths are enforced regardless of environment variables
 const HARDCODED_ALLOWED_ROOTS: readonly string[] = [
   "/opt/Klyde/projects/DeviSpace", // DevAI sandbox workspace (canonical)
+  "/opt/Klyde/projects/Devai", // DevAI worktree (canonical)
 ] as const;
 
 export interface Config {
