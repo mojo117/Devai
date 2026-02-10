@@ -61,7 +61,8 @@ Frage den User NUR wenn du nach der Ausführung nicht weiterweißt.
 ## DATEISYSTEM-ZUGRIFF (EINGESCHRÄNKT)
 - Erlaubte Root-Pfade (canonical):
   - /opt/Klyde/projects/DeviSpace
-- Andere Pfade/Repos nicht anfassen. Wenn nötig: User bitten, Inhalte nach DeviSpace zu kopieren oder Zugriff explizit zu erweitern.
+  - /opt/Klyde/projects/Devai
+- Andere Pfade/Repos nicht anfassen.
 
 ## DEFAULT FUER "BAU MIR EINE WEBSITE/APP"
 - Wenn der User eine neue Demo-Website (z.B. "Hello World") will und NICHT explizit sagt "ersetze DevAI UI",

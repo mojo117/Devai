@@ -71,13 +71,20 @@ export async function executeBash(
     if (extractedPort < DEVSERVER_PORT_MIN || extractedPort > DEVSERVER_PORT_MAX) {
       throw new Error(`Dev server port must be within ${DEVSERVER_PORT_MIN}-${DEVSERVER_PORT_MAX}. Got ${extractedPort}.`);
     }
+    const bindsAll =
+      /\b--host=0\.0\.0\.0\b/.test(command) ||
+      /\b--host\s+0\.0\.0\.0\b/.test(command) ||
+      /\bHOST=0\.0\.0\.0\b/.test(command);
+    if (!bindsAll) {
+      throw new Error(`Dev server must bind to 0.0.0.0 for domain:port access (e.g. --host 0.0.0.0).`);
+    }
     if (!/\btimeout\b/.test(command)) {
       throw new Error(`Dev server commands must be wrapped in "timeout" (e.g. timeout 10m npm run dev -- --host 0.0.0.0 --port ${extractedPort}).`);
     }
   }
 
-  // DevAI safety: restrict bash to allowedRoots (currently DeviSpace only).
-  // This prevents accidental self-modification of the Devai repo via shell commands.
+  // DevAI safety: restrict bash to allowedRoots.
+  // This prevents commands from operating outside the explicitly allowed work areas.
   const canonicalAllowedRoots = config.allowedRoots.map((r) => resolve(r));
   const assertAllowedPath = (p: string) => {
     const canonical = toCanonicalPath(resolve(p));
@@ -88,14 +95,20 @@ export async function executeBash(
   };
 
   // Block obvious references to other project roots in the command string.
-  // This is intentionally blunt: DevAI is only allowed to work inside DeviSpace.
-  const disallowProjectPath = (prefix: string, allowedSuffix: string) => {
-    if (command.includes(prefix) && !command.includes(allowedSuffix)) {
-      throw new Error(`Access denied: command references paths outside allowed roots`);
-    }
+  // Intentionally blunt: allow only the explicit allowed roots when absolute project paths are used.
+  const disallowProjectPath = (prefix: string, allowed: string[]) => {
+    if (!command.includes(prefix)) return;
+    const ok = allowed.some((suffix) => command.includes(suffix));
+    if (!ok) throw new Error(`Access denied: command references paths outside allowed roots`);
   };
-  disallowProjectPath('/opt/Klyde/projects/', '/opt/Klyde/projects/DeviSpace');
-  disallowProjectPath('/mnt/klyde-projects/', '/mnt/klyde-projects/DeviSpace');
+  disallowProjectPath('/opt/Klyde/projects/', [
+    '/opt/Klyde/projects/DeviSpace',
+    '/opt/Klyde/projects/Devai',
+  ]);
+  disallowProjectPath('/mnt/klyde-projects/', [
+    '/mnt/klyde-projects/DeviSpace',
+    '/mnt/klyde-projects/Devai',
+  ]);
 
   // Safety check
   for (const pattern of DANGEROUS_PATTERNS) {

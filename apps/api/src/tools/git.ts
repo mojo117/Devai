@@ -36,13 +36,22 @@ async function getGit(): Promise<SimpleGit> {
     throw new Error('No allowed roots configured for git operations');
   }
 
-  // Try to find a git repo starting from the first allowed root
-  const baseDir = await toRuntimePath(allowedRoots[0]);
-  const gitRoot = await findGitRoot(baseDir);
+  // Try to find a git repo starting from any allowed root (first match wins).
+  let gitRoot: string | null = null;
+  let searchedFrom: string[] = [];
+  for (const root of allowedRoots) {
+    const baseDir = await toRuntimePath(root);
+    searchedFrom.push(baseDir);
+    const candidate = await findGitRoot(baseDir);
+    if (candidate) {
+      gitRoot = candidate;
+      break;
+    }
+  }
 
   if (!gitRoot) {
     throw new Error(
-      `No git repository found from ${baseDir}. Ensure a git repo exists within allowed paths.`
+      `No git repository found from allowed roots. Searched: ${searchedFrom.join(', ')}`
     );
   }
 

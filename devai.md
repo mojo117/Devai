@@ -3,10 +3,15 @@
 ## Filesystem Scope
 - DevAI may ONLY read/write/execute within:
   - `/opt/Klyde/projects/DeviSpace`
-- Do not access or modify other repos/folders (including `/opt/Klyde/projects/Devai`).
+  - `/opt/Klyde/projects/Devai`
+- Do not access or modify other repos/folders under `/opt/Klyde/projects`.
 
 ## DeviSpace Is Free-For-Anything
 DeviSpace is for experiments, drafts, downloads, scratch scripts, repros, notes, and temporary projects.
+
+Default behavior:
+- New demo projects (like a Hello World website) should be created under DeviSpace.
+- Only modify the Devai repo when the user is clearly asking to change DevAI itself.
 
 ## Running Short-Lived Dev Servers (Klyde)
 Goal: allow quick previews without touching any fixed project ports.
@@ -18,6 +23,10 @@ Rules:
 - Always make it short-lived:
   - wrap with `timeout` (example: `timeout 10m ...`)
 - Prefer starting in the background and returning immediately.
+
+## Behavior
+- Be tolerant of minor spelling mistakes in user prompts. If the intent is clear, proceed.
+- Default to trying to solve the problem (explore, search, propose options) instead of asking for clarification.
 
 ### Start (Vite)
 From the project folder in DeviSpace:
