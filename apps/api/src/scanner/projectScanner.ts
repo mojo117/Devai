@@ -1,6 +1,7 @@
-import { readFile, stat, access } from 'fs/promises';
-import { resolve, join } from 'path';
+import { readFile, access } from 'fs/promises';
+import { resolve } from 'path';
 import type { ProjectContext } from '@devai/shared';
+import { toCanonicalPath, toRuntimePath } from '../utils/pathMapping.js';
 
 interface PackageJson {
   name?: string;
@@ -12,7 +13,8 @@ interface PackageJson {
 }
 
 export async function scanProject(projectRoot: string): Promise<ProjectContext> {
-  const packageJsonPath = resolve(projectRoot, 'package.json');
+  const runtimeRoot = await toRuntimePath(projectRoot);
+  const packageJsonPath = resolve(runtimeRoot, 'package.json');
 
   let packageJson: PackageJson | null = null;
   try {
@@ -22,9 +24,9 @@ export async function scanProject(projectRoot: string): Promise<ProjectContext> 
     // No package.json
   }
 
-  const framework = await detectFramework(projectRoot, packageJson);
-  const language = await detectLanguage(projectRoot);
-  const packageManager = await detectPackageManager(projectRoot);
+  const framework = await detectFramework(runtimeRoot, packageJson);
+  const language = await detectLanguage(runtimeRoot);
+  const packageManager = await detectPackageManager(runtimeRoot);
 
   const hasTests = !!(packageJson?.scripts?.test);
   const testCommand = packageJson?.scripts?.test;
@@ -151,13 +153,15 @@ let cachedContext: ProjectContext | null = null;
 let cacheProjectRoot: string | null = null;
 
 export async function getProjectContext(projectRoot: string): Promise<ProjectContext> {
+  const canonicalRoot = toCanonicalPath(projectRoot);
+
   // Return cached context if available for the same project
-  if (cachedContext && cacheProjectRoot === projectRoot) {
+  if (cachedContext && cacheProjectRoot === canonicalRoot) {
     return cachedContext;
   }
 
   cachedContext = await scanProject(projectRoot);
-  cacheProjectRoot = projectRoot;
+  cacheProjectRoot = canonicalRoot;
 
   return cachedContext;
 }

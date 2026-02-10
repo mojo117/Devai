@@ -78,8 +78,7 @@ async function resolvePathCaseInsensitive(basePath: string, relativePath: string
   return currentPath;
 }
 
-// Validate that the path is within allowed roots
-// File access is restricted to /opt/Klyde/projects and /workingtrees
+// Validate that the path is within allowed roots (config.allowedRoots)
 // Handles path translation for cross-server compatibility
 async function validatePath(path: string): Promise<string> {
   // Handle empty or root path requests - default to first allowed root
@@ -141,7 +140,7 @@ async function validatePath(path: string): Promise<string> {
     }
 
     // If the path starts with the root's basename, strip it to avoid duplication
-    // e.g., "projects/Test" -> "Test" when root is "/opt/Klyde/projects"
+    // e.g., "DeviSpace/repros" -> "repros" when root is "/opt/Klyde/projects/DeviSpace"
     if (segments[0]?.toLowerCase() === rootBasename.toLowerCase()) {
       cleanPath = segments.slice(1).join('/');
     }
@@ -159,7 +158,10 @@ async function validatePath(path: string): Promise<string> {
     }
   }
 
-  throw new Error(`Path "${path}" not found. You have access to /opt/Klyde/projects. Try: fs.listFiles("/opt/Klyde/projects") to see available projects.`);
+  throw new Error(
+    `Path "${path}" not found within allowed roots: ${allowedRoots.join(', ')}. ` +
+    `Try: fs.listFiles("${allowedRoots[0]}")`
+  );
 }
 
 function isAllowedExtension(path: string): boolean {

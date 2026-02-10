@@ -1,5 +1,6 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import type { Action } from '../types';
+import { ensureControlPlaneConnected, isControlPlaneConnected, subscribeActionEvents } from '../api';
 
 interface ActionWebSocketEvent {
   type: 'action_pending' | 'action_updated' | 'action_created' | 'initial_sync' | 'pong';
@@ -30,148 +31,71 @@ export function useActionWebSocket({
   enabled = true,
 }: UseActionWebSocketOptions): UseActionWebSocketReturn {
   const debug = import.meta.env.DEV && Boolean((window as any).__DEVAI_DEBUG);
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const reconnectAttempts = useRef(0);
-
   const [connectionState, setConnectionState] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
 
-  const connect = useCallback(() => {
-    if (!enabled) return;
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
-
-    // Clear any pending reconnect
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-
-    // Build WebSocket URL
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    let wsUrl = `${protocol}//${host}/api/ws/actions`;
-
-    if (sessionId) {
-      wsUrl += `?sessionId=${encodeURIComponent(sessionId)}`;
-    }
-
-    if (debug) console.log('[WS] Connecting to', wsUrl);
-    setConnectionState('connecting');
-
-    try {
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        if (debug) console.log('[WS] Connected');
-        setConnectionState('connected');
-        reconnectAttempts.current = 0;
-
-        // Start ping interval to keep connection alive
-        pingIntervalRef.current = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'ping' }));
-          }
-        }, 30000);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data) as ActionWebSocketEvent;
-          if (debug) console.log('[WS] Received:', data.type, data);
-
-          switch (data.type) {
-            case 'action_pending':
-            case 'action_created':
-              if (data.action && onActionPending) {
-                onActionPending(data.action);
-              }
-              break;
-
-            case 'action_updated':
-              if (data.action && onActionUpdated) {
-                onActionUpdated(data.action);
-              }
-              break;
-
-            case 'initial_sync':
-              if (data.actions && onInitialSync) {
-                onInitialSync(data.actions);
-              }
-              break;
-
-            case 'pong':
-              // Connection is alive
-              break;
-          }
-        } catch (err) {
-          console.error('[WS] Failed to parse message:', err);
-        }
-      };
-
-      ws.onclose = (event) => {
-        if (debug) console.log('[WS] Disconnected', event.code, event.reason);
-        setConnectionState('disconnected');
-
-        // Clean up ping interval
-        if (pingIntervalRef.current) {
-          clearInterval(pingIntervalRef.current);
-          pingIntervalRef.current = null;
-        }
-
-        // Schedule reconnect with exponential backoff
-        if (enabled && reconnectAttempts.current < 100) {
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
-          reconnectAttempts.current++;
-          if (debug) console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current})`);
-
-          reconnectTimeoutRef.current = setTimeout(() => {
-            connect();
-          }, delay);
-        }
-      };
-
-      ws.onerror = (error) => {
-        if (debug) console.error('[WS] Error:', error);
-        setConnectionState('error');
-      };
-    } catch (err) {
-      if (debug) console.error('[WS] Failed to create WebSocket:', err);
-      setConnectionState('error');
-    }
-  }, [debug, enabled, sessionId, onActionPending, onActionUpdated, onInitialSync]);
-
   const reconnect = useCallback(() => {
-    // Close existing connection
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
+    if (!enabled) return;
+    setConnectionState('connecting');
+    ensureControlPlaneConnected()
+      .then(() => setConnectionState('connected'))
+      .catch(() => setConnectionState('error'));
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled) {
+      setConnectionState('disconnected');
+      return;
     }
 
-    // Reset reconnect counter and connect
-    reconnectAttempts.current = 0;
-    connect();
-  }, [connect]);
+    let cancelled = false;
 
-  // Connect on mount and when dependencies change
-  useEffect(() => {
-    connect();
+    setConnectionState('connecting');
+    ensureControlPlaneConnected()
+      .then(() => {
+        if (!cancelled) setConnectionState('connected');
+      })
+      .catch(() => {
+        if (!cancelled) setConnectionState('error');
+      });
+
+    const unsubscribe = subscribeActionEvents((raw) => {
+      const data = raw as unknown as ActionWebSocketEvent;
+      if (debug) console.log('[WS/control] action event:', data.type, data);
+
+      switch (data.type) {
+        case 'action_pending':
+        case 'action_created':
+          if (data.action && onActionPending) onActionPending(data.action);
+          break;
+        case 'action_updated':
+          if (data.action && onActionUpdated) onActionUpdated(data.action);
+          break;
+        case 'initial_sync':
+          if (data.actions && onInitialSync) onInitialSync(data.actions);
+          break;
+        case 'pong':
+          break;
+      }
+    });
+
+    // Reflect connection state changes from the shared control plane.
+    const interval = window.setInterval(() => {
+      const connected = isControlPlaneConnected();
+      setConnectionState((prev) => {
+        if (connected) return 'connected';
+        if (prev === 'error') return prev;
+        return 'disconnected';
+      });
+    }, 1000);
 
     return () => {
-      // Cleanup on unmount
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      if (pingIntervalRef.current) {
-        clearInterval(pingIntervalRef.current);
-      }
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
+      cancelled = true;
+      unsubscribe();
+      window.clearInterval(interval);
     };
-  }, [connect]);
+    // sessionId is kept for API compatibility but not used anymore (actions are global).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, debug, sessionId, onActionPending, onActionUpdated, onInitialSync]);
 
   return {
     isConnected: connectionState === 'connected',

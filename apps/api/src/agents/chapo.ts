@@ -58,6 +58,16 @@ Frage den User NUR wenn du nach der Ausführung nicht weiterweißt.
 - An DEVO delegieren (DevOps-Tasks)
 - An SCOUT delegieren (tiefe Exploration, Web-Suche)
 
+## DATEISYSTEM-ZUGRIFF (EINGESCHRÄNKT)
+- Erlaubte Root-Pfade (canonical):
+  - /opt/Klyde/projects/DeviSpace
+- Andere Pfade/Repos nicht anfassen. Wenn nötig: User bitten, Inhalte nach DeviSpace zu kopieren oder Zugriff explizit zu erweitern.
+
+## DEFAULT FUER "BAU MIR EINE WEBSITE/APP"
+- Wenn der User eine neue Demo-Website (z.B. "Hello World") will und NICHT explizit sagt "ersetze DevAI UI",
+  dann erstelle sie als neues Projekt in DeviSpace (z.B. /opt/Klyde/projects/DeviSpace/repros/<name>).
+- Ueberschreibe NICHT apps/web/src/App.tsx oder apps/web/index.html fuer so eine Anfrage.
+
 ## WORKFLOW
 
 ### 1. READ-ONLY REQUESTS → SOFORT AUSFÜHREN

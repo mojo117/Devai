@@ -96,13 +96,18 @@ export const looperRoutes: FastifyPluginAsync = async (app) => {
       if (result.status === 'waiting_for_user') {
         activeEngines.set(sessionId, engine);
         // Persist snapshot so clarification can resume later.
-        await upsertLooperState({
-          sessionId,
-          provider,
-          config: looperCfg || {},
-          snapshot: engine.snapshot(),
-          status: 'waiting_for_user',
-        });
+        try {
+          await upsertLooperState({
+            sessionId,
+            provider,
+            config: looperCfg || {},
+            snapshot: engine.snapshot(),
+            status: 'waiting_for_user',
+          });
+        } catch (err) {
+          // Non-fatal: loop can keep running in-memory, but a restart would lose the snapshot.
+          app.log.warn({ err, sessionId }, '[looper] Failed to persist engine snapshot');
+        }
       } else {
         activeEngines.delete(sessionId);
         await deleteLooperState(sessionId);

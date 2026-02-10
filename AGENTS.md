@@ -29,6 +29,13 @@
 - Check preview at https://devai.klyde.tech.
 - Do not develop inside Baso `/opt/shared-repos/Devai/*` worktrees unless explicitly requested (those are deployment/runtime worktrees).
 
+## Filesystem Access Policy (DevAI)
+- Allowed roots (only):
+  - `/opt/Klyde/projects/DeviSpace`
+- For other repos/paths: ask the user to copy files into `DeviSpace` or explicitly expand access.
+
+DevAI MUST NOT modify the Devai repo. Use Codex/Claude Code for repo changes, or explicitly expand DevAI's allowedRoots.
+
 ## Do Not Do
 - Do not change ports or PM2 configs.
 - Do not run npm install on Klyde (dependencies live on Baso).
@@ -37,3 +44,9 @@
 ## Useful Checks
 - mutagen sync list | grep devai-dev
 - ssh root@77.42.90.193 "pm2 logs devai-dev --lines 50"
+
+## External APIs (Appwrite)
+- MyLittleTaskboard task access is available via Appwrite Function executions: `POST https://appwrite.klyde.tech/v1/functions/api-project-access/executions`.
+- Project ID header: `X-Appwrite-Project: 69805803000aeddb2ead`.
+- The project API key (`tfapi_...`) is not committed; store it in `.env` (example name: `DEVAI_TASKBOARD_API_KEY`, managed/encrypted via SOPS; see `SECRETS.md`).
+- Details/curl example: see `CLAUDE.md`.

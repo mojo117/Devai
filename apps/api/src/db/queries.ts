@@ -390,6 +390,8 @@ export async function upsertAgentState(sessionId: string, state: unknown): Promi
 
   if (error) {
     console.error('Failed to upsert agent state:', error);
+    // Surface persistence failures to callers so they can retry/backoff instead of silently dropping writes.
+    throw new Error(`Failed to upsert agent state: ${error.message}`);
   }
 }
 
@@ -453,6 +455,9 @@ export async function upsertLooperState(input: {
 
   if (error) {
     console.error('Failed to upsert looper state:', error);
+    // Callers should handle this as a non-fatal error (loop can continue),
+    // but we still want a signal so we can retry and avoid silent data loss.
+    throw new Error(`Failed to upsert looper state: ${error.message}`);
   }
 }
 
