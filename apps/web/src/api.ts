@@ -17,6 +17,35 @@ import type {
 const API_BASE = '/api';
 const TOKEN_KEY = 'devai_auth_token';
 
+async function readApiError(res: Response): Promise<string> {
+  const contentType = res.headers.get('content-type') || '';
+  const fallback = `HTTP ${res.status} ${res.statusText || ''}`.trim();
+
+  if (contentType.includes('application/json')) {
+    try {
+      const data = (await res.json()) as any;
+      const parts: string[] = [];
+      if (data?.error) parts.push(String(data.error));
+      if (data?.details) parts.push(String(data.details));
+      if (Array.isArray(data?.details)) parts.push(JSON.stringify(data.details));
+      const msg = parts.filter(Boolean).join(': ').trim();
+      return msg || fallback;
+    } catch {
+      // fall through
+    }
+  }
+
+  try {
+    const text = (await res.text()).trim();
+    if (!text) return fallback;
+    // Avoid dumping an entire HTML document.
+    if (text.startsWith('<!doctype') || text.startsWith('<html')) return fallback;
+    return `${fallback}: ${text}`.trim();
+  } catch {
+    return fallback;
+  }
+}
+
 export function getAuthToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
@@ -43,8 +72,7 @@ export async function login(username: string, password: string): Promise<{ token
   });
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(error.error || 'Login failed');
+    throw new Error(await readApiError(res));
   }
 
   const data = await res.json();
@@ -92,8 +120,7 @@ export async function sendMessage(
   });
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(error.error || 'Failed to send message');
+    throw new Error(await readApiError(res));
   }
 
   const contentType = res.headers.get('content-type') || '';
@@ -356,8 +383,7 @@ export async function batchApproveActions(actionIds: string[]): Promise<{ result
   });
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(error.error || 'Failed to batch approve actions');
+    throw new Error(await readApiError(res));
   }
 
   return res.json();
@@ -371,8 +397,7 @@ export async function batchRejectActions(actionIds: string[]): Promise<{ results
   });
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(error.error || 'Failed to batch reject actions');
+    throw new Error(await readApiError(res));
   }
 
   return res.json();
@@ -386,8 +411,7 @@ export async function approveAction(actionId: string): Promise<{ action: Action;
   });
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(error.error || 'Failed to approve action');
+    throw new Error(await readApiError(res));
   }
 
   return res.json();
@@ -401,8 +425,7 @@ export async function rejectAction(actionId: string): Promise<{ action: Action }
   });
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(error.error || 'Failed to reject action');
+    throw new Error(await readApiError(res));
   }
 
   return res.json();
@@ -416,8 +439,7 @@ export async function retryAction(actionId: string): Promise<{ action: Action; o
   });
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(error.error || 'Failed to retry action');
+    throw new Error(await readApiError(res));
   }
 
   return res.json();
@@ -782,8 +804,7 @@ export async function sendAgentApproval(
   });
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(error.error || 'Failed to submit approval');
+    throw new Error(await readApiError(res));
   }
 
   const contentType = res.headers.get('content-type') || '';
@@ -867,8 +888,7 @@ export async function sendAgentQuestionResponse(
   });
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(error.error || 'Failed to submit question response');
+    throw new Error(await readApiError(res));
   }
 
   const contentType = res.headers.get('content-type') || '';
@@ -952,8 +972,7 @@ export async function sendMultiAgentMessage(
   });
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(error.error || 'Failed to send multi-agent message');
+    throw new Error(await readApiError(res));
   }
 
   const contentType = res.headers.get('content-type') || '';

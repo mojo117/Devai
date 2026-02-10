@@ -95,6 +95,21 @@ export function selectModel(
 export function classifyTaskComplexity(message: string): TaskComplexityLevel {
   const lowercased = message.toLowerCase().trim();
 
+  // Simple general Q/A should not trigger the heavy multi-step qualification flow.
+  // This avoids unnecessary clarifications and makes DevAI answer directly.
+  //
+  // Heuristic: short question-like input without code/devops keywords.
+  const looksLikeGeneralQuestion =
+    lowercased.length <= 140 &&
+    (lowercased.endsWith('?') ||
+      /^(do you|are you|can you|could you|would you|what is|what are|why|how|when|where|who)\b/.test(lowercased) ||
+      /^(hast du|bist du|kannst du|koenntest du|wuerdest du|was ist|warum|wie|wann|wo|wer)\b/.test(lowercased)) &&
+    !/\b(git|commit|push|pull|merge|branch|deploy|pm2|docker|kubernetes|ci|cd|npm|yarn|pnpm|install|build|test|logs?)\b/.test(lowercased) &&
+    !/\b(file|files|folder|dir|directory|repo|repository|code|typescript|javascript|python|node|react|vite|next|api|endpoint|sql|database)\b/.test(lowercased);
+  if (looksLikeGeneralQuestion) {
+    return 'simple';
+  }
+
   // Trivial: Simple reads, status checks, listings
   const trivialPatterns = [
     /^(show|list|display|print|cat|read)\b/,
