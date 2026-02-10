@@ -83,6 +83,7 @@ export async function processRequestNew(options: NewProcessRequestOptions): Prom
     stateManager.addPendingQuestion(sessionId, q);
     stateManager.setPhase(sessionId, 'waiting_user');
     sendEvent({ type: 'user_question', question: q });
+    await stateManager.flushState(sessionId);
     return question;
   }
 
@@ -164,6 +165,7 @@ export async function processRequestNew(options: NewProcessRequestOptions): Prom
           stateManager.addPendingApproval(sessionId, approval);
           stateManager.setPhase(sessionId, 'waiting_user');
           sendEvent({ type: 'approval_request', request: approval, sessionId });
+          await stateManager.flushState(sessionId);
 
           return `I hit an internal budget while working on "${task.description}". Use the Continue prompt below to proceed.`;
         }
@@ -177,6 +179,7 @@ export async function processRequestNew(options: NewProcessRequestOptions): Prom
         stateManager.addPendingQuestion(sessionId, q);
         stateManager.setPhase(sessionId, 'waiting_user');
         sendEvent({ type: 'user_question', question: q });
+        await stateManager.flushState(sessionId);
         return reason;
       }
 

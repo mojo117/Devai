@@ -18,6 +18,15 @@
 
 You are editing files in `/opt/Klyde/projects/Devai/` on the Klyde server.
 
+## Filesystem Access Policy (DevAI)
+
+DevAI is intentionally restricted to exactly one filesystem root:
+- `/opt/Klyde/projects/DeviSpace` (sandbox workspace where DevAI can do anything)
+
+If a user asks about another repo under `/opt/Klyde/projects/*`, do not access it directly. Ask them to copy it into `DeviSpace` or explicitly expand access.
+
+DevAI MUST NOT modify this repo. If changes to Devai are needed, use Codex/Claude Code (human-controlled) or explicitly expand DevAI's allowedRoots.
+
 ```
 Your Edits                    Mutagen Sync                  Live Preview
 +-----------------------+    --------------->    +-----------------------+
@@ -142,6 +151,36 @@ ssh root@77.42.90.193 "pm2 status"
 - **PM2 Process**: devai-dev
 - **Mutagen Sync**: devai-dev
 - **Dev Port**: 3008
+
+## External API: MyLittleTaskboard Task Access (Appwrite)
+
+Use this Appwrite Function execution endpoint to access **MyLittleTaskboard** tasks from Devai.
+
+- **Endpoint**: `POST https://appwrite.klyde.tech/v1/functions/api-project-access/executions`
+- **Project header** (required): `X-Appwrite-Project: 69805803000aeddb2ead`
+- **Auth**: pass the project API key (`tfapi_...`) in the execution **body** as `apiKey` (see example below)
+
+**Security:** Do not hardcode or commit the API key. Store it in `.env` and keep it encrypted via SOPS (`.env.enc`).
+
+**Where to find/set the key:**
+- The `tfapi_...` key is generated in MyLittleTaskboard: Projects -> select project -> "API-Zugriff" -> "API-Key generieren".
+- In this repo, store it in `.env` (example name: `DEVAI_TASKBOARD_API_KEY`).
+- Secrets are managed via SOPS; see `SECRETS.md` for `.env.enc` deploy/decrypt flow.
+
+
+Example (curl):
+```bash
+curl -sS -X POST 'https://appwrite.klyde.tech/v1/functions/api-project-access/executions' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Appwrite-Project: 69805803000aeddb2ead' \
+  -d "{\"body\": \"{\\\"apiKey\\\": \\\"${DEVAI_TASKBOARD_API_KEY}\\\", \\\"task\\\": \\\"TASK_ID\\\"}\"}" \
+  | jq -r '.responseBody' | jq
+```
+
+Notes:
+- When calling Appwrite Functions via REST (`/v1/functions/{id}/executions`), use `body` (not `data`).
+- Appwrite wraps the function response; parse `.responseBody` (JSON string).
+
 
 ## Troubleshooting
 

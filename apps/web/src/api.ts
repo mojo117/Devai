@@ -456,12 +456,325 @@ export interface MultiAgentResponse {
   agentHistory?: AgentHistoryEntry[];
 }
 
+// ===========================================
+// WebSocket Control Plane (Multi-Agent)
+// ===========================================
+
+type PendingWsRequest = {
+  resolve: (value: MultiAgentResponse) => void;
+  reject: (err: Error) => void;
+  onEvent?: (event: ChatStreamEvent) => void;
+  timeoutId: number;
+};
+
+let chatWs: WebSocket | null = null;
+let chatWsConnecting: Promise<WebSocket> | null = null;
+let chatWsPingTimer: number | null = null;
+let chatWsReconnectTimer: number | null = null;
+let chatWsReconnectAttempts = 0;
+const pendingWsRequests = new Map<string, PendingWsRequest>();
+const lastSeqBySession = new Map<string, number>();
+const sessionListeners = new Map<string, Set<(event: ChatStreamEvent) => void>>();
+const actionListeners = new Set<(event: ChatStreamEvent) => void>();
+
+function getSeqStorageKey(sessionId: string): string {
+  return `devai_chat_seq_${sessionId}`;
+}
+
+function loadLastSeq(sessionId: string): number {
+  const mem = lastSeqBySession.get(sessionId);
+  if (typeof mem === 'number') return mem;
+  try {
+    const raw = localStorage.getItem(getSeqStorageKey(sessionId));
+    const n = raw ? Number(raw) : 0;
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function storeLastSeq(sessionId: string, seq: number): void {
+  lastSeqBySession.set(sessionId, seq);
+  try {
+    localStorage.setItem(getSeqStorageKey(sessionId), String(seq));
+  } catch {
+    // ignore
+  }
+}
+
+function addSessionListener(sessionId: string, fn: (event: ChatStreamEvent) => void): () => void {
+  const set = sessionListeners.get(sessionId) ?? new Set();
+  set.add(fn);
+  sessionListeners.set(sessionId, set);
+  return () => {
+    const cur = sessionListeners.get(sessionId);
+    if (!cur) return;
+    cur.delete(fn);
+    if (cur.size === 0) sessionListeners.delete(sessionId);
+  };
+}
+
+function getChatWsUrl(): string {
+  const token = getAuthToken();
+  if (!token) throw new Error('Not authenticated');
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.host;
+  return `${protocol}//${host}/api/ws/chat?token=${encodeURIComponent(token)}`;
+}
+
+function cleanupChatWs(): void {
+  if (chatWsPingTimer) {
+    window.clearInterval(chatWsPingTimer);
+    chatWsPingTimer = null;
+  }
+  if (chatWsReconnectTimer) {
+    window.clearTimeout(chatWsReconnectTimer);
+    chatWsReconnectTimer = null;
+  }
+  chatWs = null;
+  chatWsConnecting = null;
+}
+
+function hasAnyControlPlaneSubscribers(): boolean {
+  if (actionListeners.size > 0) return true;
+  for (const set of sessionListeners.values()) {
+    if (set.size > 0) return true;
+  }
+  return false;
+}
+
+function scheduleControlPlaneReconnect(): void {
+  if (!hasAnyControlPlaneSubscribers()) return;
+  // No auth token means WS can't connect; avoid spinning.
+  if (!getAuthToken()) return;
+  if (chatWsReconnectTimer) return;
+
+  const delay = Math.min(1000 * Math.pow(2, chatWsReconnectAttempts), 30000);
+  chatWsReconnectAttempts += 1;
+  chatWsReconnectTimer = window.setTimeout(() => {
+    chatWsReconnectTimer = null;
+    ensureChatWsConnected().catch(() => {
+      scheduleControlPlaneReconnect();
+    });
+  }, delay);
+}
+
+function failPendingWsRequests(message: string): void {
+  for (const [id, req] of pendingWsRequests.entries()) {
+    window.clearTimeout(req.timeoutId);
+    req.reject(new Error(message));
+    pendingWsRequests.delete(id);
+  }
+}
+
+async function ensureChatWsConnected(): Promise<WebSocket> {
+  if (chatWs && chatWs.readyState === WebSocket.OPEN) return chatWs;
+  if (chatWsConnecting) return chatWsConnecting;
+
+  chatWsConnecting = new Promise<WebSocket>((resolve, reject) => {
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(getChatWsUrl());
+    } catch (err) {
+      cleanupChatWs();
+      reject(err instanceof Error ? err : new Error('Failed to create WebSocket'));
+      return;
+    }
+
+    ws.onopen = () => {
+      chatWs = ws;
+      chatWsConnecting = null;
+      chatWsReconnectAttempts = 0;
+
+      // Keep alive (best-effort).
+      chatWsPingTimer = window.setInterval(() => {
+        try {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+          }
+        } catch {
+          // ignore
+        }
+      }, 30000);
+
+      resolve(ws);
+    };
+
+    ws.onmessage = (event) => {
+      let msg: any;
+      try {
+        msg = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+
+      // Action events are global and do not include sessionId/seq.
+      if (msg && typeof msg.type === 'string') {
+        if (msg.type === 'action_pending' || msg.type === 'action_updated' || msg.type === 'action_created' || msg.type === 'initial_sync') {
+          for (const fn of actionListeners) fn(msg as ChatStreamEvent);
+          // Don't return; these can still be request-scoped in the future.
+        }
+      }
+
+      const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : undefined;
+      const seq = typeof msg.seq === 'number' ? msg.seq : undefined;
+      if (sessionId && typeof seq === 'number') {
+        const prev = loadLastSeq(sessionId);
+        if (seq > prev) storeLastSeq(sessionId, seq);
+      }
+
+      const requestId = typeof msg.requestId === 'string' ? msg.requestId : undefined;
+      if (requestId && pendingWsRequests.has(requestId)) {
+        const pending = pendingWsRequests.get(requestId)!;
+        pending.onEvent?.(msg as ChatStreamEvent);
+        if (msg.type === 'response' && msg.response) {
+          window.clearTimeout(pending.timeoutId);
+          pendingWsRequests.delete(requestId);
+          pending.resolve(msg.response as MultiAgentResponse);
+        }
+        return;
+      }
+
+      // Broadcast non-request-scoped events (including replay) to listeners for that session.
+      if (sessionId) {
+        const set = sessionListeners.get(sessionId);
+        if (set) {
+          for (const fn of set) fn(msg as ChatStreamEvent);
+        }
+      }
+    };
+
+    ws.onclose = () => {
+      cleanupChatWs();
+      failPendingWsRequests('Chat WebSocket disconnected');
+      scheduleControlPlaneReconnect();
+    };
+
+    ws.onerror = () => {
+      // onclose will handle cleanup.
+      failPendingWsRequests('Chat WebSocket error');
+      scheduleControlPlaneReconnect();
+    };
+  });
+
+  return chatWsConnecting;
+}
+
+export async function ensureControlPlaneConnected(): Promise<void> {
+  await ensureChatWsConnected();
+}
+
+export function isControlPlaneConnected(): boolean {
+  return !!chatWs && chatWs.readyState === WebSocket.OPEN;
+}
+
+export function subscribeActionEvents(fn: (event: ChatStreamEvent) => void): () => void {
+  actionListeners.add(fn);
+  // Make sure the control plane is up while we have subscribers.
+  ensureChatWsConnected().catch(() => {
+    // ignore
+  });
+  return () => {
+    actionListeners.delete(fn);
+  };
+}
+
+async function wsHello(sessionId: string): Promise<void> {
+  const ws = await ensureChatWsConnected();
+  const sinceSeq = loadLastSeq(sessionId);
+  try {
+    ws.send(JSON.stringify({ type: 'hello', sessionId, sinceSeq }));
+  } catch {
+    // ignore
+  }
+}
+
+async function sendWsCommand(
+  payload: Record<string, unknown>,
+  onEvent?: (event: ChatStreamEvent) => void
+): Promise<MultiAgentResponse> {
+  const ws = await ensureChatWsConnected();
+  const requestId = crypto.randomUUID();
+
+  const timeoutId = window.setTimeout(() => {
+    const pending = pendingWsRequests.get(requestId);
+    if (pending) {
+      pendingWsRequests.delete(requestId);
+      pending.reject(new Error('Chat WebSocket request timed out'));
+    }
+  }, 180000);
+
+  const p = new Promise<MultiAgentResponse>((resolve, reject) => {
+    pendingWsRequests.set(requestId, { resolve, reject, onEvent, timeoutId });
+  });
+
+  ws.send(JSON.stringify({ ...payload, requestId }));
+  return p;
+}
+
+async function sendMultiAgentMessageWs(
+  message: string,
+  projectRoot?: string,
+  sessionId?: string,
+  onEvent?: (event: ChatStreamEvent) => void
+): Promise<MultiAgentResponse> {
+  let remove: (() => void) | null = null;
+  if (sessionId && onEvent) {
+    remove = addSessionListener(sessionId, onEvent);
+  }
+  try {
+    if (sessionId) await wsHello(sessionId);
+    return await sendWsCommand({ type: 'request', message, projectRoot, sessionId }, onEvent);
+  } finally {
+    remove?.();
+  }
+}
+
+async function sendAgentApprovalWs(
+  sessionId: string,
+  approvalId: string,
+  approved: boolean,
+  onEvent?: (event: ChatStreamEvent) => void
+): Promise<MultiAgentResponse> {
+  const remove = onEvent ? addSessionListener(sessionId, onEvent) : null;
+  try {
+    await wsHello(sessionId);
+    return await sendWsCommand({ type: 'approval', sessionId, approvalId, approved }, onEvent);
+  } finally {
+    remove?.();
+  }
+}
+
+async function sendAgentQuestionResponseWs(
+  sessionId: string,
+  questionId: string,
+  answer: string,
+  onEvent?: (event: ChatStreamEvent) => void
+): Promise<MultiAgentResponse> {
+  const remove = onEvent ? addSessionListener(sessionId, onEvent) : null;
+  try {
+    await wsHello(sessionId);
+    return await sendWsCommand({ type: 'question', sessionId, questionId, answer }, onEvent);
+  } finally {
+    remove?.();
+  }
+}
+
 export async function sendAgentApproval(
   sessionId: string,
   approvalId: string,
   approved: boolean,
   onEvent?: (event: ChatStreamEvent) => void
 ): Promise<MultiAgentResponse> {
+  // Prefer WebSocket control plane; fall back to HTTP NDJSON.
+  try {
+    if (typeof window !== 'undefined' && typeof WebSocket !== 'undefined' && getAuthToken()) {
+      return await sendAgentApprovalWs(sessionId, approvalId, approved, onEvent);
+    }
+  } catch {
+    // fall back
+  }
+
   const res = await fetch(`${API_BASE}/chat/agents/approval`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
@@ -538,6 +851,15 @@ export async function sendAgentQuestionResponse(
   answer: string,
   onEvent?: (event: ChatStreamEvent) => void
 ): Promise<MultiAgentResponse> {
+  // Prefer WebSocket control plane; fall back to HTTP NDJSON.
+  try {
+    if (typeof window !== 'undefined' && typeof WebSocket !== 'undefined' && getAuthToken()) {
+      return await sendAgentQuestionResponseWs(sessionId, questionId, answer, onEvent);
+    }
+  } catch {
+    // fall back
+  }
+
   const res = await fetch(`${API_BASE}/chat/agents/question`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
@@ -614,6 +936,15 @@ export async function sendMultiAgentMessage(
   sessionId?: string,
   onEvent?: (event: ChatStreamEvent) => void
 ): Promise<MultiAgentResponse> {
+  // Prefer WebSocket control plane; fall back to HTTP NDJSON.
+  try {
+    if (typeof window !== 'undefined' && typeof WebSocket !== 'undefined' && getAuthToken()) {
+      return await sendMultiAgentMessageWs(message, projectRoot, sessionId, onEvent);
+    }
+  } catch {
+    // fall back
+  }
+
   const res = await fetch(`${API_BASE}/chat/agents`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),

@@ -14,6 +14,7 @@ import { logToolExecution } from '../audit/logger.js';
 import { config } from '../config.js';
 import { getProjectContext } from '../scanner/projectScanner.js';
 import { loadClaudeMdContext, formatClaudeMdBlock } from '../scanner/claudeMdLoader.js';
+import { loadDevaiMdContext, formatDevaiMdBlock } from '../scanner/devaiMdLoader.js';
 import { checkPermission } from '../permissions/checker.js';
 import { shouldRequireConfirmation } from '../config/trust.js';
 import { getTrustMode } from '../db/queries.js';
@@ -120,33 +121,52 @@ askForConfirmation("fs.delete", {"path": "/path/to/archive", "recursive": true},
 When exploring a codebase, use fs.glob to find files and fs.grep to search for specific code. This is more efficient than listing directories manually.
 
 FILE ACCESS:
-- You have FULL access to /opt/Klyde/projects (canonical path)
-- On Baso, /opt/Klyde/projects is mounted at /mnt/klyde-projects (use this path when a tool requires a real on-disk path)
-- Each project is at /opt/Klyde/projects/<project-name> (e.g., /opt/Klyde/projects/Devai)
-- On Baso: /mnt/klyde-projects/<project-name> (e.g., /mnt/klyde-projects/Devai)
-- Your working directory is in "Project Context" above - but you can access ANY project
+- Your file access is RESTRICTED to exactly this canonical root:
+  - /opt/Klyde/projects/DeviSpace
+- On Baso, /opt/Klyde/projects is mounted at /mnt/klyde-projects, so the runtime location is:
+  - /mnt/klyde-projects/DeviSpace
+- You MUST NOT access other repos/folders (including /opt/Klyde/projects/Devai).
 - Linux is CASE SENSITIVE: /Test and /test are DIFFERENT directories
 
 IF USER MENTIONS A GITHUB REPO OR URL:
 - Extract the repo name from the URL (e.g., "mojo117/Devai" → "Devai")
-- The repo is likely at /opt/Klyde/projects/<repo-name>
-- Use fs.listFiles("/opt/Klyde/projects") to see all available projects
-- DO NOT say "I cannot access" - TRY to find the project first!
+- Only proceed if the repo is within the allowed roots above. Otherwise, ask the user to copy it into DeviSpace or explicitly expand access.
 
 BEFORE any file/directory operation:
 1. Use fs.listFiles to verify the path exists
 2. Check the EXACT case of directory/file names
-3. If not found, use fs.glob or try /opt/Klyde/projects/<name>
+3. If not found, use fs.glob within the allowed roots
 4. If still uncertain, ASK the user - but NEVER claim you "cannot access"
 
 Examples:
-- User gives GitHub link → extract repo name, check /opt/Klyde/projects/<repo-name>
+- User gives GitHub link → if not already in allowed roots, ask user to place it into /opt/Klyde/projects/DeviSpace
 - User says "here" or "this folder" → use the working directory from Project Context
 - Path error → try fs.listFiles on parent dir, then search with fs.glob
 
-NEVER say "access denied" or "cannot access" for paths under /opt/Klyde/projects - you CAN access them.
+If you hit "Access denied", it likely means the path is outside the allowed root. Tell the user the allowed root and propose copying files into DeviSpace.
+
+DEVISPACE (free-for-anything sandbox):
+- You may use /opt/Klyde/projects/DeviSpace for ANYTHING: experiments, drafts, downloads, scratch scripts, repros, notes.
+- DevAI MUST NOT modify DevAI itself. If the user wants changes in the Devai repo, ask them to use Codex/Claude Code or explicitly expand DevAI's allowedRoots.
+
+IMPORTANT DEFAULT (avoid accidental self-overwrites):
+- If the user asks to "build a new website/app" (e.g. a Hello World site) and does NOT explicitly say to replace DevAI's UI,
+  create it as a NEW folder under /opt/Klyde/projects/DeviSpace (for example /opt/Klyde/projects/DeviSpace/repros/<name>).
+- Do NOT overwrite DevAI's chat UI entrypoints (apps/web/src/App.tsx, apps/web/index.html) unless the user explicitly requests modifying DevAI itself.
+
+DEV SERVER (DeviSpace on Klyde):
+- Allowed ports (strict): 8090-8095 (TCP). Firewall (UFW) is opened for this range on Klyde.
+- Start dev servers with an explicit port AND a short timeout, e.g.:
+  - timeout 10m npm run dev -- --host 0.0.0.0 --port 8090
 
 Focus on solving the user's problem efficiently while being transparent about any changes you want to make.`;
+
+function getUiHostFromRequest(req: { headers: Record<string, unknown> }): string | null {
+  const raw = String(req.headers['host'] || '').trim();
+  if (!raw) return null;
+  // Strip port if present.
+  return raw.split(':')[0] || null;
+}
 
 export const chatRoutes: FastifyPluginAsync = async (app) => {
   app.post('/chat', {
@@ -179,6 +199,8 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     }
 
     try {
+      const uiHost = getUiHostFromRequest(request);
+
       // Convert messages to LLM format
       const llmMessages: LLMMessage[] = messages.map((m) => ({
         role: m.role,
@@ -212,6 +234,15 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       if (validatedProjectRoot) {
         const claudeMdContext = await loadClaudeMdContext(validatedProjectRoot);
         claudeMdBlock = formatClaudeMdBlock(claudeMdContext);
+      }
+
+      // Load devai.md (global instructions)
+      let devaiMdBlock = '';
+      try {
+        const devaiMdContext = await loadDevaiMdContext();
+        devaiMdBlock = formatDevaiMdBlock(devaiMdContext, { uiHost });
+      } catch {
+        // Optional
       }
 
       // Load Global Context
@@ -258,7 +289,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
       const llmResponse = await llmRouter.generate(provider, {
           messages: conversationMessages,
-          systemPrompt: SYSTEM_PROMPT + projectContextBlock + claudeMdBlock + globalContextBlock + skillsPrompt + pinnedFilesBlock,
+          systemPrompt: SYSTEM_PROMPT + devaiMdBlock + projectContextBlock + claudeMdBlock + globalContextBlock + skillsPrompt + pinnedFilesBlock,
           toolsEnabled: true,
           tools,
         });
@@ -432,10 +463,14 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
       // Initialize or get state
       const state = getOrCreateState(activeSessionId);
-      // Keep the last request for approval/resume flows (independent of projectRoot).
-      state.taskContext.originalRequest = message;
       if (validatedProjectRoot) {
         state.taskContext.gatheredInfo['projectRoot'] = validatedProjectRoot;
+      }
+
+      // Make UI host available to the multi-agent prompts (used for domain:port URLs).
+      const uiHost = getUiHostFromRequest(request);
+      if (uiHost) {
+        state.taskContext.gatheredInfo['uiHost'] = uiHost;
       }
 
       const sendEvent = (event: AgentStreamEvent | Record<string, unknown>) => {
@@ -768,8 +803,9 @@ export async function handleToolCall(
   if (toolName === 'askForConfirmation') {
     const requestedToolName = toolArgs.toolName as string | undefined;
     const requestedToolArgs = toolArgs.toolArgs as Record<string, unknown> | undefined;
-    const description = (toolArgs.description as string | undefined) ||
+    const baseDescription = (toolArgs.description as string | undefined) ||
       (requestedToolName ? generateActionDescription(requestedToolName, requestedToolArgs || {}) : 'Requested action');
+    const description = decorateActionDescription(baseDescription, requestedToolName, requestedToolArgs);
 
     if (!requestedToolName || !requestedToolArgs) {
       return 'Error: askForConfirmation requires toolName and toolArgs';
@@ -864,6 +900,36 @@ export async function handleToolCall(
   } else {
     return `Error executing ${toolName}: ${result.error}`;
   }
+}
+
+function decorateActionDescription(
+  base: string,
+  toolName?: string,
+  toolArgs?: Record<string, unknown>
+): string {
+  if (!toolName || !toolArgs) return base;
+  const path = typeof toolArgs.path === 'string' ? toolArgs.path : null;
+  if (!path) return base;
+
+  // Guard against accidentally overwriting the DevAI UI when user only asked for a separate demo website.
+  const protectedWebEntrypoints = new Set<string>([
+    '/opt/Klyde/projects/Devai/apps/web/src/App.tsx',
+    '/opt/Klyde/projects/Devai/apps/web/index.html',
+    'apps/web/src/App.tsx',
+    'apps/web/index.html',
+  ]);
+
+  const isWriteLike =
+    toolName === 'fs_writeFile' ||
+    toolName === 'fs_edit' ||
+    toolName === 'fs_delete' ||
+    toolName === 'fs_move';
+
+  if (isWriteLike && protectedWebEntrypoints.has(path)) {
+    return `HIGH RISK: modifies DevAI UI entrypoint: ${path}\n${base}`;
+  }
+
+  return base;
 }
 
 function generateActionDescription(toolName: string, args: Record<string, unknown>): string {

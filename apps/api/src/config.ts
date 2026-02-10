@@ -7,8 +7,7 @@ loadEnv({ path: resolve(process.cwd(), "../../.env") });
 // Hardcoded allowed roots for file access security
 // These paths are enforced regardless of environment variables
 const HARDCODED_ALLOWED_ROOTS: readonly string[] = [
-  "/opt/Klyde/projects", // Klyde server (lokal, wenn DevAI dort läuft)
-  "/mnt/klyde-projects", // Baso: SSHFS mount zu Klyde (read-write)
+  "/opt/Klyde/projects/DeviSpace", // DevAI sandbox workspace (canonical)
 ] as const;
 
 export interface Config {

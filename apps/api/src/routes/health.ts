@@ -12,9 +12,8 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
       perplexity: isPerplexityConfigured(),
     };
 
-    // Default project root - always use the canonical Klyde path
-    // The fs tools will handle path mapping if running on Baso
-    const projectRoot = '/opt/Klyde/projects';
+    // Default project root (canonical). Runtime mounts are handled by the fs tools/scanner.
+    const projectRoot = config.allowedRoots[0] || '/opt/Klyde/projects/DeviSpace';
 
     // Get MCP server status
     const mcp = mcpManager.getStatus();

@@ -1,6 +1,7 @@
 import { readFile, stat } from 'fs/promises';
 import { resolve } from 'path';
 import { config } from '../config.js';
+import { toRuntimePath } from '../utils/pathMapping.js';
 
 const DEFAULT_LOG_PATH = './var/staging.log';
 const DEFAULT_LINES = 200;
@@ -27,7 +28,8 @@ export async function getStagingLogs(lines: number = DEFAULT_LINES, projectPath?
     throw new Error(`Access denied: Path must be within ${config.allowedRoots.join(' or ')}`);
   }
 
-  const logPath = resolve(normalizedPath, DEFAULT_LOG_PATH);
+  const runtimeProjectPath = await toRuntimePath(normalizedPath);
+  const logPath = resolve(runtimeProjectPath, DEFAULT_LOG_PATH);
 
   try {
     await stat(logPath);

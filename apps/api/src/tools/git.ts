@@ -2,6 +2,7 @@ import simpleGit, { SimpleGit, StatusResult } from 'simple-git';
 import { config } from '../config.js';
 import { access } from 'fs/promises';
 import { join, resolve, dirname, relative } from 'path';
+import { toCanonicalPath, toRuntimePath } from '../utils/pathMapping.js';
 
 async function pathExists(path: string): Promise<boolean> {
   try {
@@ -36,7 +37,7 @@ async function getGit(): Promise<SimpleGit> {
   }
 
   // Try to find a git repo starting from the first allowed root
-  const baseDir = allowedRoots[0];
+  const baseDir = await toRuntimePath(allowedRoots[0]);
   const gitRoot = await findGitRoot(baseDir);
 
   if (!gitRoot) {
@@ -46,7 +47,7 @@ async function getGit(): Promise<SimpleGit> {
   }
 
   // Verify git root is within allowed paths
-  const gitRootResolved = resolve(gitRoot);
+  const gitRootResolved = toCanonicalPath(resolve(gitRoot));
   const allowed = allowedRoots.some((root) => {
     const absoluteRoot = resolve(root);
     return gitRootResolved.startsWith(absoluteRoot + '/') || gitRootResolved === absoluteRoot;

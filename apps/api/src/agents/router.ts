@@ -49,6 +49,7 @@ import { KODA_AGENT } from './koda.js';
 import { DEVO_AGENT } from './devo.js';
 import { SCOUT_AGENT } from './scout.js';
 import { loadClaudeMdContext, formatClaudeMdBlock } from '../scanner/claudeMdLoader.js';
+import { loadDevaiMdContext, formatDevaiMdBlock } from '../scanner/devaiMdLoader.js';
 import { processRequestNew } from './newRouter.js';
 import { config } from '../config.js';
 import { getMessages } from '../db/queries.js';
@@ -93,6 +94,25 @@ function looksLikeContinuePrompt(text: string): boolean {
   return t.includes('required more steps than allowed') || t.includes('should i continue?');
 }
 
+function normalizeQuickText(text: string): string {
+  return (text || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[.!?,;:]+$/g, '');
+}
+
+function isSmallTalk(text: string): boolean {
+  const t = normalizeQuickText(text);
+  if (!t) return false;
+  const greetings = new Set([
+    'hi', 'hello', 'hey', 'yo', 'sup',
+    'hallo', 'moin', 'servus',
+    'ey', 'was geht', "what's up", 'whats up', 'wie gehts', "wie geht's",
+  ]);
+  return greetings.has(t);
+}
+
 async function loadRecentConversationHistory(sessionId: string): Promise<Array<{ role: string; content: string }>> {
   const messages = await getMessages(sessionId);
   return messages.slice(-30).map((m) => ({ role: m.role, content: m.content }));
@@ -102,6 +122,23 @@ function getProjectRootFromState(sessionId: string): string | null {
   const state = stateManager.getState(sessionId);
   const value = state?.taskContext.gatheredInfo['projectRoot'];
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+async function getDevaiMdBlockForSession(sessionId: string): Promise<string> {
+  const state = stateManager.getState(sessionId);
+  if (state?.taskContext.gatheredInfo['devaiMdBlock']) {
+    return String(state.taskContext.gatheredInfo['devaiMdBlock']);
+  }
+
+  const uiHost = (state?.taskContext.gatheredInfo['uiHost'] as string | undefined) || null;
+  try {
+    const ctx = await loadDevaiMdContext();
+    const block = formatDevaiMdBlock(ctx, { uiHost });
+    stateManager.setGatheredInfo(sessionId, 'devaiMdBlock', block);
+    return block;
+  } catch {
+    return '';
+  }
 }
 
 function buildToolResultContent(result: { success: boolean; result?: unknown; error?: string }): { content: string; isError: boolean } {
@@ -154,6 +191,13 @@ export async function processRequest(
     return handleUserApproval(sessionId, latest.approvalId, decision, sendEvent);
   }
 
+  // If we're waiting for the user to answer a clarification question, treat the next message as the answer.
+  const pendingQuestions = gateState.pendingQuestions ?? [];
+  if (gateState.currentPhase === 'waiting_user' && pendingQuestions.length > 0) {
+    const latestQ = pendingQuestions[pendingQuestions.length - 1];
+    return handleUserResponse(sessionId, latestQ.questionId, userMessage, sendEvent);
+  }
+
   // Fallback: if state was lost (restart) but the last assistant prompt was a "continue?" gate,
   // interpret "yes" as "continue the previous request".
   if (decision === true && pendingApprovals.length === 0) {
@@ -167,8 +211,16 @@ export async function processRequest(
     }
   }
 
+  // Lightweight small-talk response (avoid forcing project clarification on greetings).
+  if (isSmallTalk(userMessage) && history.length <= 1) {
+    return 'Hey. Womit soll ich dir helfen: Code aendern, Bug fixen, oder etwas nachschlagen?';
+  }
+
   // Keep the last actual request for approval/resume flows.
   stateManager.setOriginalRequest(sessionId, userMessage);
+
+  // Load devai.md global instructions for this session (applies to both routers).
+  await getDevaiMdBlockForSession(sessionId);
 
   // New capability-based router (feature-flagged)
   if (config.useNewAgentRouter) {
@@ -193,6 +245,9 @@ export async function processRequest(
   stateManager.setOriginalRequest(sessionId, userMessage);
   stateManager.setGatheredInfo(sessionId, 'taskComplexity', taskComplexity);
   stateManager.setGatheredInfo(sessionId, 'modelSelection', modelSelection);
+
+  // Load devai.md global instructions and store in state
+  await getDevaiMdBlockForSession(sessionId);
 
   // Load CLAUDE.md project instructions and store in state
   if (projectRoot) {
@@ -237,6 +292,7 @@ export async function processRequest(
       stateManager.addPendingQuestion(sessionId, question);
       stateManager.setPhase(sessionId, 'waiting_user');
       sendEvent({ type: 'user_question', question });
+      await stateManager.flushState(sessionId);
 
       return `Ich habe eine Frage bevor ich fortfahren kann:\n\n${qualification.clarificationQuestion}`;
     }
@@ -259,6 +315,7 @@ export async function processRequest(
       stateManager.addPendingApproval(sessionId, approval);
       stateManager.setPhase(sessionId, 'waiting_user');
       sendEvent({ type: 'approval_request', request: approval, sessionId });
+      await stateManager.flushState(sessionId);
 
       return `Dieser Task erfordert deine Freigabe:\n\n**${userMessage}**\n\nRisiko-Level: ${qualification.riskLevel}\n\nBitte bestätige, dass ich fortfahren soll.`;
     }
@@ -396,8 +453,10 @@ async function executeSimpleTask(
   // Get CLAUDE.md project instructions from state
   const state = stateManager.getState(sessionId);
   const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
+  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
 
   const systemPrompt = `${agent.systemPrompt}
+${devaiMdBlock}
 ${claudeMdBlock}
 ${projectRoot ? `Working Directory: ${projectRoot}` : ''}
 
@@ -489,8 +548,10 @@ async function runChapoQualification(
   // Get CLAUDE.md project instructions from state (loaded in processRequest)
   const state = stateManager.getState(sessionId);
   const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
+  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
 
   const systemPrompt = `${chapo.systemPrompt}
+${devaiMdBlock}
 ${claudeMdBlock}
 ${projectRoot ? `Working Directory: ${projectRoot}` : ''}
 
@@ -762,6 +823,7 @@ async function delegateToAgent(
   // Get CLAUDE.md project instructions from state
   const state = stateManager.getState(sessionId);
   const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
+  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
 
   const contextSummary = context.relevantFiles.length > 0
     ? `\n\nRelevante Dateien:\n${context.relevantFiles.join('\n')}`
@@ -772,6 +834,7 @@ async function delegateToAgent(
     : '';
 
   const systemPrompt = `${agent.systemPrompt}
+${devaiMdBlock}
 ${claudeMdBlock}
 KONTEXT VON CHAPO:
 ${contextSummary}${gitStatusSummary}
@@ -1141,6 +1204,9 @@ async function handleEscalation(
 
   // CHAPO analyzes the issue
   const chapo = getAgent('chapo');
+  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
+  const state = stateManager.getState(sessionId);
+  const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
   const response = await llmRouter.generate('anthropic', {
     model: chapo.model,
     messages: [
@@ -1160,7 +1226,7 @@ Analysiere das Problem und entscheide:
 Antworte mit einer klaren Handlungsanweisung für ${fromAgent.toUpperCase()}.`,
       },
     ],
-    systemPrompt: chapo.systemPrompt,
+    systemPrompt: `${chapo.systemPrompt}\n${devaiMdBlock}\n${claudeMdBlock}`,
     toolsEnabled: false,
   });
 
@@ -1194,6 +1260,9 @@ async function runChapoReview(
   sendEvent({ type: 'agent_thinking', agent: 'chapo', status: 'Überprüfe Ergebnis...' });
 
   const chapo = getAgent('chapo');
+  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
+  const state = stateManager.getState(sessionId);
+  const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
   const history = stateManager.getHistory(sessionId);
 
   const historySummary = history
@@ -1222,7 +1291,7 @@ Erstelle eine Zusammenfassung für den User:
 3. Was sind die nächsten Schritte (falls nötig)?`,
       },
     ],
-    systemPrompt: chapo.systemPrompt,
+    systemPrompt: `${chapo.systemPrompt}\n${devaiMdBlock}\n${claudeMdBlock}`,
     toolsEnabled: false,
   });
 
@@ -1272,6 +1341,7 @@ export async function handleUserResponse(
     userResponse,
     { status: 'success' }
   );
+  await stateManager.flushState(sessionId);
 
   // Continue processing with the new information
   const state = stateManager.getState(sessionId);
@@ -1309,6 +1379,7 @@ export async function handleUserApproval(
 
   if (!approved) {
     stateManager.setPhase(sessionId, 'error');
+    await stateManager.flushState(sessionId);
     return 'Task abgebrochen durch User.';
   }
 
@@ -1324,6 +1395,7 @@ export async function handleUserApproval(
     // Only grant "global approval" for real risk approvals. Continue-gates should not disable future approval checks.
     stateManager.grantApproval(sessionId);
   }
+  await stateManager.flushState(sessionId);
 
   const state = stateManager.getState(sessionId);
   if (state) {
@@ -1374,8 +1446,10 @@ async function getChapoPerspective(
   const chapo = getAgent('chapo');
   const state = stateManager.getState(sessionId);
   const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
+  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
 
   const systemPrompt = `${chapo.systemPrompt}
+${devaiMdBlock}
 ${claudeMdBlock}
 
 STRATEGISCHE ANALYSE FÜR PLAN MODE
@@ -1457,6 +1531,7 @@ async function getKodaPerspective(
   const koda = getAgent('koda');
   const state = stateManager.getState(sessionId);
   const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
+  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
 
   // KODA gets read-only tools for exploration
   const readOnlyTools = getToolsForLLM().filter((t) =>
@@ -1468,6 +1543,7 @@ async function getKodaPerspective(
     : '';
 
   const systemPrompt = `${koda.systemPrompt}
+${devaiMdBlock}
 ${claudeMdBlock}
 
 CODE-IMPACT-ANALYSE FÜR PLAN MODE
@@ -1609,6 +1685,7 @@ async function getDevoPerspective(
   const devo = getAgent('devo');
   const state = stateManager.getState(sessionId);
   const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
+  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
 
   // DEVO gets read-only tools for exploration
   const readOnlyTools = getToolsForLLM().filter((t) =>
@@ -1616,6 +1693,7 @@ async function getDevoPerspective(
   );
 
   const systemPrompt = `${devo.systemPrompt}
+${devaiMdBlock}
 ${claudeMdBlock}
 
 DEVOPS-IMPACT-ANALYSE FÜR PLAN MODE
@@ -1754,6 +1832,7 @@ async function synthesizePlan(
   sendEvent?.({ type: 'agent_thinking', agent: 'chapo', status: 'Synthese des Plans...' });
 
   const chapo = getAgent('chapo');
+  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
   const plan = stateManager.getCurrentPlan(sessionId);
   const planId = plan?.planId || nanoid();
 
@@ -1783,6 +1862,7 @@ ${devoPerspective ? `DEVO (DevOps):
 - Bedenken: ${devoPerspective.concerns.join(', ')}` : ''}`;
 
   const systemPrompt = `${chapo.systemPrompt}
+${devaiMdBlock}
 
 PLAN-SYNTHESE
 
@@ -2164,6 +2244,7 @@ export async function spawnScout(
   sendEvent?.({ type: 'scout_start', query, scope });
 
   const scout = getAgent('scout');
+  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
   const scoutToolNames = getToolsForAgent('scout');
   const tools = getToolsForLLM().filter((t) => scoutToolNames.includes(t.name));
 
@@ -2195,7 +2276,7 @@ export async function spawnScout(
     const response = await llmRouter.generate('anthropic', {
       model: scout.model,
       messages,
-      systemPrompt: scout.systemPrompt,
+      systemPrompt: `${scout.systemPrompt}\n${devaiMdBlock}`,
       tools,
       toolsEnabled: true,
     });
