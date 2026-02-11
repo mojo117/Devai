@@ -17,6 +17,61 @@ import type {
 const API_BASE = '/api';
 const TOKEN_KEY = 'devai_auth_token';
 
+/**
+ * Parse an NDJSON stream and return the final response.
+ * Emits events via onEvent callback as they arrive.
+ */
+async function parseNDJSONStream<T>(
+  body: ReadableStream<Uint8Array>,
+  onEvent?: (event: ChatStreamEvent) => void
+): Promise<T> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalResponse: T | null = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line) as { type?: string; response?: unknown };
+        onEvent?.(event as ChatStreamEvent);
+        if (event.type === 'response') {
+          finalResponse = event.response as T;
+        }
+      } catch (e) {
+        console.warn('Failed to parse NDJSON line:', line, e);
+      }
+    }
+  }
+
+  // Process any remaining buffer content after stream ends
+  if (buffer.trim()) {
+    try {
+      const event = JSON.parse(buffer) as { type?: string; response?: unknown };
+      onEvent?.(event as ChatStreamEvent);
+      if (event.type === 'response') {
+        finalResponse = event.response as T;
+      }
+    } catch (e) {
+      console.warn('Failed to parse final NDJSON buffer:', buffer, e);
+    }
+  }
+
+  if (!finalResponse) {
+    throw new Error('No response received from server');
+  }
+
+  return finalResponse;
+}
+
 async function readApiError(res: Response): Promise<string> {
   const contentType = res.headers.get('content-type') || '';
   const fallback = `HTTP ${res.status} ${res.statusText || ''}`.trim();
@@ -132,63 +187,7 @@ export async function sendMessage(
     throw new Error('Missing response body');
   }
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let finalResponse: { message: ChatMessage; pendingActions: Action[]; sessionId?: string; contextStats?: { tokensUsed: number; tokenBudget: number; note?: string } } | null = null;
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line) as { type?: string; response?: unknown };
-        if (onEvent) {
-          onEvent(event as ChatStreamEvent);
-        }
-        if (event.type === 'response') {
-          finalResponse = event.response as {
-            message: ChatMessage;
-            pendingActions: Action[];
-            sessionId?: string;
-          };
-        }
-      } catch (e) {
-        console.warn('Failed to parse NDJSON line:', line, e);
-      }
-    }
-  }
-
-  // Process any remaining buffer content after stream ends
-  if (buffer.trim()) {
-    try {
-      const event = JSON.parse(buffer) as { type?: string; response?: unknown };
-      if (onEvent) {
-        onEvent(event as ChatStreamEvent);
-      }
-      if (event.type === 'response') {
-        finalResponse = event.response as {
-          message: ChatMessage;
-          pendingActions: Action[];
-          sessionId?: string;
-        };
-      }
-    } catch (e) {
-      console.warn('Failed to parse final NDJSON buffer:', buffer, e);
-    }
-  }
-
-  if (!finalResponse) {
-    throw new Error('No response received from server');
-  }
-
-  return finalResponse;
+  return parseNDJSONStream<{ message: ChatMessage; pendingActions: Action[]; sessionId?: string; contextStats?: { tokensUsed: number; tokenBudget: number; note?: string } }>(res.body, onEvent);
 }
 
 export async function fetchSkills(): Promise<SkillsResponse> {
@@ -816,54 +815,7 @@ export async function sendAgentApproval(
     throw new Error('Missing response body');
   }
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let finalResponse: MultiAgentResponse | null = null;
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line) as { type?: string; response?: unknown };
-        if (onEvent) {
-          onEvent(event as ChatStreamEvent);
-        }
-        if (event.type === 'response') {
-          finalResponse = event.response as MultiAgentResponse;
-        }
-      } catch (e) {
-        console.warn('Failed to parse NDJSON line:', line, e);
-      }
-    }
-  }
-
-  if (buffer.trim()) {
-    try {
-      const event = JSON.parse(buffer) as { type?: string; response?: unknown };
-      if (onEvent) {
-        onEvent(event as ChatStreamEvent);
-      }
-      if (event.type === 'response') {
-        finalResponse = event.response as MultiAgentResponse;
-      }
-    } catch (e) {
-      console.warn('Failed to parse final NDJSON buffer:', buffer, e);
-    }
-  }
-
-  if (!finalResponse) {
-    throw new Error('No response received from server');
-  }
-
-  return finalResponse;
+  return parseNDJSONStream<MultiAgentResponse>(res.body, onEvent);
 }
 
 export async function sendAgentQuestionResponse(
@@ -900,54 +852,7 @@ export async function sendAgentQuestionResponse(
     throw new Error('Missing response body');
   }
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let finalResponse: MultiAgentResponse | null = null;
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line) as { type?: string; response?: unknown };
-        if (onEvent) {
-          onEvent(event as ChatStreamEvent);
-        }
-        if (event.type === 'response') {
-          finalResponse = event.response as MultiAgentResponse;
-        }
-      } catch (e) {
-        console.warn('Failed to parse NDJSON line:', line, e);
-      }
-    }
-  }
-
-  if (buffer.trim()) {
-    try {
-      const event = JSON.parse(buffer) as { type?: string; response?: unknown };
-      if (onEvent) {
-        onEvent(event as ChatStreamEvent);
-      }
-      if (event.type === 'response') {
-        finalResponse = event.response as MultiAgentResponse;
-      }
-    } catch (e) {
-      console.warn('Failed to parse final NDJSON buffer:', buffer, e);
-    }
-  }
-
-  if (!finalResponse) {
-    throw new Error('No response received from server');
-  }
-
-  return finalResponse;
+  return parseNDJSONStream<MultiAgentResponse>(res.body, onEvent);
 }
 
 export async function sendMultiAgentMessage(
@@ -984,55 +889,7 @@ export async function sendMultiAgentMessage(
     throw new Error('Missing response body');
   }
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let finalResponse: MultiAgentResponse | null = null;
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line) as { type?: string; response?: unknown };
-        if (onEvent) {
-          onEvent(event as ChatStreamEvent);
-        }
-        if (event.type === 'response') {
-          finalResponse = event.response as MultiAgentResponse;
-        }
-      } catch (e) {
-        console.warn('Failed to parse NDJSON line:', line, e);
-      }
-    }
-  }
-
-  // Process any remaining buffer content after stream ends
-  if (buffer.trim()) {
-    try {
-      const event = JSON.parse(buffer) as { type?: string; response?: unknown };
-      if (onEvent) {
-        onEvent(event as ChatStreamEvent);
-      }
-      if (event.type === 'response') {
-        finalResponse = event.response as MultiAgentResponse;
-      }
-    } catch (e) {
-      console.warn('Failed to parse final NDJSON buffer:', buffer, e);
-    }
-  }
-
-  if (!finalResponse) {
-    throw new Error('No response received from server');
-  }
-
-  return finalResponse;
+  return parseNDJSONStream<MultiAgentResponse>(res.body, onEvent);
 }
 
 export async function fetchAgentState(sessionId: string): Promise<{

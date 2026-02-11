@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import { sendMessage, sendMultiAgentMessage, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction, globProjectFiles, fetchPendingActions, batchApproveActions, batchRejectActions } from '../api';
+import { sendMultiAgentMessage, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction, globProjectFiles, fetchPendingActions, batchApproveActions, batchRejectActions } from '../api';
 import type { ChatStreamEvent } from '../api';
 import type { ChatMessage, ContextStats, SessionSummary, Action } from '../types';
 import type { AgentHistoryEntry } from '../api';
@@ -114,8 +114,7 @@ export function ChatUI({
     runRequest: () => Promise<{ message: ChatMessage; sessionId?: string } | null>;
   }>(null);
 
-  // Multi-agent mode state
-  const [multiAgentMode] = useState(true);
+  // Agent state
   const [activeAgent, setActiveAgent] = useState<AgentName | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>('idle');
   const [agentHistory, setAgentHistory] = useState<AgentHistoryEntry[]>([]);
@@ -168,12 +167,6 @@ export function ChatUI({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
-
-  useEffect(() => {
-    if (!sessionId || !multiAgentMode) {
-      return;
-    }
-  }, [sessionId, multiAgentMode]);
 
   // Emit tool events to parent
   useEffect(() => {
@@ -423,10 +416,8 @@ export function ChatUI({
   };
 
   const handleStreamEvent = (event: ChatStreamEvent) => {
-    // Handle agent-specific events in multi-agent mode
-    if (multiAgentMode) {
-      handleAgentEvent(event);
-    }
+    // Handle agent-specific events
+    handleAgentEvent(event);
 
     const eventAgent = (event.agent as AgentName | undefined) || activeAgent || undefined;
     const type = String(event.type || '');
@@ -526,61 +517,34 @@ export function ChatUI({
       timestamp: new Date().toISOString(),
     };
 
-    const currentMessages = [...messages, userMessage];
-    setMessages(currentMessages);
+    setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
     setToolEvents([]);
     setFileHints([]);
 
     // Reset agent state when starting new message
-    if (multiAgentMode) {
-      setAgentHistory([]);
-      setAgentPhase('idle');
-      setActiveAgent(null);
-    }
+    setAgentHistory([]);
+    setAgentPhase('idle');
+    setActiveAgent(null);
 
     const runRequest = async (): Promise<{ message: ChatMessage; sessionId?: string } | null> => {
-      // Use multi-agent or single-agent endpoint based on mode
-      if (multiAgentMode) {
-        const response = await sendMultiAgentMessage(
-          content,
-          projectRoot || undefined,
-          sessionId || undefined,
-          handleStreamEvent
-        );
+      const response = await sendMultiAgentMessage(
+        content,
+        projectRoot || undefined,
+        sessionId || undefined,
+        handleStreamEvent
+      );
 
-        if (response.agentHistory) {
-          setAgentHistory(response.agentHistory);
-        }
-        if (response.sessionId) {
-          setSessionId(response.sessionId);
-          await saveSetting('lastSessionId', response.sessionId);
-        }
-        setMessages((prev) => [...prev, response.message]);
-        await refreshSessions(response.sessionId);
-        return { message: response.message, sessionId: response.sessionId };
-      } else {
-        const response = await sendMessage(
-          currentMessages,
-          'anthropic', // Default provider for legacy single-agent mode
-          projectRoot || undefined,
-          skillIds,
-          pinnedFiles,
-          projectContextOverride,
-          sessionId || undefined,
-          handleStreamEvent
-        );
-        if (response.contextStats && onContextUpdate) {
-          onContextUpdate(response.contextStats);
-        }
-        if (response.sessionId) {
-          setSessionId(response.sessionId);
-          await saveSetting('lastSessionId', response.sessionId);
-        }
-        setMessages((prev) => [...prev, response.message]);
-        await refreshSessions(response.sessionId);
-        return { message: response.message, sessionId: response.sessionId };
+      if (response.agentHistory) {
+        setAgentHistory(response.agentHistory);
       }
+      if (response.sessionId) {
+        setSessionId(response.sessionId);
+        await saveSetting('lastSessionId', response.sessionId);
+      }
+      setMessages((prev) => [...prev, response.message]);
+      await refreshSessions(response.sessionId);
+      return { message: response.message, sessionId: response.sessionId };
     };
 
     try {
@@ -934,28 +898,26 @@ export function ChatUI({
           </div>
         )}
 
-        {/* Agent Status - show when multi-agent mode is active */}
-        {multiAgentMode && (
-          <div className="space-y-2">
-            <AgentStatus
-              activeAgent={activeAgent}
-              phase={agentPhase}
-            />
-            {agentHistory.length > 0 && (
-              <button
-                onClick={() => setShowAgentHistory(!showAgentHistory)}
-                className="text-[11px] text-blue-400 hover:text-blue-300"
-              >
-                {showAgentHistory ? 'Hide Agent History' : `Show Agent History (${agentHistory.length} entries)`}
-              </button>
-            )}
-            {showAgentHistory && agentHistory.length > 0 && (
-              <div className="bg-gray-900 border border-gray-700 rounded-lg p-2">
-                <AgentTimeline entries={agentHistory} />
-              </div>
-            )}
-          </div>
-        )}
+        {/* Agent Status */}
+        <div className="space-y-2">
+          <AgentStatus
+            activeAgent={activeAgent}
+            phase={agentPhase}
+          />
+          {agentHistory.length > 0 && (
+            <button
+              onClick={() => setShowAgentHistory(!showAgentHistory)}
+              className="text-[11px] text-blue-400 hover:text-blue-300"
+            >
+              {showAgentHistory ? 'Hide Agent History' : `Show Agent History (${agentHistory.length} entries)`}
+            </button>
+          )}
+          {showAgentHistory && agentHistory.length > 0 && (
+            <div className="bg-gray-900 border border-gray-700 rounded-lg p-2">
+              <AgentTimeline entries={agentHistory} />
+            </div>
+          )}
+        </div>
 
         {messages.length === 0 && (
           <div className="text-center text-gray-500 mt-8">
