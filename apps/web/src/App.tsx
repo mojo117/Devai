@@ -12,51 +12,28 @@ import {
   approveAction,
   rejectAction,
   retryAction,
-  fetchSkills,
-  reloadSkills,
-  fetchProject,
-  refreshProject,
-  fetchSetting,
-  saveSetting,
-  login,
-  verifyAuth,
-  setAuthToken,
-  clearAuthToken,
 } from './api';
-import type {
-  Action,
-  HealthResponse,
-  SkillSummary,
-  ProjectContext,
-  PinnedFilesSetting,
-  IgnorePatternsSetting,
-  ProjectContextOverrideSetting,
-} from './types';
+import type { Action, HealthResponse } from './types';
+import { useAuth } from './hooks/useAuth';
+import { useSkills } from './hooks/useSkills';
+import { useProject } from './hooks/useProject';
+import { usePersistedSettings } from './hooks/usePersistedSettings';
 
 function App() {
-  const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [actions, setActions] = useState<Action[]>([]);
-  const [skills, setSkills] = useState<SkillSummary[]>([]);
-  const [skillsLoadedAt, setSkillsLoadedAt] = useState<string | null>(null);
-  const [skillsErrors, setSkillsErrors] = useState<string[]>([]);
-  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
-  const [projectContext, setProjectContext] = useState<ProjectContext | null>(null);
-  const [projectContextLoadedAt, setProjectContextLoadedAt] = useState<string | null>(null);
-  const [projectLoading, setProjectLoading] = useState(false);
+  // Custom hooks for grouped state
+  const auth = useAuth();
   const [error, setError] = useState<string | null>(null);
-  const [skillsLoading, setSkillsLoading] = useState(false);
-  const [authChecked, setAuthChecked] = useState(false);
-  const [isAuthed, setIsAuthed] = useState(false);
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [authLoading, setAuthLoading] = useState(false);
-  const [pinnedFiles, setPinnedFiles] = useState<string[]>([]);
-  const [ignorePatterns, setIgnorePatterns] = useState<string[]>([]);
-  const [projectContextOverride, setProjectContextOverride] = useState<ProjectContextOverrideSetting>({
-    enabled: false,
-    summary: '',
-  });
+  const handleError = useCallback((msg: string) => setError(msg), []);
+
+  const skills = useSkills(auth.isAuthed, handleError);
+  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const project = useProject(auth.isAuthed, health?.projectRoot, handleError);
+  const settings = usePersistedSettings(auth.isAuthed);
+
+  // Actions state
+  const [actions, setActions] = useState<Action[]>([]);
+
+  // UI state
   const [view, setView] = useState<'chat' | 'actions'>('chat');
   const [contextStats, setContextStats] = useState<{
     tokensUsed: number;
@@ -65,7 +42,7 @@ function App() {
   } | null>(null);
   const [feedEvents, setFeedEvents] = useState<FeedEvent[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
-  const [feedWidth, setFeedWidth] = useState(384); // Default 384px (w-96)
+  const [feedWidth, setFeedWidth] = useState(384);
   const [clearFeedTrigger, setClearFeedTrigger] = useState(0);
   const [mobilePanel, setMobilePanel] = useState<'chat' | 'feed'>('chat');
   const [isMobile, setIsMobile] = useState(false);
@@ -81,13 +58,12 @@ function App() {
     }));
   }, []);
 
-  // Handle agent state changes from ChatUI
   const handleAgentChange = useCallback((agent: AgentName | null, phase: AgentPhase) => {
     setActiveAgent(agent);
     setAgentPhase(phase);
   }, []);
 
-  // Track window resize for mobile detection
+  // Mobile detection
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
     checkMobile();
@@ -95,217 +71,41 @@ function App() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Convert tool events to feed events
+  // Tool events to feed events
   const handleToolEvents = useCallback((toolEvents: ToolEvent[]) => {
     const newFeedEvents = toolEvents.map(toolEventToFeedEvent);
     setFeedEvents(newFeedEvents);
   }, []);
 
-  // Clear feed events
   const handleClearFeed = useCallback(() => {
     setFeedEvents([]);
     setClearFeedTrigger((prev) => prev + 1);
   }, []);
 
-  // Handle resize of the system feed panel
   const handleFeedResize = useCallback((deltaX: number) => {
-    setFeedWidth((prev) => {
-      const newWidth = prev - deltaX; // Subtract because dragging right should shrink the feed
-      return Math.max(200, Math.min(800, newWidth)); // Clamp between 200px and 800px
-    });
+    setFeedWidth((prev) => Math.max(200, Math.min(800, prev - deltaX)));
   }, []);
 
+  // Fetch health when authenticated
   useEffect(() => {
-    verifyAuth()
-      .then((valid) => {
-        setIsAuthed(valid);
-        if (!valid) clearAuthToken();
-      })
-      .catch(() => setIsAuthed(false))
-      .finally(() => setAuthChecked(true));
-  }, []);
-
-  useEffect(() => {
-    if (!isAuthed) return;
+    if (!auth.isAuthed) return;
     fetchHealth()
       .then(setHealth)
       .catch((err) => setError(err.message));
-  }, [isAuthed]);
+  }, [auth.isAuthed]);
 
+  // Poll actions
   useEffect(() => {
-    if (!isAuthed) return;
-    let isMounted = true;
-
-    const loadProjectContextOverride = async () => {
-      try {
-        const stored = await fetchSetting('projectContextOverride');
-        const value = stored.value as ProjectContextOverrideSetting | null;
-        if (!isMounted) return;
-        const next = value && typeof value === 'object'
-          ? {
-              enabled: Boolean((value as ProjectContextOverrideSetting).enabled),
-              summary: typeof (value as ProjectContextOverrideSetting).summary === 'string'
-                ? (value as ProjectContextOverrideSetting).summary
-                : '',
-            }
-          : { enabled: false, summary: '' };
-        setProjectContextOverride(next);
-      } catch {
-        if (!isMounted) return;
-        setProjectContextOverride({ enabled: false, summary: '' });
-      }
-    };
-
-    loadProjectContextOverride();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [isAuthed]);
-
-  useEffect(() => {
-    if (!isAuthed) return;
-    let isMounted = true;
-
-    const loadIgnorePatterns = async () => {
-      try {
-        const stored = await fetchSetting('ignorePatterns');
-        const value = stored.value as IgnorePatternsSetting | null;
-        if (!isMounted) return;
-        const patterns = value && Array.isArray((value as IgnorePatternsSetting).patterns)
-          ? (value as IgnorePatternsSetting).patterns.filter((p) => typeof p === 'string')
-          : [];
-        setIgnorePatterns(patterns);
-      } catch {
-        if (!isMounted) return;
-        setIgnorePatterns([]);
-      }
-    };
-
-    loadIgnorePatterns();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [isAuthed]);
-
-  useEffect(() => {
-    if (!isAuthed || !health?.projectRoot) return;
-    setProjectLoading(true);
-    fetchProject(health.projectRoot)
-      .then((data) => {
-        setProjectContext(data.context);
-        setProjectContextLoadedAt(new Date().toISOString());
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setProjectLoading(false));
-  }, [isAuthed, health?.projectRoot]);
-
-  useEffect(() => {
-    if (!isAuthed) return;
-    let isMounted = true;
-
-    const load = async () => {
-      setSkillsLoading(true);
-      try {
-        const [skillsData, storedSetting] = await Promise.all([
-          fetchSkills(),
-          fetchSetting('selectedSkills'),
-        ]);
-
-        if (!isMounted) return;
-        setSkills(skillsData.skills);
-        setSkillsLoadedAt(skillsData.loadedAt);
-        setSkillsErrors(skillsData.errors || []);
-
-        const storedIds = Array.isArray(storedSetting.value)
-          ? storedSetting.value.filter((id) => typeof id === 'string')
-          : [];
-        const validIds = new Set(skillsData.skills.map((skill) => skill.id));
-        const filtered = storedIds.filter((id) => validIds.has(id));
-        setSelectedSkillIds(filtered);
-      } catch (err) {
-        if (!isMounted) return;
-        setError(err instanceof Error ? err.message : 'Failed to load skills');
-      } finally {
-        if (isMounted) {
-          setSkillsLoading(false);
-        }
-      }
-    };
-
-    load();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [isAuthed]);
-
-  useEffect(() => {
-    if (!isAuthed) return;
-    let isMounted = true;
-
-    const loadPinned = async () => {
-      try {
-        const stored = await fetchSetting('pinnedFiles');
-        const value = stored.value as PinnedFilesSetting | null;
-        if (!isMounted) return;
-        const files = value && Array.isArray((value as PinnedFilesSetting).files)
-          ? (value as PinnedFilesSetting).files.filter((f) => typeof f === 'string')
-          : [];
-        setPinnedFiles(files);
-      } catch {
-        if (!isMounted) return;
-        setPinnedFiles([]);
-      }
-    };
-
-    loadPinned();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [isAuthed]);
-
-  useEffect(() => {
-    if (!isAuthed) return;
-    saveSetting('selectedSkills', selectedSkillIds).catch(() => {
-      // Non-blocking persistence; ignore errors here.
-    });
-  }, [isAuthed, selectedSkillIds]);
-
-  useEffect(() => {
-    if (!isAuthed) return;
-    saveSetting('pinnedFiles', { files: pinnedFiles }).catch(() => {
-      // Non-blocking persistence; ignore errors here.
-    });
-  }, [isAuthed, pinnedFiles]);
-
-  useEffect(() => {
-    if (!isAuthed) return;
-    saveSetting('ignorePatterns', { patterns: ignorePatterns }).catch(() => {
-      // Non-blocking persistence; ignore errors here.
-    });
-  }, [isAuthed, ignorePatterns]);
-
-  useEffect(() => {
-    if (!isAuthed) return;
-    saveSetting('projectContextOverride', projectContextOverride).catch(() => {
-      // Non-blocking persistence; ignore errors here.
-    });
-  }, [isAuthed, projectContextOverride]);
-
-  useEffect(() => {
-    if (!isAuthed) return;
+    if (!auth.isAuthed) return;
     const interval = setInterval(() => {
       fetchActions()
         .then((data) => setActions(data.actions))
         .catch(console.error);
     }, 2000);
-
     return () => clearInterval(interval);
-  }, [isAuthed]);
+  }, [auth.isAuthed]);
 
+  // Action handlers
   const handleApprove = async (actionId: string) => {
     try {
       await approveAction(actionId);
@@ -336,64 +136,8 @@ function App() {
     }
   };
 
-  const handleToggleSkill = (skillId: string) => {
-    setSelectedSkillIds((prev) => (
-      prev.includes(skillId)
-        ? prev.filter((id) => id !== skillId)
-        : [...prev, skillId]
-    ));
-  };
-
-  const handleReloadSkills = async () => {
-    setSkillsLoading(true);
-    try {
-      const data = await reloadSkills();
-      setSkills(data.skills);
-      setSkillsLoadedAt(data.loadedAt);
-      setSkillsErrors(data.errors || []);
-      const validIds = new Set(data.skills.map((skill) => skill.id));
-      const filteredIds = selectedSkillIds.filter((id) => validIds.has(id));
-      setSelectedSkillIds(filteredIds);
-      await saveSetting('selectedSkills', filteredIds);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to reload skills');
-    } finally {
-      setSkillsLoading(false);
-    }
-  };
-
-  const handleRefreshProject = async () => {
-    if (!health?.projectRoot) return;
-    setProjectLoading(true);
-    try {
-      const data = await refreshProject(health.projectRoot);
-      setProjectContext(data.context);
-      setProjectContextLoadedAt(new Date().toISOString());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to refresh project');
-    } finally {
-      setProjectLoading(false);
-    }
-  };
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError(null);
-    setAuthLoading(true);
-
-    try {
-      const result = await login(username, password);
-      setAuthToken(result.token);
-      setIsAuthed(true);
-    } catch (err) {
-      setAuthError(err instanceof Error ? err.message : 'Login failed');
-      clearAuthToken();
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
-  if (!authChecked) {
+  // Auth loading screen
+  if (!auth.authChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-950 text-gray-200">
         <div className="text-sm text-gray-400">Checking credentials...</div>
@@ -401,19 +145,20 @@ function App() {
     );
   }
 
-  if (!isAuthed) {
+  // Login screen
+  if (!auth.isAuthed) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-950 text-gray-200 px-4">
         <form
-          onSubmit={handleLogin}
+          onSubmit={auth.handleLogin}
           className="w-full max-w-sm bg-gray-900 border border-gray-800 rounded-lg p-6 shadow-xl"
         >
           <h1 className="text-xl font-semibold text-blue-400 mb-2">DevAI Login</h1>
           <p className="text-sm text-gray-400 mb-6">Sign in to access the DevAI dashboard.</p>
 
-          {authError && (
+          {auth.authError && (
             <div className="mb-4 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-              {authError}
+              {auth.authError}
             </div>
           )}
 
@@ -423,8 +168,8 @@ function App() {
           <input
             id="username"
             type="email"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            value={auth.username}
+            onChange={(e) => auth.setUsername(e.target.value)}
             className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder="name@example.com"
             required
@@ -436,8 +181,8 @@ function App() {
           <input
             id="password"
             type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            value={auth.password}
+            onChange={(e) => auth.setPassword(e.target.value)}
             className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder="********"
             required
@@ -446,9 +191,9 @@ function App() {
           <button
             type="submit"
             className="mt-6 w-full rounded-md bg-blue-500 py-2 text-sm font-semibold text-white hover:bg-blue-400 disabled:opacity-60"
-            disabled={authLoading || !username || !password}
+            disabled={auth.authLoading || !auth.username || !auth.password}
           >
-            {authLoading ? 'Signing in...' : 'Sign In'}
+            {auth.authLoading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
       </div>
@@ -480,32 +225,32 @@ function App() {
   return (
     <ErrorBoundary>
     <div className="min-h-screen flex flex-col">
-      {/* Left Sidebar with Toolbar and Panels - hidden on mobile */}
+      {/* Left Sidebar - hidden on mobile */}
       {!isMobile && <LeftSidebar
         allowedRoots={health?.allowedRoots}
-        skills={skills}
-        selectedSkillIds={selectedSkillIds}
-        skillsLoadedAt={skillsLoadedAt}
-        skillsErrors={skillsErrors}
-        onToggleSkill={handleToggleSkill}
-        onReloadSkills={handleReloadSkills}
-        skillsLoading={skillsLoading}
+        skills={skills.skills}
+        selectedSkillIds={skills.selectedSkillIds}
+        skillsLoadedAt={skills.skillsLoadedAt}
+        skillsErrors={skills.skillsErrors}
+        onToggleSkill={skills.handleToggleSkill}
+        onReloadSkills={skills.handleReloadSkills}
+        skillsLoading={skills.skillsLoading}
         projectRoot={health?.projectRoot || null}
-        projectContext={projectContext}
-        projectContextLoadedAt={projectContextLoadedAt}
-        onRefreshProject={handleRefreshProject}
-        projectLoading={projectLoading}
-        pinnedFiles={pinnedFiles}
-        onUnpinFile={(file) => setPinnedFiles((prev) => prev.filter((f) => f !== file))}
-        ignorePatterns={ignorePatterns}
-        onUpdateIgnorePatterns={setIgnorePatterns}
-        projectContextOverride={projectContextOverride}
-        onUpdateProjectContextOverride={setProjectContextOverride}
+        projectContext={project.projectContext}
+        projectContextLoadedAt={project.projectContextLoadedAt}
+        onRefreshProject={project.handleRefreshProject}
+        projectLoading={project.projectLoading}
+        pinnedFiles={settings.pinnedFiles}
+        onUnpinFile={settings.removePinnedFile}
+        ignorePatterns={settings.ignorePatterns}
+        onUpdateIgnorePatterns={settings.setIgnorePatterns}
+        projectContextOverride={settings.projectContextOverride}
+        onUpdateProjectContextOverride={settings.setProjectContextOverride}
         contextStats={contextStats}
         mcpServers={health?.mcp}
       />}
 
-      {/* Header - compact sticky header */}
+      {/* Header */}
       <header
         className="sticky top-0 z-40 bg-gray-800/95 backdrop-blur border-b border-gray-700 px-3 md:px-4 py-2"
         style={{ marginLeft: isMobile ? 0 : LEFT_SIDEBAR_WIDTH }}
@@ -684,17 +429,15 @@ function App() {
       <div className="flex-1 flex w-full overflow-hidden min-h-0" style={{ marginLeft: isMobile ? 0 : LEFT_SIDEBAR_WIDTH }}>
         {view === 'chat' ? (
           <>
-            {/* Chat Area - shown on desktop always, on mobile only when mobilePanel is 'chat' */}
-            {/* Desktop: 2/3 width, Mobile: full width */}
             <div className={`flex flex-col min-w-0 min-h-0 overflow-hidden ${isMobile ? (mobilePanel === 'chat' ? 'flex-1' : 'hidden') : 'flex-1'}`}>
               <ChatUI
                 projectRoot={health?.projectRoot}
-                skillIds={selectedSkillIds}
+                skillIds={skills.selectedSkillIds}
                 allowedRoots={health?.allowedRoots}
-                pinnedFiles={pinnedFiles}
-                ignorePatterns={ignorePatterns}
-                projectContextOverride={projectContextOverride}
-                onPinFile={(file) => setPinnedFiles((prev) => (prev.includes(file) ? prev : [...prev, file]))}
+                pinnedFiles={settings.pinnedFiles}
+                ignorePatterns={settings.ignorePatterns}
+                projectContextOverride={settings.projectContextOverride}
+                onPinFile={settings.addPinnedFile}
                 onContextUpdate={(stats) => setContextStats(stats)}
                 onToolEvent={handleToolEvents}
                 onLoadingChange={setChatLoading}
@@ -706,11 +449,8 @@ function App() {
               />
             </div>
 
-            {/* Resizable Divider - hidden on mobile */}
             {!isMobile && <ResizableDivider onResize={handleFeedResize} />}
 
-            {/* System Feed - shown on desktop always, on mobile only when mobilePanel is 'feed' */}
-            {/* Desktop: 1/3 width, Mobile: full width */}
             <aside
               className={`min-h-0 overflow-hidden ${isMobile ? (mobilePanel === 'feed' ? 'flex-1' : 'hidden') : 'flex-shrink-0'}`}
               style={isMobile ? undefined : { width: feedWidth }}
@@ -732,7 +472,7 @@ function App() {
         )}
       </div>
 
-      {/* Mobile Panel Toggle - only shown on mobile in chat view */}
+      {/* Mobile Panel Toggle */}
       {isMobile && view === 'chat' && (
         <div className="bg-gray-800 border-t border-gray-700 px-4 py-2">
           <div className="flex items-center justify-center gap-1">
