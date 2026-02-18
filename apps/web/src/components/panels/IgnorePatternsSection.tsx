@@ -25,7 +25,7 @@ export function IgnorePatternsSection({
 
   return (
     <div className="mt-4">
-      <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+      <div className="text-[11px] uppercase tracking-wide text-devai-text-muted mb-1">
         Ignore Patterns
       </div>
       <textarea
@@ -33,13 +33,13 @@ export function IgnorePatternsSection({
         onChange={(e) => setIgnoreInput(e.target.value)}
         rows={3}
         placeholder="e.g. node_modules/**, **/dist/**"
-        className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200"
+        className="w-full bg-devai-bg border border-devai-border rounded px-2 py-1 text-[11px] text-devai-text"
       />
-      <div className="mt-2 flex items-center justify-between text-[10px] text-gray-500">
+      <div className="mt-2 flex items-center justify-between text-[10px] text-devai-text-muted">
         <span>{ignorePatterns.length} active</span>
         <button
           onClick={handleApply}
-          className="text-[10px] text-gray-400 hover:text-gray-200"
+          className="text-[10px] text-devai-text-secondary hover:text-devai-text"
         >
           Apply
         </button>

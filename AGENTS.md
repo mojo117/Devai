@@ -49,7 +49,7 @@ Default behavior:
 - ssh root@77.42.90.193 "pm2 logs devai-dev --lines 50"
 
 ## External APIs (Appwrite)
-- MyLittleTaskboard task access is available via Appwrite Function executions: `POST https://appwrite.klyde.tech/v1/functions/api-project-access/executions`.
+- TaskForge task access is available via Appwrite Function executions: `POST https://appwrite.klyde.tech/v1/functions/api-project-access/executions`.
 - Project ID header: `X-Appwrite-Project: 69805803000aeddb2ead`.
 - The project API key (`tfapi_...`) is not committed; store it in `.env` (example name: `DEVAI_TASKBOARD_API_KEY`, managed/encrypted via SOPS; see `SECRETS.md`).
 - Details/curl example: see `CLAUDE.md`.

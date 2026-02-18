@@ -41,7 +41,7 @@ export function SkillsSection({
           {skills.map((skill) => (
             <label
               key={skill.id}
-              className="flex items-start gap-2 bg-gray-900 rounded p-2 text-xs text-gray-200"
+              className="flex items-start gap-2 bg-devai-bg rounded p-2 text-xs text-devai-text"
             >
               <input
                 type="checkbox"
@@ -50,14 +50,14 @@ export function SkillsSection({
                 onChange={() => onToggleSkill(skill.id)}
               />
               <span>
-                <span className="block font-semibold text-blue-300">{skill.name}</span>
-                <span className="block text-[11px] text-gray-500">{skill.description}</span>
+                <span className="block font-semibold text-devai-accent">{skill.name}</span>
+                <span className="block text-[11px] text-devai-text-muted">{skill.description}</span>
               </span>
             </label>
           ))}
         </div>
       ) : (
-        <p className="text-xs text-gray-500 mt-2">
+        <p className="text-xs text-devai-text-muted mt-2">
           No skills loaded. Add manifests under the skills folder.
         </p>
       )}

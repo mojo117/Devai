@@ -36,11 +36,9 @@ import type {
 } from './types.js';
 import * as stateManager from './stateManager.js';
 import { llmRouter } from '../llm/router.js';
-import { executeTool } from '../tools/executor.js';
-import { getToolsForLLM, toolRequiresConfirmation } from '../tools/registry.js';
+import { getToolsForLLM } from '../tools/registry.js';
 import { mcpManager } from '../mcp/index.js';
-import { createAction } from '../actions/manager.js';
-import { buildActionPreview } from '../actions/preview.js';
+import { executeToolWithApprovalBridge } from '../actions/approvalBridge.js';
 import type { LLMMessage, ToolCall } from '../llm/types.js';
 
 // Agent definitions
@@ -501,7 +499,18 @@ WICHTIG: Dies ist eine einfache Anfrage. Führe sie DIREKT aus ohne zu fragen.`;
         args: toolCall.arguments,
       });
 
-      const toolResult = await executeTool(toolCall.name, toolCall.arguments);
+      const toolResult = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
+        onActionPending: (action) => {
+          sendEvent({
+            type: 'action_pending',
+            actionId: action.id,
+            toolName: action.toolName,
+            toolArgs: action.toolArgs,
+            description: action.description,
+            preview: action.preview,
+          });
+        },
+      });
 
       sendEvent({
         type: 'tool_result',
@@ -728,7 +737,18 @@ Falls Delegation nötig:
       }
 
       // Regular tool execution
-      const result = await executeTool(toolCall.name, toolCall.arguments);
+      const result = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
+        onActionPending: (action) => {
+          sendEvent({
+            type: 'action_pending',
+            actionId: action.id,
+            toolName: action.toolName,
+            toolArgs: action.toolArgs,
+            description: action.description,
+            preview: action.preview,
+          });
+        },
+      });
 
       sendEvent({
         type: 'tool_result',
@@ -950,39 +970,19 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
         args: toolCall.arguments,
       });
 
-      // Check if tool requires confirmation - create pending action for UI approval
-      if (toolRequiresConfirmation(toolCall.name)) {
-        const preview = await buildActionPreview(toolCall.name, toolCall.arguments);
-        const description = generateToolDescription(toolCall.name, toolCall.arguments);
-
-        const action = await createAction({
-          id: nanoid(),
-          toolName: toolCall.name,
-          toolArgs: toolCall.arguments,
-          description,
-          preview,
-        });
-
-        // Send action_pending event for inline approval in UI
-        sendEvent({
-          type: 'action_pending',
-          actionId: action.id,
-          toolName: action.toolName,
-          toolArgs: action.toolArgs,
-          description: action.description,
-          preview: action.preview,
-        });
-
-        toolResults.push({
-          toolUseId: toolCall.id,
-          result: `Action created for approval: ${description} (Action ID: ${action.id})`,
-          isError: false,
-        });
-        continue;
-      }
-
       const startTime = Date.now();
-      const result = await executeTool(toolCall.name, toolCall.arguments);
+      const result = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
+        onActionPending: (action) => {
+          sendEvent({
+            type: 'action_pending',
+            actionId: action.id,
+            toolName: action.toolName,
+            toolArgs: action.toolArgs,
+            description: action.description,
+            preview: action.preview,
+          });
+        },
+      });
       const duration = Date.now() - startTime;
 
       executedTools.push({
@@ -1016,48 +1016,6 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
       content: '',
       toolResults,
     });
-  }
-
-  // Helper function to generate tool descriptions
-  function generateToolDescription(toolName: string, args: Record<string, unknown>): string {
-    switch (toolName) {
-      case 'fs_writeFile':
-        return `Write to file: ${args.path}`;
-      case 'fs_edit':
-        return `Edit file: ${args.path}`;
-      case 'fs_mkdir':
-        return `Create directory: ${args.path}`;
-      case 'fs_move':
-        return `Move: ${args.source} → ${args.destination}`;
-      case 'fs_delete':
-        return `Delete: ${args.path}`;
-      case 'git_commit':
-        return `Git commit: "${args.message}"`;
-      case 'git_push':
-        return `Git push to ${args.remote || 'origin'}/${args.branch || 'current branch'}`;
-      case 'git_pull':
-        return `Git pull from ${args.remote || 'origin'}/${args.branch || 'current branch'}`;
-      case 'github_triggerWorkflow':
-        return `Trigger workflow: ${args.workflow} on ${args.ref}`;
-      case 'bash_execute':
-        return `Execute: ${args.command}`;
-      case 'ssh_execute':
-        return `SSH to ${args.host}: ${args.command}`;
-      case 'pm2_restart':
-        return `PM2 restart: ${args.processName}`;
-      case 'pm2_stop':
-        return `PM2 stop: ${args.processName}`;
-      case 'pm2_start':
-        return `PM2 start: ${args.processName}`;
-      case 'pm2_reloadAll':
-        return `PM2 reload all processes`;
-      case 'npm_install':
-        return args.packageName ? `npm install ${args.packageName}` : 'npm install';
-      case 'npm_run':
-        return `npm run ${args.script}`;
-      default:
-        return `Execute: ${toolName}`;
-    }
   }
 
   // Log to history
@@ -1622,7 +1580,18 @@ Antworte am Ende mit einem JSON-Block:
         args: toolCall.arguments,
       });
 
-      const result = await executeTool(toolCall.name, toolCall.arguments);
+      const result = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
+        onActionPending: (action) => {
+          sendEvent({
+            type: 'action_pending',
+            actionId: action.id,
+            toolName: action.toolName,
+            toolArgs: action.toolArgs,
+            description: action.description,
+            preview: action.preview,
+          });
+        },
+      });
 
       sendEvent({
         type: 'tool_result',
@@ -1770,7 +1739,18 @@ Antworte am Ende mit einem JSON-Block:
         args: toolCall.arguments,
       });
 
-      const result = await executeTool(toolCall.name, toolCall.arguments);
+      const result = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
+        onActionPending: (action) => {
+          sendEvent({
+            type: 'action_pending',
+            actionId: action.id,
+            toolName: action.toolName,
+            toolArgs: action.toolArgs,
+            description: action.description,
+            preview: action.preview,
+          });
+        },
+      });
 
       sendEvent({
         type: 'tool_result',
@@ -2315,7 +2295,18 @@ export async function spawnScout(
         return result;
       }
 
-      const result = await executeTool(toolCall.name, toolCall.arguments);
+      const result = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
+        onActionPending: (action) => {
+          sendEvent?.({
+            type: 'action_pending',
+            actionId: action.id,
+            toolName: action.toolName,
+            toolArgs: action.toolArgs,
+            description: action.description,
+            preview: action.preview,
+          });
+        },
+      });
 
       const toolResult = buildToolResultContent(result);
       toolResults.push({

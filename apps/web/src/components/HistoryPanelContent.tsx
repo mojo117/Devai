@@ -61,8 +61,8 @@ export function HistoryPanelContent() {
   return (
     <div className="p-4">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-semibold text-gray-400">History</h2>
-        {loading && <span className="text-[10px] text-gray-500">Loading...</span>}
+        <h2 className="text-sm font-semibold text-devai-text-secondary">History</h2>
+        {loading && <span className="text-[10px] text-devai-text-muted">Loading...</span>}
       </div>
 
       {error && (
@@ -73,7 +73,7 @@ export function HistoryPanelContent() {
 
       <div className="space-y-2">
         {sessions.length === 0 && (
-          <p className="text-xs text-gray-500">No sessions yet.</p>
+          <p className="text-xs text-devai-text-muted">No sessions yet.</p>
         )}
         {sessions.map((session) => (
           <button
@@ -81,31 +81,31 @@ export function HistoryPanelContent() {
             onClick={() => handleSelect(session.id)}
             className={`w-full text-left text-xs rounded px-2 py-2 ${
               selectedSessionId === session.id
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-900 text-gray-300 hover:bg-gray-700'
+                ? 'bg-devai-accent text-white'
+                : 'bg-devai-bg text-devai-text-secondary hover:bg-devai-card'
             }`}
           >
             <div className="font-semibold">
               {session.title ? session.title : session.id.slice(0, 8)}
             </div>
-            <div className="text-[10px] text-gray-400">
+            <div className="text-[10px] text-devai-text-muted">
               {new Date(session.createdAt).toLocaleString()}
             </div>
           </button>
         ))}
       </div>
 
-      <div className="mt-4 pt-4 border-t border-gray-700">
-        <h3 className="text-xs uppercase tracking-wide text-gray-400 mb-2">
+      <div className="mt-4 pt-4 border-t border-devai-border">
+        <h3 className="text-xs uppercase tracking-wide text-devai-text-secondary mb-2">
           Messages
         </h3>
         {messages.length === 0 ? (
-          <p className="text-xs text-gray-500">No messages to display.</p>
+          <p className="text-xs text-devai-text-muted">No messages to display.</p>
         ) : (
           <div className="space-y-3">
             {messages.map((message) => (
-              <div key={message.id} className="bg-gray-900 rounded p-2 text-xs text-gray-200">
-                <div className="flex items-center justify-between text-[10px] text-gray-400 mb-1">
+              <div key={message.id} className="bg-devai-bg rounded p-2 text-xs text-devai-text">
+                <div className="flex items-center justify-between text-[10px] text-devai-text-muted mb-1">
                   <span>{message.role}</span>
                   <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
                 </div>

@@ -57,20 +57,20 @@ export function FileBrowserSection({ allowedRoots, ignorePatterns }: FileBrowser
       actionLabel="Up"
       actionDisabled={filesPath === '.'}
     >
-      <p className="text-[10px] text-gray-600 mt-1">
+      <p className="text-[10px] text-devai-text-muted mt-1">
         Root: {selectedRoot || 'none'} / {filesPath}
       </p>
       {!selectedRoot ? (
-        <p className="text-xs text-gray-500 mt-2">No allowed root selected.</p>
+        <p className="text-xs text-devai-text-muted mt-2">No allowed root selected.</p>
       ) : (
         <>
           {allowedRoots && allowedRoots.length > 1 && (
             <div className="mt-2">
-              <label className="text-[11px] text-gray-500">Root</label>
+              <label className="text-[11px] text-devai-text-muted">Root</label>
               <select
                 value={selectedRoot}
                 onChange={(e) => setSelectedRoot(e.target.value)}
-                className="mt-1 w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200"
+                className="mt-1 w-full bg-devai-bg border border-devai-border rounded px-2 py-1 text-xs text-devai-text"
               >
                 {allowedRoots.map((root) => (
                   <option key={root} value={root}>{root}</option>
@@ -80,24 +80,24 @@ export function FileBrowserSection({ allowedRoots, ignorePatterns }: FileBrowser
           )}
           {filesError && <p className="text-xs text-red-300 mt-2">{filesError}</p>}
           {filesLoading ? (
-            <p className="text-xs text-gray-500 mt-2">Loading files...</p>
+            <p className="text-xs text-devai-text-muted mt-2">Loading files...</p>
           ) : (
             <div className="mt-2 space-y-1">
               {files.length === 0 ? (
-                <p className="text-xs text-gray-500">No files found.</p>
+                <p className="text-xs text-devai-text-muted">No files found.</p>
               ) : (
                 files.map((entry) => (
                   <button
                     key={`${filesPath}/${entry.name}`}
                     onClick={() => handleOpenEntry(entry)}
-                    className="w-full text-left text-xs bg-gray-900 hover:bg-gray-700 rounded px-2 py-1 text-gray-300 flex items-center justify-between"
+                    className="w-full text-left text-xs bg-devai-bg hover:bg-devai-card rounded px-2 py-1 text-devai-text-secondary flex items-center justify-between"
                     disabled={entry.type !== 'directory'}
                   >
                     <span className="truncate">
                       {entry.type === 'directory' ? '[dir]' : '[file]'} {entry.name}
                     </span>
                     {entry.type === 'directory' && (
-                      <span className="text-[10px] text-gray-500">open</span>
+                      <span className="text-[10px] text-devai-text-muted">open</span>
                     )}
                   </button>
                 ))

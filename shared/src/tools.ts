@@ -1,13 +1,13 @@
 export type ToolName =
-  | 'fs.listFiles'
-  | 'fs.readFile'
-  | 'fs.writeFile'
-  | 'git.status'
-  | 'git.diff'
-  | 'git.commit'
-  | 'github.triggerWorkflow'
-  | 'github.getWorkflowRunStatus'
-  | 'logs.getStagingLogs'
+  | 'fs_listFiles'
+  | 'fs_readFile'
+  | 'fs_writeFile'
+  | 'git_status'
+  | 'git_diff'
+  | 'git_commit'
+  | 'github_triggerWorkflow'
+  | 'github_getWorkflowRunStatus'
+  | 'logs_getStagingLogs'
   | 'askForConfirmation';
 
 export interface ToolDefinition {

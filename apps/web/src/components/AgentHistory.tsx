@@ -59,8 +59,8 @@ export function AgentHistory({
 
   if (entries.length === 0) {
     return (
-      <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-        <div className="text-sm text-gray-500 text-center">
+      <div className="bg-devai-card border border-devai-border rounded-lg p-4">
+        <div className="text-sm text-devai-text-muted text-center">
           No agent activity yet
         </div>
       </div>
@@ -69,12 +69,12 @@ export function AgentHistory({
 
   return (
     <div
-      className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden"
+      className="bg-devai-card border border-devai-border rounded-lg overflow-hidden"
       style={{ maxHeight }}
     >
-      <div className="sticky top-0 bg-gray-800 border-b border-gray-700 px-3 py-2 flex items-center justify-between">
-        <span className="text-sm font-medium text-gray-300">Agent History</span>
-        <span className="text-xs text-gray-500">{entries.length} entries</span>
+      <div className="sticky top-0 bg-devai-card border-b border-devai-border px-3 py-2 flex items-center justify-between">
+        <span className="text-sm font-medium text-devai-text-secondary">Agent History</span>
+        <span className="text-xs text-devai-text-muted">{entries.length} entries</span>
       </div>
 
       <div className="overflow-y-auto" style={{ maxHeight: `calc(${maxHeight} - 40px)` }}>
@@ -87,20 +87,20 @@ export function AgentHistory({
             <div
               key={id}
               className={`border-l-2 ${statusStyles[entry.status]} ${
-                index < entries.length - 1 ? 'border-b border-gray-700' : ''
+                index < entries.length - 1 ? 'border-b border-devai-border' : ''
               }`}
             >
               {/* Header */}
               <button
                 onClick={() => toggleExpanded(id)}
-                className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-gray-700/30 transition-colors"
+                className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-devai-card/30 transition-colors"
               >
-                <span className="text-xs text-gray-500 w-16 shrink-0">{time}</span>
+                <span className="text-xs text-devai-text-muted w-16 shrink-0">{time}</span>
                 <AgentBadge agent={entry.agent as AgentName} size="sm" />
-                <span className="text-sm text-gray-300 flex-1 truncate">
+                <span className="text-sm text-devai-text-secondary flex-1 truncate">
                   {entry.action}
                 </span>
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-devai-text-muted">
                   {entry.duration}ms
                 </span>
                 <span
@@ -117,7 +117,7 @@ export function AgentHistory({
                   {statusLabels[entry.status]}
                 </span>
                 <svg
-                  className={`w-4 h-4 text-gray-500 transition-transform ${
+                  className={`w-4 h-4 text-devai-text-muted transition-transform ${
                     isExpanded ? 'rotate-180' : ''
                   }`}
                   fill="none"
@@ -139,8 +139,8 @@ export function AgentHistory({
                   {/* Input */}
                   {entry.input != null && (
                     <div>
-                      <div className="text-xs text-gray-500 mb-1">Input</div>
-                      <pre className="text-xs bg-gray-900 p-2 rounded overflow-x-auto text-gray-300">
+                      <div className="text-xs text-devai-text-muted mb-1">Input</div>
+                      <pre className="text-xs bg-devai-bg p-2 rounded overflow-x-auto text-devai-text-secondary">
                         {renderValue(entry.input)}
                       </pre>
                     </div>
@@ -149,26 +149,26 @@ export function AgentHistory({
                   {/* Tool Calls */}
                   {showToolCalls && (entry.toolCalls?.length ?? 0) > 0 && (
                     <div>
-                      <div className="text-xs text-gray-500 mb-1">
+                      <div className="text-xs text-devai-text-muted mb-1">
                         Tool Calls ({entry.toolCalls!.length})
                       </div>
                       <div className="space-y-1">
                         {entry.toolCalls!.map((tc, i) => (
                           <div
                             key={i}
-                            className="bg-gray-900 rounded p-2 text-xs"
+                            className="bg-devai-bg rounded p-2 text-xs"
                           >
                             <div className="flex items-center gap-2 mb-1">
-                              <span className="text-blue-400 font-mono">
+                              <span className="text-devai-accent font-mono">
                                 {tc.name}
                               </span>
                             </div>
-                            <pre className="text-gray-400 overflow-x-auto">
+                            <pre className="text-devai-text-secondary overflow-x-auto">
                               {JSON.stringify(tc.arguments, null, 2)}
                             </pre>
                             {tc.result && (
-                              <div className="mt-1 pt-1 border-t border-gray-700">
-                                <span className="text-gray-500">Result: </span>
+                              <div className="mt-1 pt-1 border-t border-devai-border">
+                                <span className="text-devai-text-muted">Result: </span>
                                 <span className="text-green-400">
                                   {tc.result.length > 100
                                     ? tc.result.substring(0, 100) + '...'
@@ -185,8 +185,8 @@ export function AgentHistory({
                   {/* Output */}
                   {entry.output != null && (
                     <div>
-                      <div className="text-xs text-gray-500 mb-1">Output</div>
-                      <pre className="text-xs bg-gray-900 p-2 rounded overflow-x-auto text-gray-300 max-h-48 overflow-y-auto">
+                      <div className="text-xs text-devai-text-muted mb-1">Output</div>
+                      <pre className="text-xs bg-devai-bg p-2 rounded overflow-x-auto text-devai-text-secondary max-h-48 overflow-y-auto">
                         {renderValue(entry.output)}
                       </pre>
                     </div>
@@ -230,7 +230,7 @@ export function AgentTimeline({ entries }: AgentTimelineProps) {
             {entry.agent === 'chapo' ? '🎯' : entry.agent === 'koda' ? '💻' : '🔧'}
           </div>
           {i < entries.length - 1 && (
-            <div className="w-4 h-0.5 bg-gray-600" />
+            <div className="w-4 h-0.5 bg-devai-border" />
           )}
         </div>
       ))}
@@ -250,7 +250,7 @@ export function AgentActivity({ agent, action }: AgentActivityProps) {
   if (!agent || !action) return null;
 
   return (
-    <div className="flex items-center gap-2 text-sm text-gray-400 animate-pulse">
+    <div className="flex items-center gap-2 text-sm text-devai-text-secondary animate-pulse">
       <AgentBadge agent={agent} size="sm" />
       <span>{action}</span>
       <div className="flex gap-1">

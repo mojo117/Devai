@@ -7,7 +7,7 @@
 
 import type { AssignedTask, AgentExecutionResult } from './deterministicRouter/types.js';
 import type { SendEventFn } from './router.js';
-import { executeTool } from '../tools/executor.js';
+import { executeToolWithApprovalBridge } from '../actions/approvalBridge.js';
 import { getToolsForLLM } from '../tools/registry.js';
 import { llmRouter } from '../llm/router.js';
 import { getAgent, getToolsForAgent } from './router.js';
@@ -136,7 +136,18 @@ export async function executeAgentTask(
         args: toolCall.arguments,
       });
 
-      const result = await executeTool(toolCall.name, toolCall.arguments);
+      const result = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
+        onActionPending: (action) => {
+          sendEvent({
+            type: 'action_pending',
+            actionId: action.id,
+            toolName: action.toolName,
+            toolArgs: action.toolArgs,
+            description: action.description,
+            preview: action.preview,
+          });
+        },
+      });
 
       sendEvent({
         type: 'tool_result',

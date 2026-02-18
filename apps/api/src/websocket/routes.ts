@@ -1,17 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { WebSocket } from 'ws';
-import { resolve } from 'node:path';
 import { registerClient as registerActionClient, unregisterClient as unregisterActionClient, getConnectionStats } from './actionBroadcaster.js';
 import { getPendingActions } from '../actions/manager.js';
-import { verifyToken } from '../routes/auth.js';
-import { emitChatEvent, getChatGatewayStats, getCurrentSeq, getEventsSince, registerChatClient, unregisterChatClient } from './chatGateway.js';
-import { createSession, getMessages, saveMessage, updateSessionTitleIfEmpty } from '../db/queries.js';
-import { ensureStateLoaded, getOrCreateState, getState } from '../agents/stateManager.js';
-import { processRequest as processMultiAgentRequest, handleUserApproval, handleUserResponse, handlePlanApproval } from '../agents/router.js';
-import type { AgentStreamEvent } from '../agents/types.js';
-import { config } from '../config.js';
-import { nanoid } from 'nanoid';
-import type { ChatMessage } from '@devai/shared';
 
 export const websocketRoutes: FastifyPluginAsync = async (app) => {
   // WebSocket endpoint for real-time action updates
@@ -429,10 +419,3 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
     return getChatGatewayStats();
   });
 };
-
-function buildSessionTitle(content: string): string | null {
-  const trimmed = String(content || '').replace(/\s+/g, ' ').trim();
-  if (!trimmed) return null;
-  if (trimmed.length <= 60) return trimmed;
-  return `${trimmed.slice(0, 57)}...`;
-}

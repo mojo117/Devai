@@ -100,13 +100,27 @@ export async function getMessages(sessionId: string): Promise<StoredMessage[]> {
     return [];
   }
 
+  const roleOrder: Record<ChatMessage['role'], number> = {
+    user: 0,
+    assistant: 1,
+    system: 2,
+  };
+
   return (data || []).map((row) => ({
     id: row.id,
     sessionId: row.session_id,
     role: row.role as ChatMessage['role'],
     content: row.content,
     timestamp: row.timestamp,
-  }));
+  })).sort((a, b) => {
+    const ta = Date.parse(a.timestamp);
+    const tb = Date.parse(b.timestamp);
+    if (ta !== tb) return ta - tb;
+    const ra = roleOrder[a.role] ?? 99;
+    const rb = roleOrder[b.role] ?? 99;
+    if (ra !== rb) return ra - rb;
+    return a.id.localeCompare(b.id);
+  });
 }
 
 export async function saveMessage(sessionId: string, message: ChatMessage): Promise<void> {

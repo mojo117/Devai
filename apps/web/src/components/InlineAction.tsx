@@ -53,7 +53,7 @@ export function InlineAction({ action, onApprove, onReject }: InlineActionProps)
       <div className="bg-green-900/30 border border-green-600 rounded-lg p-3 my-2">
         <div className="flex items-center gap-2">
           <span className="text-green-400">✓ Approved</span>
-          <span className="font-mono text-sm text-gray-400">{action.toolName}</span>
+          <span className="font-mono text-sm text-devai-text-secondary">{action.toolName}</span>
         </div>
       </div>
     );
@@ -64,7 +64,7 @@ export function InlineAction({ action, onApprove, onReject }: InlineActionProps)
       <div className="bg-red-900/30 border border-red-600 rounded-lg p-3 my-2">
         <div className="flex items-center gap-2">
           <span className="text-red-400">✗ Rejected</span>
-          <span className="font-mono text-sm text-gray-400">{action.toolName}</span>
+          <span className="font-mono text-sm text-devai-text-secondary">{action.toolName}</span>
         </div>
       </div>
     );
@@ -80,25 +80,25 @@ export function InlineAction({ action, onApprove, onReject }: InlineActionProps)
       </div>
 
       {/* Tool info */}
-      <p className="font-mono text-sm text-blue-400 mb-1">{action.toolName}</p>
-      <p className="text-sm text-gray-300 mb-2">{action.description}</p>
+      <p className="font-mono text-sm text-devai-accent mb-1">{action.toolName}</p>
+      <p className="text-sm text-devai-text-secondary mb-2">{action.description}</p>
 
       {/* Arguments preview */}
       <details className="mb-3">
-        <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-400">
+        <summary className="text-xs text-devai-text-muted cursor-pointer hover:text-devai-text-secondary">
           View arguments
         </summary>
-        <pre className="mt-2 text-xs bg-gray-900 p-2 rounded overflow-x-auto text-gray-300">
+        <pre className="mt-2 text-xs bg-devai-bg p-2 rounded overflow-x-auto text-devai-text-secondary">
           {JSON.stringify(action.toolArgs, null, 2)}
         </pre>
       </details>
 
       {action.preview?.summary && (
         <details className="mb-3">
-          <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-400">
+          <summary className="text-xs text-devai-text-muted cursor-pointer hover:text-devai-text-secondary">
             View action summary
           </summary>
-          <pre className="mt-2 text-xs bg-gray-950 p-2 rounded overflow-x-auto text-gray-300 whitespace-pre-wrap">
+          <pre className="mt-2 text-xs bg-devai-bg p-2 rounded overflow-x-auto text-devai-text-secondary whitespace-pre-wrap">
             {action.preview.summary}
           </pre>
         </details>
@@ -106,10 +106,10 @@ export function InlineAction({ action, onApprove, onReject }: InlineActionProps)
 
       {action.preview?.diff && (
         <details className="mb-3">
-          <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-400">
+          <summary className="text-xs text-devai-text-muted cursor-pointer hover:text-devai-text-secondary">
             View patch preview
           </summary>
-          <pre className="mt-2 text-xs bg-gray-950 p-2 rounded overflow-x-auto text-gray-300 whitespace-pre-wrap">
+          <pre className="mt-2 text-xs bg-devai-bg p-2 rounded overflow-x-auto text-devai-text-secondary whitespace-pre-wrap">
             {action.preview.diff}
           </pre>
         </details>

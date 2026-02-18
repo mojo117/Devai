@@ -4,6 +4,7 @@
 // ──────────────────────────────────────────────
 
 import type { AgentType } from '@devai/shared';
+import type { Action } from '../../actions/types.js';
 import type { ToolExecutionResult } from '../../tools/executor.js';
 
 export interface AgentContext {
@@ -11,6 +12,7 @@ export interface AgentContext {
   toolName?: string;
   toolArgs?: Record<string, unknown>;
   previousResults?: string[];
+  onActionPending?: (action: Action) => void | Promise<void>;
 }
 
 export interface AgentResult {

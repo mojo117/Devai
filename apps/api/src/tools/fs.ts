@@ -160,7 +160,7 @@ async function validatePath(path: string): Promise<string> {
 
   throw new Error(
     `Path "${path}" not found within allowed roots: ${allowedRoots.join(', ')}. ` +
-    `Try: fs.listFiles("${allowedRoots[0]}")`
+    `Try: fs_listFiles("${allowedRoots[0]}")`
   );
 }
 

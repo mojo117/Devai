@@ -7,7 +7,7 @@ import type { ValidationResult } from '@devai/shared';
 import type { LLMProvider, GenerateResponse } from '../llm/types.js';
 import { llmRouter } from '../llm/router.js';
 
-const VALIDATION_SYSTEM_PROMPT = `You are a quality-assurance reviewer for an AI assistant called Chapo.
+export const VALIDATION_SYSTEM_PROMPT = `You are a quality-assurance reviewer for an AI assistant called Chapo.
 Your job is to evaluate a proposed answer BEFORE it is sent to the user.
 
 Evaluate the following criteria:

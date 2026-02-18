@@ -69,36 +69,36 @@ export function SearchSection({ selectedRoot, ignorePatterns }: SearchSectionPro
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search pattern"
-            className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200"
+            className="w-full bg-devai-bg border border-devai-border rounded px-2 py-1 text-xs text-devai-text"
           />
           <input
             value={searchGlob}
             onChange={(e) => setSearchGlob(e.target.value)}
             placeholder="Glob filter (optional)"
-            className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200"
+            className="w-full bg-devai-bg border border-devai-border rounded px-2 py-1 text-xs text-devai-text"
           />
         </div>
         {searchError && <p className="text-xs text-red-300 mt-2">{searchError}</p>}
         {searchResults.length > 0 && (
           <div className="mt-3 space-y-2">
             {searchResults.slice(0, 20).map((match, idx) => (
-              <div key={`${match.file}-${match.line}-${idx}`} className="bg-gray-900 rounded p-2 text-xs text-gray-200">
+              <div key={`${match.file}-${match.line}-${idx}`} className="bg-devai-bg rounded p-2 text-xs text-devai-text">
                 <div className="flex items-center justify-between">
-                  <span className="font-mono text-[11px] text-blue-300 truncate">
+                  <span className="font-mono text-[11px] text-devai-accent truncate">
                     {match.file}:{match.line}
                   </span>
                   <button
                     onClick={() => handlePreviewFile(match.file)}
-                    className="text-[10px] text-gray-400 hover:text-gray-200"
+                    className="text-[10px] text-devai-text-secondary hover:text-devai-text"
                   >
                     Open
                   </button>
                 </div>
-                <p className="text-[11px] text-gray-400 mt-1">{match.content}</p>
+                <p className="text-[11px] text-devai-text-secondary mt-1">{match.content}</p>
               </div>
             ))}
             {searchResults.length > 20 && (
-              <p className="text-[10px] text-gray-500">Showing first 20 matches.</p>
+              <p className="text-[10px] text-devai-text-muted">Showing first 20 matches.</p>
             )}
           </div>
         )}
@@ -114,11 +114,11 @@ export function SearchSection({ selectedRoot, ignorePatterns }: SearchSectionPro
           }}
           actionLabel="Close"
         >
-          <p className="text-[10px] text-gray-600 mt-1 truncate">{filePreviewPath}</p>
-          {filePreviewLoading && <p className="text-xs text-gray-500 mt-2">Loading preview...</p>}
+          <p className="text-[10px] text-devai-text-muted mt-1 truncate">{filePreviewPath}</p>
+          {filePreviewLoading && <p className="text-xs text-devai-text-muted mt-2">Loading preview...</p>}
           {filePreviewError && <p className="text-xs text-red-300 mt-2">{filePreviewError}</p>}
           {filePreviewContent && (
-            <pre className="mt-2 text-[11px] bg-gray-900 p-2 rounded text-gray-300 whitespace-pre-wrap max-h-48 overflow-y-auto">
+            <pre className="mt-2 text-[11px] bg-devai-bg p-2 rounded text-devai-text-secondary whitespace-pre-wrap max-h-48 overflow-y-auto">
               {filePreviewContent.length > 2000
                 ? `${filePreviewContent.slice(0, 2000)}\n...`
                 : filePreviewContent}

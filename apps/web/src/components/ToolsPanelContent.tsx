@@ -96,7 +96,7 @@ export function ToolsPanelContent({
         skillsLoading={skillsLoading}
       />
 
-      <div className="border-t border-gray-700 pt-4 mt-4 mb-5">
+      <div className="border-t border-devai-border pt-4 mt-4 mb-5">
         <McpStatus servers={mcpServers ?? []} />
       </div>
 

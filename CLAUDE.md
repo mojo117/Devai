@@ -155,9 +155,9 @@ ssh root@77.42.90.193 "pm2 status"
 - **Mutagen Sync**: devai-dev
 - **Dev Port**: 3008
 
-## External API: MyLittleTaskboard Task Access (Appwrite)
+## External API: TaskForge Task Access (Appwrite)
 
-Use this Appwrite Function execution endpoint to access **MyLittleTaskboard** tasks from Devai.
+Use this Appwrite Function execution endpoint to access **TaskForge** tasks from Devai.
 
 - **Endpoint**: `POST https://appwrite.klyde.tech/v1/functions/api-project-access/executions`
 - **Project header** (required): `X-Appwrite-Project: 69805803000aeddb2ead`
@@ -166,7 +166,7 @@ Use this Appwrite Function execution endpoint to access **MyLittleTaskboard** ta
 **Security:** Do not hardcode or commit the API key. Store it in `.env` and keep it encrypted via SOPS (`.env.enc`).
 
 **Where to find/set the key:**
-- The `tfapi_...` key is generated in MyLittleTaskboard: Projects -> select project -> "API-Zugriff" -> "API-Key generieren".
+- The `tfapi_...` key is generated in TaskForge: Projects -> select project -> "API-Zugriff" -> "API-Key generieren".
 - In this repo, store it in `.env` (example name: `DEVAI_TASKBOARD_API_KEY`).
 - Secrets are managed via SOPS; see `SECRETS.md` for `.env.enc` deploy/decrypt flow.
 

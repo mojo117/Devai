@@ -45,14 +45,19 @@ describe('actions manager', () => {
 
     const action = await createAction({
       id: 'action-1',
-      toolName: 'fs_listFiles',
-      toolArgs: { path: '.' },
-      description: 'List files',
+      toolName: 'fs_writeFile',
+      toolArgs: { path: 'test.txt', content: 'hello' },
+      description: 'Write file',
     });
 
     const executed = await approveAndExecuteAction(action.id);
     const stored = await getAction(action.id);
 
+    expect(executeTool).toHaveBeenCalledWith(
+      'fs_writeFile',
+      { path: 'test.txt', content: 'hello' },
+      { bypassConfirmation: true }
+    );
     expect(executed.status).toBe('done');
     expect(executed.result).toEqual({ ok: true });
     expect(stored?.status).toBe('done');

@@ -4,7 +4,6 @@ import rateLimit from '@fastify/rate-limit';
 import fastifyWebsocket from '@fastify/websocket';
 import { config } from './config.js';
 import { healthRoutes } from './routes/health.js';
-import { chatRoutes } from './routes/chat.js';
 import { actionRoutes } from './routes/actions.js';
 import { projectRoutes } from './routes/project.js';
 import { skillsRoutes } from './routes/skills.js';
@@ -63,7 +62,6 @@ app.addHook('preHandler', async (request, reply) => {
 
 // Register routes
 await app.register(healthRoutes, { prefix: '/api' });
-await app.register(chatRoutes, { prefix: '/api' });
 await app.register(actionRoutes, { prefix: '/api' });
 await app.register(projectRoutes, { prefix: '/api' });
 await app.register(skillsRoutes, { prefix: '/api' });

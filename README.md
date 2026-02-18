@@ -82,6 +82,7 @@ npm run dev:web
 | `GITHUB_OWNER` | GitHub Repository Owner |
 | `GITHUB_REPO` | GitHub Repository Name |
 | `PROJECT_ROOT` | Pfad zum verwalteten Projekt |
+| `DEVAI_TASKBOARD_API_KEY` | TaskForge API Key (`tfapi_...`) fuer read-only Task-Zugriff via Appwrite Function |
 
 ## Authentifizierung (Supabase)
 
@@ -122,6 +123,37 @@ curl -X POST http://localhost:3001/api/actions/approve \
 - API-Zugriff erfordert JWT (ausser /api/health und /api/auth/*)
 - Riskante Aktionen (writeFile, commit, deploy) erfordern explizite Bestaetigung
 - Alle Aktionen werden in `var/audit.log` protokolliert
+
+## TaskForge API (Live verifiziert am 2026-02-11)
+
+DevAI nutzt fuer Taskboard-Lesezugriff diesen Appwrite Function Endpoint:
+
+- Endpoint: `POST https://appwrite.klyde.tech/v1/functions/api-project-access/executions`
+- Header: `X-Appwrite-Project: 69805803000aeddb2ead`
+- Auth im Body: `apiKey` (aus `.env` als `DEVAI_TASKBOARD_API_KEY`)
+
+Wichtig:
+- Der Request-Body muss im Appwrite-Format `{"body":"<json-string>"}` gesendet werden.
+- Die eigentlichen Nutzdaten stehen in `responseBody` (JSON-String) und muessen geparst werden.
+
+Beispiel: einzelne Task laden
+```bash
+curl -sS -X POST 'https://appwrite.klyde.tech/v1/functions/api-project-access/executions' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Appwrite-Project: 69805803000aeddb2ead' \
+  -d "{\"body\": \"{\\\"apiKey\\\": \\\"${DEVAI_TASKBOARD_API_KEY}\\\", \\\"task\\\": \\\"6985090b0034cf3f7ce3\\\"}\"}" \
+  | jq -r '.responseBody' | jq
+```
+
+Live-Test Ergebnis (2026-02-11):
+- Task `6985090b0034cf3f7ce3` wurde erfolgreich geladen (`responseStatusCode: 200`)
+- Titel: `Globaler Kontext`
+- Status: `open`
+- Column: `Test`
+
+Zusatztests (ebenfalls 2026-02-11):
+- Ohne `task` Parameter: Projektuebersicht erfolgreich (`stats.total=15`, `stats.open=10`, `stats.done=5`)
+- Mit `search: "Globaler Kontext"`: passender Task erfolgreich gefunden
 
 ## Current State (Implementation Notes)
 

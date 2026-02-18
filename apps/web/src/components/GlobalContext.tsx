@@ -60,18 +60,18 @@ export function GlobalContext({ isOpen, onClose }: GlobalContextProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">
+      <div className="bg-devai-surface border border-devai-border rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-devai-border">
           <div>
-            <h2 className="text-lg font-semibold text-gray-200">Global Context</h2>
-            <p className="text-xs text-gray-500">
+            <h2 className="text-lg font-semibold text-devai-text">Global Context</h2>
+            <p className="text-xs text-devai-text-muted">
               Context that will be included in every conversation with the AI
             </p>
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-200 transition-colors"
+            className="text-devai-text-secondary hover:text-devai-text transition-colors"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -83,7 +83,7 @@ export function GlobalContext({ isOpen, onClose }: GlobalContextProps) {
         <div className="flex-1 overflow-y-auto p-4">
           {loading ? (
             <div className="flex items-center justify-center py-8">
-              <div className="text-sm text-gray-500">Loading...</div>
+              <div className="text-sm text-devai-text-muted">Loading...</div>
             </div>
           ) : (
             <div className="space-y-4">
@@ -93,9 +93,9 @@ export function GlobalContext({ isOpen, onClose }: GlobalContextProps) {
                   type="checkbox"
                   checked={enabled}
                   onChange={(e) => setEnabled(e.target.checked)}
-                  className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-blue-600 focus:ring-blue-500"
+                  className="w-4 h-4 rounded border-devai-border bg-devai-bg text-devai-accent focus:ring-devai-accent"
                 />
-                <span className="text-sm text-gray-300">
+                <span className="text-sm text-devai-text-secondary">
                   Enable global context in conversations
                 </span>
               </label>
@@ -103,10 +103,10 @@ export function GlobalContext({ isOpen, onClose }: GlobalContextProps) {
               {/* Context Input */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-sm font-medium text-gray-400">
+                  <label className="text-sm font-medium text-devai-text-secondary">
                     Context Content
                   </label>
-                  <span className="text-xs text-gray-600">
+                  <span className="text-xs text-devai-text-muted">
                     {content.length} characters
                   </span>
                 </div>
@@ -115,9 +115,9 @@ export function GlobalContext({ isOpen, onClose }: GlobalContextProps) {
                   onChange={(e) => setContent(e.target.value)}
                   placeholder="Enter context information that should be available to the AI in every conversation..."
                   rows={12}
-                  className="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-mono"
+                  className="w-full bg-devai-bg border border-devai-border rounded-lg px-3 py-2 text-sm text-devai-text placeholder-devai-text-muted focus:outline-none focus:ring-2 focus:ring-devai-accent resize-none font-mono"
                 />
-                <p className="mt-2 text-xs text-gray-500">
+                <p className="mt-2 text-xs text-devai-text-muted">
                   This context will be prepended to every conversation. Use it for information about coding standards, architecture decisions, or other project-wide knowledge.
                 </p>
               </div>
@@ -140,7 +140,7 @@ export function GlobalContext({ isOpen, onClose }: GlobalContextProps) {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-700">
+        <div className="flex items-center justify-between px-4 py-3 border-t border-devai-border">
           <button
             onClick={handleClear}
             disabled={saving || loading}
@@ -152,14 +152,14 @@ export function GlobalContext({ isOpen, onClose }: GlobalContextProps) {
             <button
               onClick={onClose}
               disabled={saving}
-              className="px-4 py-2 text-sm text-gray-400 hover:text-gray-200 transition-colors"
+              className="px-4 py-2 text-sm text-devai-text-secondary hover:text-devai-text transition-colors"
             >
               Close
             </button>
             <button
               onClick={handleSave}
               disabled={saving || loading}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded transition-colors disabled:opacity-50"
+              className="px-4 py-2 bg-devai-accent hover:bg-devai-accent-hover text-white text-sm font-medium rounded transition-colors disabled:opacity-50"
             >
               {saving ? 'Saving...' : 'Save'}
             </button>

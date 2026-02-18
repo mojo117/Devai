@@ -873,18 +873,31 @@ function getAllTools(): ToolDefinition[] {
 
 // Get tool definition by name
 export function getToolDefinition(name: string): ToolDefinition | undefined {
-  return getAllTools().find((t) => t.name === name);
+  const normalized = normalizeToolName(name);
+  return getAllTools().find((t) => t.name === normalized);
 }
 
 // Check if a tool is whitelisted
 export function isToolWhitelisted(name: string): boolean {
-  return getAllTools().some((t) => t.name === name);
+  const normalized = normalizeToolName(name);
+  return getAllTools().some((t) => t.name === normalized);
 }
 
 // Check if a tool requires confirmation
 export function toolRequiresConfirmation(name: string): boolean {
   const tool = getToolDefinition(name);
   return tool?.requiresConfirmation ?? true; // Default to requiring confirmation for unknown tools
+}
+
+/**
+ * Normalize tool names to canonical registry format.
+ * Legacy dotted names like "fs.listFiles" are converted to "fs_listFiles".
+ */
+export function normalizeToolName(name: string): string {
+  const raw = String(name || '').trim();
+  if (!raw) return raw;
+  if (!raw.includes('.')) return raw;
+  return raw.replace(/\./g, '_');
 }
 
 // Convert to LLM tool format
