@@ -11,7 +11,6 @@ import { skillsRoutes } from './routes/skills.js';
 import { sessionsRoutes } from './routes/sessions.js';
 import { settingsRoutes } from './routes/settings.js';
 import { memoryRoutes } from './routes/memory.js';
-import { looperRoutes } from './routes/looper.js';
 import { SessionLogger } from './audit/sessionLogger.js';
 import { userfilesRoutes } from './routes/userfiles.js';
 import { authMiddleware, registerAuthRoutes } from './routes/auth.js';
@@ -75,7 +74,6 @@ await app.register(skillsRoutes, { prefix: '/api' });
 await app.register(sessionsRoutes, { prefix: '/api' });
 await app.register(settingsRoutes, { prefix: '/api' });
 await app.register(memoryRoutes, { prefix: '/api' });
-await app.register(looperRoutes, { prefix: '/api' });
 await app.register(websocketRoutes, { prefix: '/api' });
 await app.register(userfilesRoutes, { prefix: '/api' });
 

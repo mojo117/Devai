@@ -1,7 +1,6 @@
 import { appendFileSync, mkdirSync, readdirSync, unlinkSync, statSync } from 'fs';
 import { resolve, join } from 'path';
 import { sanitize } from './logger.js';
-import type { LooperStreamEvent } from '@devai/shared';
 
 const LOGS_DIR = resolve(process.cwd(), '../../var/logs');
 const MAX_RESULT_LENGTH = 2000;
@@ -153,75 +152,6 @@ export class SessionLogger {
   logError(error: string, agent?: string): void {
     const agentTag = agent ? ` (${agent})` : '';
     this.append(`### [${ts()}] Error${agentTag}\n\n\`\`\`\n${truncate(error)}\n\`\`\`\n\n`);
-  }
-
-  /** Log a LooperStreamEvent (from the looper engine). */
-  logLooperEvent(event: LooperStreamEvent): void {
-    const data = event.data as Record<string, unknown> | undefined;
-    if (!data) return;
-
-    switch (event.type) {
-      case 'thinking':
-        // Skip — too noisy
-        break;
-
-      case 'step': {
-        const decision = data.decision as Record<string, unknown> | undefined;
-        if (decision) {
-          this.logDecision(
-            String(decision.intent || ''),
-            decision.agent as string | undefined,
-            decision.toolName as string | undefined,
-            decision.reasoning as string | undefined,
-          );
-        }
-        break;
-      }
-
-      case 'tool_call':
-        this.logToolCall(
-          String(data.tool || data.toolName || 'unknown'),
-          (data.args || {}) as Record<string, unknown>,
-          data.agent as string | undefined,
-        );
-        break;
-
-      case 'tool_result':
-        this.logToolResult(
-          String(data.tool || data.toolName || 'unknown'),
-          Boolean(data.success),
-          data.output || data.result,
-          data.durationMs as number | undefined,
-        );
-        break;
-
-      case 'answer':
-        this.logAssistant(String(data.answer || ''));
-        break;
-
-      case 'clarify':
-        this.append(`### [${ts()}] Clarification\n\n${String(data.question || '')}\n\n`);
-        break;
-
-      case 'error':
-        this.logError(String(data.message || data.error || JSON.stringify(data)));
-        break;
-
-      case 'validation': {
-        const confidence = data.confidence ?? 'n/a';
-        const issues = Array.isArray(data.issues) ? data.issues.join(', ') : '';
-        this.append(`### [${ts()}] Self-Validation\n\nConfidence: ${confidence} | Issues: ${issues || 'none'}\n\n`);
-        break;
-      }
-
-      case 'action_pending':
-        this.append(`### [${ts()}] Action Pending — ${data.toolName || 'unknown'}\n\n${data.description || ''}\n\n`);
-        break;
-
-      default:
-        // Log unknown event types minimally
-        this.append(`### [${ts()}] ${event.type}\n\n\`\`\`json\n${truncate(JSON.stringify(data, null, 2))}\n\`\`\`\n\n`);
-    }
   }
 
   /** Log an AgentStreamEvent (from the multi-agent WebSocket chat). */

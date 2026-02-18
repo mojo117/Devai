@@ -47,7 +47,7 @@ export interface Config {
   // Persistence
   dbPath: string;
 
-  // Looper-AI
+  // Decision loop runtime tuning (legacy LOOPER_* env var names retained)
   looperMaxIterations: number;
   looperMaxConversationTokens: number;
   looperMaxToolRetries: number;
@@ -96,7 +96,7 @@ export function loadConfig(): Config {
 
     dbPath: process.env.DB_PATH || resolve(process.cwd(), "../../var/devai.db"),
 
-    // Looper-AI
+    // Decision loop runtime tuning (legacy env names for compatibility)
     looperMaxIterations: parseInt(process.env.LOOPER_MAX_ITERATIONS || "25", 10),
     looperMaxConversationTokens: parseInt(process.env.LOOPER_MAX_CONVERSATION_TOKENS || "120000", 10),
     looperMaxToolRetries: parseInt(process.env.LOOPER_MAX_TOOL_RETRIES || "3", 10),

@@ -24,7 +24,7 @@ Regeln:
   • agent "searcher" → Web-Suchen, Recherche (Tools: web_search, web_fetch, context_*)
   • agent "document_manager" → Dateien lesen/schreiben/organisieren (Tools: fs_*)
   • agent "commander" → Shell, Git, SSH, PM2 (Tools: bash_execute, ssh_execute, pm2_*, npm_*, git_*)
-  • Für memory_* Tools: agent ist egal (wird vom Looper direkt ausgeführt)
+  • Für memory_* Tools: agent ist egal (wird direkt im Coordinator-Loop ausgeführt)
 - intent "clarify": Nur wenn wirklich unklar ist was der User will. Stelle EINE fokussierte Frage.
 
 KRITISCH – toolName muss EXAKT ein Tool aus der Liste unten sein!

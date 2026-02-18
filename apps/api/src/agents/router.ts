@@ -10,18 +10,10 @@ import type {
   AgentName,
   AgentDefinition,
   AgentStreamEvent,
-  DelegationTask,
-  DelegationResult,
-  EscalationIssue,
-  EscalationIssueType,
-  EscalationResponse,
   UserQuestion,
   UserResponse,
-  ApprovalRequest,
-  ApprovalResponse,
   QualificationResult,
-  GatheredContext,
-  ExecutedTool,
+  TaskType,
   // Plan Mode types
   ChapoPerspective,
   DevoPerspective,
@@ -38,24 +30,20 @@ import { llmRouter } from '../llm/router.js';
 import { getToolsForLLM, toolRegistry } from '../tools/registry.js';
 import { mcpManager } from '../mcp/index.js';
 import { executeToolWithApprovalBridge } from '../actions/approvalBridge.js';
-import type { LLMMessage, ToolCall } from '../llm/types.js';
+import type { LLMMessage } from '../llm/types.js';
 
 // Agent definitions
 import { CHAPO_AGENT } from './chapo.js';
 import { DEVO_AGENT } from './devo.js';
 import { SCOUT_AGENT } from './scout.js';
-import { config } from '../config.js';
 import { getMessages, getTrustMode } from '../db/queries.js';
 import { rememberNote } from '../memory/workspaceMemory.js';
 import { getCombinedSystemContextBlock, warmSystemContextForSession } from './systemContext.js';
 import {
   classifyTaskComplexity,
   selectModel,
-  detectTargetAgent,
-  shouldSkipQualification,
-  shouldSkipReview,
 } from '../llm/modelSelector.js';
-import type { TaskComplexityLevel, ModelSelection } from './types.js';
+import { ChapoLoop } from './chapo-loop.js';
 
 export type SendEventFn = (event: AgentStreamEvent) => void;
 
@@ -151,6 +139,23 @@ function buildToolResultContent(result: { success: boolean; result?: unknown; er
   }
   const content = result.error ? `Error: ${result.error}` : 'Error: Tool failed without a message.';
   return { content, isError: true };
+}
+
+function buildPlanQualificationForComplexTask(userMessage: string): QualificationResult {
+  const lower = userMessage.toLowerCase();
+  const looksDevOps = /(deploy|pm2|server|ssh|infra|docker|nginx|k8s|kubernetes)/.test(lower);
+  const taskType: TaskType = looksDevOps ? 'devops' : 'mixed';
+
+  return {
+    taskType,
+    riskLevel: 'high',
+    complexity: 'complex',
+    targetAgent: looksDevOps ? 'devo' : null,
+    requiresApproval: false,
+    requiresClarification: false,
+    gatheredContext: { relevantFiles: [], fileContents: {} },
+    reasoning: 'Complex task routed directly to Plan Mode pre-qualification.',
+  };
 }
 
 // Get agent definition
@@ -267,164 +272,61 @@ export async function processRequest(
   stateManager.setGatheredInfo(sessionId, 'trustMode', trustMode);
 
   try {
-    // FAST PATH: Skip qualification for trivial/simple tasks
-    if (shouldSkipQualification(taskComplexity)) {
-      console.info('[agents] FAST PATH: Skipping qualification', { taskComplexity });
-      return executeSimpleTask(sessionId, userMessage, history, projectRoot, taskComplexity, modelSelection, sendEvent);
-    }
+    // Pre-loop gate: keep full qualification + Plan Mode for complex tasks.
+    if (taskComplexity === 'complex') {
+      stateManager.setPhase(sessionId, 'qualification');
+      stateManager.setActiveAgent(sessionId, 'chapo');
+      sendEvent({ type: 'agent_start', agent: 'chapo', phase: 'qualification' });
 
-    // STANDARD PATH: Full qualification for moderate/complex tasks
-    stateManager.setPhase(sessionId, 'qualification');
-    stateManager.setActiveAgent(sessionId, 'chapo');
-    sendEvent({ type: 'agent_start', agent: 'chapo', phase: 'qualification' });
+      const qualification = buildPlanQualificationForComplexTask(userMessage);
 
-    // Phase 1: CHAPO qualifies the task (with smart model selection)
-    const qualification = await runChapoQualification(
-      sessionId,
-      userMessage,
-      history,
-      projectRoot,
-      sendEvent,
-      modelSelection
-    );
+      stateManager.setQualificationResult(sessionId, qualification);
 
-    stateManager.setQualificationResult(sessionId, qualification);
-
-    // Check if user clarification needed
-    if (qualification.requiresClarification && qualification.clarificationQuestion) {
-      const question: UserQuestion = {
-        questionId: nanoid(),
-        question: qualification.clarificationQuestion,
-        fromAgent: 'chapo',
-        timestamp: new Date().toISOString(),
-      };
-      stateManager.addPendingQuestion(sessionId, question);
-      stateManager.setPhase(sessionId, 'waiting_user');
-      sendEvent({ type: 'user_question', question });
-      await stateManager.flushState(sessionId);
-
-      return `Ich habe eine Frage bevor ich fortfahren kann:\n\n${qualification.clarificationQuestion}`;
-    }
-
-    // Check if approval needed (risky task)
-    if (qualification.requiresApproval && !stateManager.isApprovalGranted(sessionId) && !approvalsBypassed) {
-      console.info('[agents] approval required', {
-        sessionId,
-        riskLevel: qualification.riskLevel,
-        targetAgent: qualification.targetAgent,
-      });
-      const approval: ApprovalRequest = {
-        approvalId: nanoid(),
-        description: `Task: ${userMessage}\n\nRisiko: ${qualification.riskLevel}\nZiel-Agent: ${qualification.targetAgent}`,
-        riskLevel: qualification.riskLevel,
-        actions: [],
-        fromAgent: 'chapo',
-        timestamp: new Date().toISOString(),
-      };
-      stateManager.addPendingApproval(sessionId, approval);
-      stateManager.setPhase(sessionId, 'waiting_user');
-      sendEvent({ type: 'approval_request', request: approval, sessionId });
-      await stateManager.flushState(sessionId);
-
-      return `Dieser Task erfordert deine Freigabe:\n\n**${userMessage}**\n\nRisiko-Level: ${qualification.riskLevel}\n\nBitte bestätige, dass ich fortfahren soll.`;
-    }
-
-    // Phase 2: Check if Plan Mode is required
-    if (determinePlanModeRequired(qualification)) {
-      console.info('[agents] Plan Mode required', {
-        sessionId,
-        taskType: qualification.taskType,
-        complexity: qualification.complexity,
-        riskLevel: qualification.riskLevel,
-      });
-
-      // Run Plan Mode - returns plan for user approval
-      const plan = await runPlanMode(
-        sessionId,
-        userMessage,
-        qualification,
-        sendEvent
-      );
-
-      if (approvalsBypassed) {
-        console.info('[agents] trusted mode: auto-approving generated plan', {
+      if (determinePlanModeRequired(qualification)) {
+        console.info('[agents] Plan Mode required', {
           sessionId,
-          planId: plan.planId,
+          taskType: qualification.taskType,
+          complexity: qualification.complexity,
+          riskLevel: qualification.riskLevel,
         });
-        return handlePlanApproval(
+
+        const plan = await runPlanMode(
           sessionId,
-          plan.planId,
-          true,
-          'Auto-approved in trusted mode',
+          userMessage,
+          qualification,
           sendEvent
         );
+
+        if (approvalsBypassed) {
+          console.info('[agents] trusted mode: auto-approving generated plan', {
+            sessionId,
+            planId: plan.planId,
+          });
+          return handlePlanApproval(
+            sessionId,
+            plan.planId,
+            true,
+            'Auto-approved in trusted mode',
+            sendEvent
+          );
+        }
+
+        return `**Plan erstellt und wartet auf Genehmigung**\n\n${plan.summary}\n\n**Risiko:** ${plan.overallRisk}\n**Tasks:** ${plan.tasks.length}\n\nBitte überprüfe den Plan und bestätige die Ausführung.`;
       }
-
-      // Plan Mode pauses here for user approval
-      // The plan will be executed after user approves via handlePlanApproval
-      return `**Plan erstellt und wartet auf Genehmigung**\n\n${plan.summary}\n\n**Risiko:** ${plan.overallRisk}\n**Tasks:** ${plan.tasks.length}\n\nBitte überprüfe den Plan und bestätige die Ausführung.`;
     }
 
-    // Phase 2: Execute based on task type (simple tasks without Plan Mode)
-    stateManager.setPhase(sessionId, 'execution');
-
-    let result: string;
-
-    if (qualification.taskType === 'exploration' || qualification.targetAgent === 'chapo') {
-      // CHAPO already executed the tools during qualification - return results directly
-      result = qualification.reasoning;
-    } else if (qualification.taskType === 'mixed' && qualification.targetAgent === null) {
-      // Mixed task — delegate to DEVO
-      result = await runParallelExecution(
-        sessionId,
-        userMessage,
-        qualification,
-        projectRoot,
-        sendEvent
-      );
-    } else if (qualification.targetAgent) {
-      // Single agent execution (DEVO)
-      result = await delegateToAgent(
-        sessionId,
-        qualification.targetAgent,
-        userMessage,
-        qualification.gatheredContext,
-        sendEvent
-      );
-    } else {
-      // Fallback: Chapo handles it (simple read-only task)
-      result = qualification.reasoning || 'Task verarbeitet.';
-    }
-
-    // Phase 3: Review (conditional - skip for simple low-risk tasks)
-    const skipReview = shouldSkipReview(taskComplexity, qualification.riskLevel, result);
-
-    let finalResult: string;
-    if (skipReview) {
-      console.info('[agents] Skipping review phase', { taskComplexity, riskLevel: qualification.riskLevel });
-      finalResult = result;
-    } else {
-      stateManager.setPhase(sessionId, 'review');
-      sendEvent({ type: 'agent_start', agent: 'chapo', phase: 'review' });
-
-      // CHAPO reviews the result
-      finalResult = await runChapoReview(
-        sessionId,
-        userMessage,
-        result,
-        sendEvent
-      );
-    }
-
-    // Send history
-    sendEvent({
-      type: 'agent_history',
-      entries: stateManager.getHistory(sessionId),
+    const loopProjectRoot = projectRoot || getProjectRootFromState(sessionId);
+    const loop = new ChapoLoop(sessionId, sendEvent, loopProjectRoot, modelSelection, {
+      selfValidationEnabled: taskComplexity !== 'trivial',
+      maxIterations: taskComplexity === 'trivial' ? 8 : 20,
     });
+    const loopResult = await loop.run(userMessage, history);
 
-    sendEvent({ type: 'agent_complete', agent: 'chapo', result: finalResult });
+    if (loopResult.status === 'error') {
+      stateManager.setPhase(sessionId, 'error');
+    }
 
-    return finalResult;
+    return loopResult.answer;
   } catch (error) {
     stateManager.setPhase(sessionId, 'error');
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -442,891 +344,6 @@ export async function processRequest(
 
     return `Fehler aufgetreten: ${errorMessage}\n\nBitte hilf mir, dieses Problem zu lösen.`;
   }
-}
-
-/**
- * FAST PATH: Execute simple tasks without qualification
- */
-async function executeSimpleTask(
-  sessionId: string,
-  userMessage: string,
-  conversationHistory: Array<{ role: string; content: string }>,
-  projectRoot: string | null,
-  taskComplexity: TaskComplexityLevel,
-  modelSelection: ModelSelection,
-  sendEvent: SendEventFn
-): Promise<string> {
-  const targetAgent = detectTargetAgent(userMessage);
-
-  console.info('[agents] executeSimpleTask', {
-    sessionId,
-    taskComplexity,
-    targetAgent,
-    model: `${modelSelection.provider}/${modelSelection.model}`,
-  });
-
-  stateManager.setPhase(sessionId, 'execution');
-  stateManager.setActiveAgent(sessionId, targetAgent);
-  sendEvent({ type: 'agent_start', agent: targetAgent, phase: 'execution' });
-
-  const agent = getAgent(targetAgent);
-  const agentToolNames = getToolsForAgent(targetAgent);
-  const tools = getToolsForLLM().filter((t) => agentToolNames.includes(t.name));
-  await warmSystemContextForSession(sessionId, projectRoot || getProjectRootFromState(sessionId));
-  const systemContextBlock = getCombinedSystemContextBlock(sessionId);
-
-  const systemPrompt = `${agent.systemPrompt}
-${systemContextBlock}
-${projectRoot ? `Working Directory: ${projectRoot}` : ''}
-
-WICHTIG: Dies ist eine einfache Anfrage. Führe sie DIREKT aus ohne zu fragen.`;
-
-  const messages: LLMMessage[] = [
-    ...conversationHistory
-      .filter(m => m.role === 'user' || m.role === 'assistant')
-      .map(m => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.content
-      })),
-    { role: 'user', content: userMessage },
-  ];
-
-  // Multi-turn execution: run LLM, execute tools, feed results back
-  let turn = 0;
-  const MAX_TURNS = 3;
-  let finalContent = '';
-
-  while (turn < MAX_TURNS) {
-    turn++;
-
-    const response = await llmRouter.generateWithFallback(
-      modelSelection.provider as 'anthropic' | 'openai' | 'gemini',
-      {
-        model: modelSelection.model,
-        messages,
-        systemPrompt,
-        tools,
-        toolsEnabled: true,
-      }
-    );
-
-    if (response.content) {
-      finalContent = response.content;
-    }
-
-    // No tool calls → LLM is done, use its text response
-    if (!response.toolCalls || response.toolCalls.length === 0) {
-      break;
-    }
-
-    // Add assistant message with tool calls to conversation
-    messages.push({
-      role: 'assistant',
-      content: response.content || '',
-      toolCalls: response.toolCalls,
-    });
-
-    const toolResults: { toolUseId: string; result: string; isError: boolean }[] = [];
-
-    for (const toolCall of response.toolCalls) {
-      sendEvent({
-        type: 'tool_call',
-        agent: targetAgent,
-        toolName: toolCall.name,
-        args: toolCall.arguments,
-      });
-
-      // Handle delegateToScout — spawn SCOUT for web/codebase research
-      if (toolCall.name === 'delegateToScout') {
-        const query = toolCall.arguments.query as string;
-        const scope = (toolCall.arguments.scope as ScoutScope) || 'both';
-        const context = toolCall.arguments.context as string | undefined;
-
-        sendEvent({
-          type: 'agent_thinking',
-          agent: targetAgent,
-          status: `Spawne SCOUT für: ${query}`,
-        });
-
-        try {
-          const scoutResult = await spawnScout(sessionId, query, { scope, context, sendEvent });
-          sendEvent({
-            type: 'tool_result',
-            agent: targetAgent,
-            toolName: toolCall.name,
-            result: scoutResult,
-            success: true,
-          });
-          toolResults.push({
-            toolUseId: toolCall.id,
-            result: JSON.stringify(scoutResult, null, 2),
-            isError: false,
-          });
-        } catch (error) {
-          const errMsg = error instanceof Error ? error.message : 'SCOUT spawn failed';
-          sendEvent({
-            type: 'tool_result',
-            agent: targetAgent,
-            toolName: toolCall.name,
-            result: { error: errMsg },
-            success: false,
-          });
-          toolResults.push({
-            toolUseId: toolCall.id,
-            result: `Error: ${errMsg}`,
-            isError: true,
-          });
-        }
-        continue;
-      }
-
-      // Handle delegateToDevo — actually delegate
-      if (toolCall.name === 'delegateToKoda' || toolCall.name === 'delegateToDevo') {
-        const delegateAgent: AgentName = 'devo';
-        const taskDesc = (toolCall.arguments.task as string) || userMessage;
-
-        sendEvent({
-          type: 'agent_thinking',
-          agent: targetAgent,
-          status: `Delegiere an ${delegateAgent.toUpperCase()}: ${taskDesc}`,
-        });
-
-        try {
-          const delegationResult = await delegateToAgent(
-            sessionId,
-            delegateAgent,
-            taskDesc,
-            { relevantFiles: [], fileContents: {} },
-            sendEvent
-          );
-          sendEvent({
-            type: 'tool_result',
-            agent: targetAgent,
-            toolName: toolCall.name,
-            result: { delegated: true, agent: delegateAgent },
-            success: true,
-          });
-          toolResults.push({
-            toolUseId: toolCall.id,
-            result: delegationResult,
-            isError: false,
-          });
-        } catch (error) {
-          const errMsg = error instanceof Error ? error.message : 'Delegation failed';
-          toolResults.push({
-            toolUseId: toolCall.id,
-            result: `Error: ${errMsg}`,
-            isError: true,
-          });
-        }
-        continue;
-      }
-
-      // askUser / requestApproval — not supported in fast path, tell LLM to answer directly
-      if (toolCall.name === 'askUser' || toolCall.name === 'requestApproval') {
-        toolResults.push({
-          toolUseId: toolCall.id,
-          result: 'Dies ist eine einfache Anfrage — beantworte sie direkt ohne Rückfragen.',
-          isError: true,
-        });
-        continue;
-      }
-
-      // Regular tool execution
-      const toolResult = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
-        onActionPending: (action) => {
-          sendEvent({
-            type: 'action_pending',
-            actionId: action.id,
-            toolName: action.toolName,
-            toolArgs: action.toolArgs,
-            description: action.description,
-            preview: action.preview,
-          });
-        },
-      });
-
-      sendEvent({
-        type: 'tool_result',
-        agent: targetAgent,
-        toolName: toolCall.name,
-        result: toolResult.result,
-        success: toolResult.success,
-      });
-
-      const content = buildToolResultContent(toolResult);
-      toolResults.push({
-        toolUseId: toolCall.id,
-        result: content.content,
-        isError: content.isError,
-      });
-    }
-
-    // Feed tool results back to LLM for the next turn
-    messages.push({
-      role: 'user',
-      content: '',
-      toolResults,
-    });
-  }
-
-  const result = finalContent;
-
-  sendEvent({ type: 'agent_complete', agent: targetAgent, result });
-  sendEvent({
-    type: 'agent_history',
-    entries: stateManager.getHistory(sessionId),
-  });
-
-  return result;
-}
-
-/**
- * CHAPO: Task Qualification Phase
- */
-async function runChapoQualification(
-  sessionId: string,
-  userMessage: string,
-  conversationHistory: Array<{ role: string; content: string }>,
-  projectRoot: string | null,
-  sendEvent: SendEventFn,
-  modelSelection?: ModelSelection
-): Promise<QualificationResult> {
-  sendEvent({ type: 'agent_thinking', agent: 'chapo', status: 'Analysiere Task...' });
-
-  const chapo = getAgent('chapo');
-  const chapoToolNames = getToolsForAgent('chapo');
-  const tools = getToolsForLLM().filter((t) => chapoToolNames.includes(t.name));
-
-  // Use provided model or default to agent's model
-  const provider = (modelSelection?.provider || 'anthropic') as 'anthropic' | 'openai' | 'gemini';
-  const model = modelSelection?.model || chapo.model;
-  await warmSystemContextForSession(sessionId, projectRoot || getProjectRootFromState(sessionId));
-  const systemContextBlock = getCombinedSystemContextBlock(sessionId);
-
-  const systemPrompt = `${chapo.systemPrompt}
-${systemContextBlock}
-${projectRoot ? `Working Directory: ${projectRoot}` : ''}
-
-WICHTIG: Bei Read-Only Anfragen (Dateien auflisten, lesen, suchen, Git-Status) führe das Tool SOFORT aus.
-Gib NUR JSON zurück wenn du an DEVO delegieren musst.
-
-Falls Delegation nötig:
-\`\`\`json
-{
-  "taskType": "code_change|devops|exploration|mixed",
-  "riskLevel": "low|medium|high",
-  "targetAgent": "devo|chapo",
-  "requiresApproval": true/false,
-  "requiresClarification": false,
-  "reasoning": "..."
-}
-\`\`\``;
-
-  const messages: LLMMessage[] = [
-    ...conversationHistory
-      .filter(m => m.role === 'user' || m.role === 'assistant')
-      .map(m => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.content
-      })),
-    { role: 'user', content: userMessage },
-  ];
-
-  const gatheredContext: GatheredContext = {
-    relevantFiles: [],
-    fileContents: {},
-  };
-
-  // Run CHAPO with tools for context gathering
-  let turn = 0;
-  const MAX_TURNS = 5;
-  let finalContent = '';
-
-  while (turn < MAX_TURNS) {
-    turn++;
-
-    const response = await llmRouter.generateWithFallback(provider, {
-      model,
-      messages,
-      systemPrompt,
-      tools,
-      toolsEnabled: true,
-    });
-
-    if (response.content) {
-      finalContent = response.content;
-    }
-
-    if (!response.toolCalls || response.toolCalls.length === 0) {
-      break;
-    }
-
-    // Add assistant message with tool calls once
-    messages.push({
-      role: 'assistant',
-      content: response.content || '',
-      toolCalls: response.toolCalls,
-    });
-
-    const toolResults: { toolUseId: string; result: string; isError: boolean }[] = [];
-
-    // Execute tools (read-only for CHAPO)
-    // Meta-tools (delegation) are handled specially
-    for (const toolCall of response.toolCalls) {
-      sendEvent({
-        type: 'tool_call',
-        agent: 'chapo',
-        toolName: toolCall.name,
-        args: toolCall.arguments,
-      });
-
-      // Handle delegation meta-tools specially
-      if (toolCall.name === 'delegateToScout') {
-        // CHAPO wants to spawn SCOUT for exploration/web search
-        const query = toolCall.arguments.query as string;
-        const scope = (toolCall.arguments.scope as ScoutScope) || 'both';
-        const context = toolCall.arguments.context as string | undefined;
-
-        sendEvent({
-          type: 'agent_thinking',
-          agent: 'chapo',
-          status: `Spawne SCOUT für: ${query}`,
-        });
-
-        try {
-          const scoutResult = await spawnScout(sessionId, query, { scope, context, sendEvent });
-          sendEvent({
-            type: 'tool_result',
-            agent: 'chapo',
-            toolName: toolCall.name,
-            result: scoutResult,
-            success: true,
-          });
-          toolResults.push({
-            toolUseId: toolCall.id,
-            result: JSON.stringify(scoutResult, null, 2),
-            isError: false,
-          });
-        } catch (error) {
-          const errMsg = error instanceof Error ? error.message : 'SCOUT spawn failed';
-          sendEvent({
-            type: 'tool_result',
-            agent: 'chapo',
-            toolName: toolCall.name,
-            result: { error: errMsg },
-            success: false,
-          });
-          toolResults.push({
-            toolUseId: toolCall.id,
-            result: `Error: ${errMsg}`,
-            isError: true,
-          });
-        }
-        continue;
-      }
-
-      if (toolCall.name === 'delegateToKoda' || toolCall.name === 'delegateToDevo') {
-        // These require proper delegation via the main flow - return qualification result
-        const taskDesc = toolCall.arguments.task as string;
-
-        sendEvent({
-          type: 'tool_result',
-          agent: 'chapo',
-          toolName: toolCall.name,
-          result: { delegating: true, targetAgent: 'devo', task: taskDesc },
-          success: true,
-        });
-
-        // Return early with delegation result
-        return {
-          taskType: 'code_change',
-          riskLevel: 'medium',
-          complexity: 'moderate',
-          targetAgent: 'devo',
-          requiresApproval: false,
-          requiresClarification: false,
-          gatheredContext: {
-            ...gatheredContext,
-            delegationTask: taskDesc,
-            delegationContext: toolCall.arguments.context,
-            delegationFiles: toolCall.arguments.files as string[] | undefined,
-          },
-          reasoning: `CHAPO delegiert an DEVO: ${taskDesc}`,
-        };
-      }
-
-      if (toolCall.name === 'askUser' || toolCall.name === 'requestApproval') {
-        // Handle user questions and approval requests
-        const question = toolCall.arguments.question || toolCall.arguments.description;
-        toolResults.push({
-          toolUseId: toolCall.id,
-          result: `Frage an User: ${question}`,
-          isError: false,
-        });
-        sendEvent({
-          type: 'tool_result',
-          agent: 'chapo',
-          toolName: toolCall.name,
-          result: { question },
-          success: true,
-        });
-        continue;
-      }
-
-      // Regular tool execution
-      const result = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
-        onActionPending: (action) => {
-          sendEvent({
-            type: 'action_pending',
-            actionId: action.id,
-            toolName: action.toolName,
-            toolArgs: action.toolArgs,
-            description: action.description,
-            preview: action.preview,
-          });
-        },
-      });
-
-      sendEvent({
-        type: 'tool_result',
-        agent: 'chapo',
-        toolName: toolCall.name,
-        result: result.result,
-        success: result.success,
-      });
-
-      // Track gathered files
-      if (toolCall.name === 'fs_readFile' && result.success) {
-        const path = toolCall.arguments.path as string;
-        gatheredContext.relevantFiles.push(path);
-        gatheredContext.fileContents[path] = (result.result as { content: string }).content;
-        stateManager.addGatheredFile(sessionId, path);
-      }
-
-      if (toolCall.name === 'git_status' && result.success) {
-        gatheredContext.gitStatus = result.result as GatheredContext['gitStatus'];
-      }
-
-      const toolResult = buildToolResultContent(result);
-      toolResults.push({
-        toolUseId: toolCall.id,
-        result: toolResult.content,
-        isError: toolResult.isError,
-      });
-    }
-
-    // Add tool results as a single user message
-    messages.push({
-      role: 'user',
-      content: '',
-      toolResults,
-    });
-  }
-
-  // Parse qualification result from response
-  const jsonMatch = finalContent.match(/```json\n([\s\S]*?)\n```/);
-  if (jsonMatch) {
-    try {
-      const parsed = JSON.parse(jsonMatch[1]);
-      return {
-        taskType: parsed.taskType || 'unclear',
-        riskLevel: parsed.riskLevel || 'medium',
-        complexity: 'moderate',
-        targetAgent: parsed.targetAgent === 'null' ? null : parsed.targetAgent,
-        requiresApproval: parsed.requiresApproval ?? false,
-        requiresClarification: parsed.requiresClarification ?? false,
-        clarificationQuestion: parsed.clarificationQuestion,
-        gatheredContext,
-        reasoning: parsed.reasoning || '',
-      };
-    } catch {
-      // Fallback if JSON parsing fails
-    }
-  }
-
-  // Default qualification - Act First, Ask Later
-  // If CHAPO didn't output JSON, it likely executed tools directly (exploration)
-  // Don't ask for clarification - let the results speak
-  return {
-    taskType: 'exploration',
-    riskLevel: 'low',
-    complexity: 'simple',
-    targetAgent: 'chapo',  // CHAPO handles it directly
-    requiresApproval: false,
-    requiresClarification: false,  // NEVER ask by default!
-    gatheredContext,
-    reasoning: finalContent || 'Read-Only Exploration ausgeführt',
-  };
-}
-
-/**
- * Delegate task to a specific agent (DEVO)
- */
-async function delegateToAgent(
-  sessionId: string,
-  targetAgent: AgentName,
-  task: string,
-  context: GatheredContext,
-  sendEvent: SendEventFn
-): Promise<string> {
-  stateManager.setActiveAgent(sessionId, targetAgent);
-  sendEvent({
-    type: 'agent_switch',
-    from: 'chapo',
-    to: targetAgent,
-    reason: 'Delegiere Aufgabe an DEVO',
-  });
-  sendEvent({ type: 'delegation', from: 'chapo', to: targetAgent, task });
-
-  const agent = getAgent(targetAgent);
-  const agentToolNames = getToolsForAgent(targetAgent);
-  const tools = getToolsForLLM().filter((t) => agentToolNames.includes(t.name));
-  const systemContextBlock = getCombinedSystemContextBlock(sessionId);
-
-  const contextSummary = context.relevantFiles.length > 0
-    ? `\n\nRelevante Dateien:\n${context.relevantFiles.join('\n')}`
-    : '';
-
-  const gitStatusSummary = context.gitStatus
-    ? `\n\nGit Status:\n- Branch: ${context.gitStatus.branch}\n- Modified: ${context.gitStatus.modified.join(', ') || 'none'}`
-    : '';
-
-  const systemPrompt = `${agent.systemPrompt}
-${systemContextBlock}
-KONTEXT VON CHAPO:
-${contextSummary}${gitStatusSummary}
-
-AUFGABE: ${task}
-
-Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
-
-  const messages: LLMMessage[] = [
-    { role: 'user', content: task },
-  ];
-
-  const executedTools: ExecutedTool[] = [];
-  let turn = 0;
-  const MAX_TURNS = 10;
-  let finalContent = '';
-
-  while (turn < MAX_TURNS) {
-    turn++;
-    sendEvent({ type: 'agent_thinking', agent: targetAgent, status: `Turn ${turn}...` });
-
-    const response = await llmRouter.generate('anthropic', {
-      model: agent.model,
-      messages,
-      systemPrompt,
-      tools,
-      toolsEnabled: true,
-    });
-
-    if (response.content) {
-      finalContent = response.content;
-    }
-
-    if (!response.toolCalls || response.toolCalls.length === 0) {
-      break;
-    }
-
-    // Add assistant message with tool calls once
-    messages.push({
-      role: 'assistant',
-      content: response.content || '',
-      toolCalls: response.toolCalls,
-    });
-
-    const toolResults: { toolUseId: string; result: string; isError: boolean }[] = [];
-
-    // Execute tools
-    for (const toolCall of response.toolCalls) {
-      // Check for escalation
-      if (toolCall.name === 'escalateToChapo') {
-        // Build proper EscalationIssue from tool arguments
-        const args = toolCall.arguments as {
-          issueType?: string;
-          description?: string;
-          context?: Record<string, unknown>;
-          suggestedSolutions?: string[];
-        };
-        const escalationIssue: EscalationIssue = {
-          issueId: nanoid(),
-          fromAgent: targetAgent,
-          issueType: (args.issueType as EscalationIssueType) || 'error',
-          description: args.description || 'Unknown issue',
-          context: args.context || {},
-          suggestedSolutions: args.suggestedSolutions,
-          timestamp: new Date().toISOString(),
-        };
-        const escalation = await handleEscalation(
-          sessionId,
-          targetAgent,
-          escalationIssue,
-          sendEvent
-        );
-
-        if (escalation.action === 'abort') {
-          return `Task abgebrochen: ${escalation.instructions}`;
-        }
-
-        toolResults.push({
-          toolUseId: toolCall.id,
-          result: `CHAPO Antwort: ${escalation.instructions || escalation.alternativeApproach}`,
-          isError: false,
-        });
-        continue;
-      }
-
-      // Verify tool is in agent's allowed list (security check)
-      if (!canAgentUseTool(targetAgent, toolCall.name)) {
-        sendEvent({
-          type: 'tool_result',
-          agent: targetAgent,
-          toolName: toolCall.name,
-          result: `Error: Tool "${toolCall.name}" is not available to ${targetAgent}`,
-          success: false,
-        });
-
-        toolResults.push({
-          toolUseId: toolCall.id,
-          result: `Error: Tool "${toolCall.name}" is not available to ${targetAgent}`,
-          isError: true,
-        });
-        continue;
-      }
-
-      sendEvent({
-        type: 'tool_call',
-        agent: targetAgent,
-        toolName: toolCall.name,
-        args: toolCall.arguments,
-      });
-
-      const startTime = Date.now();
-      const result = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
-        onActionPending: (action) => {
-          sendEvent({
-            type: 'action_pending',
-            actionId: action.id,
-            toolName: action.toolName,
-            toolArgs: action.toolArgs,
-            description: action.description,
-            preview: action.preview,
-          });
-        },
-      });
-      const duration = Date.now() - startTime;
-
-      executedTools.push({
-        name: toolCall.name,
-        args: toolCall.arguments,
-        result: result.result,
-        success: result.success,
-        duration,
-        timestamp: new Date().toISOString(),
-      });
-
-      sendEvent({
-        type: 'tool_result',
-        agent: targetAgent,
-        toolName: toolCall.name,
-        result: result.result,
-        success: result.success,
-      });
-
-      const toolResult = buildToolResultContent(result);
-      toolResults.push({
-        toolUseId: toolCall.id,
-        result: toolResult.content,
-        isError: toolResult.isError,
-      });
-    }
-
-    // Add tool results as a single user message
-    messages.push({
-      role: 'user',
-      content: '',
-      toolResults,
-    });
-  }
-
-  // Log to history
-  stateManager.addHistoryEntry(
-    sessionId,
-    targetAgent,
-    'execute_tool',
-    task,
-    finalContent,
-    {
-      toolCalls: executedTools.map((t) => ({
-        id: nanoid(),
-        name: t.name,
-        arguments: t.args,
-        result: t.result,
-        duration: t.duration,
-      })),
-      status: 'success',
-    }
-  );
-
-  sendEvent({ type: 'agent_complete', agent: targetAgent, result: finalContent });
-
-  return finalContent;
-}
-
-/**
- * Run parallel execution (delegates to DEVO)
- */
-async function runParallelExecution(
-  sessionId: string,
-  task: string,
-  qualification: QualificationResult,
-  projectRoot: string | null,
-  sendEvent: SendEventFn
-): Promise<string> {
-  // With unified DEVO agent, just delegate directly
-  return delegateToAgent(sessionId, 'devo', task, qualification.gatheredContext, sendEvent);
-}
-
-/**
- * Handle escalation from DEVO
- */
-async function handleEscalation(
-  sessionId: string,
-  fromAgent: AgentName,
-  issue: Partial<EscalationIssue>,
-  sendEvent: SendEventFn
-): Promise<EscalationResponse> {
-  const escalation: EscalationIssue = {
-    issueId: nanoid(),
-    fromAgent,
-    issueType: issue.issueType || 'error',
-    description: issue.description || 'Unknown issue',
-    context: issue.context || {},
-    suggestedSolutions: issue.suggestedSolutions,
-    timestamp: new Date().toISOString(),
-  };
-
-  sendEvent({ type: 'escalation', from: fromAgent, issue: escalation });
-
-  stateManager.addHistoryEntry(
-    sessionId,
-    fromAgent,
-    'escalate',
-    escalation,
-    null,
-    { status: 'escalated' }
-  );
-
-  // Switch to CHAPO for handling
-  stateManager.setActiveAgent(sessionId, 'chapo');
-  sendEvent({
-    type: 'agent_switch',
-    from: fromAgent,
-    to: 'chapo',
-    reason: 'Eskalation behandeln',
-  });
-
-  // CHAPO analyzes the issue
-  const chapo = getAgent('chapo');
-  const systemContextBlock = getCombinedSystemContextBlock(sessionId);
-  const response = await llmRouter.generate('anthropic', {
-    model: chapo.model,
-    messages: [
-      {
-        role: 'user',
-        content: `ESKALATION von ${fromAgent.toUpperCase()}:
-
-Problem-Typ: ${escalation.issueType}
-Beschreibung: ${escalation.description}
-${escalation.suggestedSolutions ? `Vorgeschlagene Lösungen: ${escalation.suggestedSolutions.join(', ')}` : ''}
-
-Analysiere das Problem und entscheide:
-1. Kann ich eine alternative Lösung vorschlagen?
-2. Muss ich den User fragen?
-3. Soll der Task abgebrochen werden?
-
-Antworte mit einer klaren Handlungsanweisung für ${fromAgent.toUpperCase()}.`,
-      },
-    ],
-    systemPrompt: `${chapo.systemPrompt}\n${systemContextBlock}`,
-    toolsEnabled: false,
-  });
-
-  stateManager.addHistoryEntry(
-    sessionId,
-    'chapo',
-    'respond',
-    escalation,
-    response.content,
-    { status: 'success' }
-  );
-
-  return {
-    issueId: escalation.issueId,
-    resolved: true,
-    action: 'alternative',
-    instructions: response.content,
-  };
-}
-
-/**
- * CHAPO: Review Phase
- */
-async function runChapoReview(
-  sessionId: string,
-  originalTask: string,
-  executionResult: string,
-  sendEvent: SendEventFn
-): Promise<string> {
-  stateManager.setActiveAgent(sessionId, 'chapo');
-  sendEvent({ type: 'agent_thinking', agent: 'chapo', status: 'Überprüfe Ergebnis...' });
-
-  const chapo = getAgent('chapo');
-  const systemContextBlock = getCombinedSystemContextBlock(sessionId);
-  const history = stateManager.getHistory(sessionId);
-
-  const historySummary = history
-    .slice(-10)
-    .map((e) => `[${e.agent}] ${e.action}: ${e.status}`)
-    .join('\n');
-
-  const response = await llmRouter.generate('anthropic', {
-    model: chapo.model,
-    messages: [
-      {
-        role: 'user',
-        content: `REVIEW PHASE
-
-Original-Anfrage: ${originalTask}
-
-Ausführungs-Ergebnis:
-${executionResult}
-
-History:
-${historySummary}
-
-Erstelle eine Zusammenfassung für den User:
-1. Was wurde gemacht?
-2. Gab es Probleme?
-3. Was sind die nächsten Schritte (falls nötig)?`,
-      },
-    ],
-    systemPrompt: `${chapo.systemPrompt}\n${systemContextBlock}`,
-    toolsEnabled: false,
-  });
-
-  stateManager.addHistoryEntry(
-    sessionId,
-    'chapo',
-    'review',
-    { originalTask, executionResult },
-    response.content,
-    { status: 'success' }
-  );
-
-  return response.content;
 }
 
 /**
@@ -1880,6 +897,49 @@ export async function runPlanMode(
   return finalPlan || plan;
 }
 
+async function executePlanTaskWithLoop(
+  sessionId: string,
+  task: PlanTask,
+  plan: ExecutionPlan,
+  sendEvent: SendEventFn
+): Promise<string> {
+  const projectRoot = getProjectRootFromState(sessionId);
+  const complexity = classifyTaskComplexity(task.description);
+  const modelSelection = selectModel(complexity);
+
+  const loop = new ChapoLoop(sessionId, sendEvent, projectRoot, modelSelection, {
+    selfValidationEnabled: true,
+    maxIterations: 20,
+  });
+
+  const taskPrompt = `GENEHMIGTER PLAN-TASK
+
+Task-ID: ${task.taskId}
+Titel: ${task.subject}
+Zugewiesener Agent: ${task.assignedAgent}
+Beschreibung: ${task.description}
+${task.activeForm ? `Aktive Form: ${task.activeForm}` : ''}
+${plan.devoPerspective?.servicesAffected?.length ? `Betroffene Services: ${plan.devoPerspective.servicesAffected.join(', ')}` : ''}
+
+Führe diesen Task jetzt aus und gib ein präzises Ergebnis zurück.
+WICHTIG:
+- Kein neuer Gesamtplan
+- Nur diese Task ausführen
+- Nur bei absolutem Blocker eine Rückfrage stellen`;
+
+  const result = await loop.run(taskPrompt, []);
+
+  if (result.status === 'completed') {
+    return result.answer;
+  }
+
+  if (result.status === 'waiting_for_user') {
+    throw new Error(`Task benötigt Rückfrage: ${result.question || result.answer}`);
+  }
+
+  throw new Error(result.answer || 'Task execution failed in decision loop');
+}
+
 /**
  * Execute an approved plan
  */
@@ -1938,17 +998,10 @@ export async function executePlan(
     });
 
     try {
-      // Delegate to assigned agent
-      const context: GatheredContext = {
-        relevantFiles: plan.devoPerspective?.servicesAffected || [],
-        fileContents: {},
-      };
-
-      const result = await delegateToAgent(
+      const result = await executePlanTaskWithLoop(
         sessionId,
-        nextTask.assignedAgent,
-        nextTask.description,
-        context,
+        nextTask,
+        plan,
         sendEvent
       );
 
