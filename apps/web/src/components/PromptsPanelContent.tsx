@@ -1,38 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import { fetchLooperPrompts } from '../api';
-import type { LooperPrompt } from '../types';
+import type { LooperPromptsResponse } from '../types';
+import { useAsyncData } from '../hooks/useAsyncData';
+
+interface PromptsData extends LooperPromptsResponse {
+  loadedAt: string;
+}
 
 export function PromptsPanelContent() {
-  const [prompts, setPrompts] = useState<LooperPrompt[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [loadedAt, setLoadedAt] = useState<string | null>(null);
-
-  const loadPrompts = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await fetchLooperPrompts();
-      setPrompts(result.prompts);
-      setLoadedAt(new Date().toISOString());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load prompts');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    let isMounted = true;
-    const run = async () => {
-      if (!isMounted) return;
-      await loadPrompts();
-    };
-    void run();
-    return () => {
-      isMounted = false;
-    };
+  const fetchWithTimestamp = useCallback(async (): Promise<PromptsData> => {
+    const result = await fetchLooperPrompts();
+    return { ...result, loadedAt: new Date().toISOString() };
   }, []);
+
+  const { data, loading, error, refresh } = useAsyncData(fetchWithTimestamp, []);
+
+  const prompts = data?.prompts ?? [];
+  const loadedAt = data?.loadedAt ?? null;
 
   return (
     <div className="p-4">
@@ -51,7 +35,7 @@ export function PromptsPanelContent() {
         <div className="flex items-center gap-2">
           {loading && <span className="text-[10px] text-devai-text-muted">Loading...</span>}
           <button
-            onClick={() => void loadPrompts()}
+            onClick={refresh}
             className="text-[10px] text-devai-text-secondary hover:text-devai-text disabled:opacity-50"
             disabled={loading}
           >

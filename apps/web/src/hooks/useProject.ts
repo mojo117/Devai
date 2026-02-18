@@ -1,6 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { fetchProject, refreshProject } from '../api';
 import type { ProjectContext } from '../types';
+import { useAsyncData } from './useAsyncData';
+
+interface ProjectData {
+  context: ProjectContext;
+  loadedAt: string;
+}
 
 export interface UseProjectReturn {
   projectContext: ProjectContext | null;
@@ -14,41 +20,36 @@ export function useProject(
   projectRoot: string | undefined,
   onError?: (msg: string) => void
 ): UseProjectReturn {
-  const [projectContext, setProjectContext] = useState<ProjectContext | null>(null);
-  const [projectContextLoadedAt, setProjectContextLoadedAt] = useState<string | null>(null);
-  const [projectLoading, setProjectLoading] = useState(false);
+  const shouldRefreshRef = useRef(false);
 
-  // Load project context
+  const fetchFn = useCallback(async (): Promise<ProjectData> => {
+    const fetcher = shouldRefreshRef.current ? refreshProject : fetchProject;
+    shouldRefreshRef.current = false;
+    const data = await fetcher(projectRoot!);
+    return { context: data.context, loadedAt: new Date().toISOString() };
+  }, [projectRoot]);
+
+  const { data, loading, error, refresh } = useAsyncData(
+    fetchFn,
+    [projectRoot],
+    { enabled: isAuthed && !!projectRoot },
+  );
+
+  // Forward errors to parent callback
   useEffect(() => {
-    if (!isAuthed || !projectRoot) return;
-    setProjectLoading(true);
-    fetchProject(projectRoot)
-      .then((data) => {
-        setProjectContext(data.context);
-        setProjectContextLoadedAt(new Date().toISOString());
-      })
-      .catch((err) => onError?.(err.message))
-      .finally(() => setProjectLoading(false));
-  }, [isAuthed, projectRoot, onError]);
+    if (error) onError?.(error);
+  }, [error, onError]);
 
   const handleRefreshProject = useCallback(async () => {
     if (!projectRoot) return;
-    setProjectLoading(true);
-    try {
-      const data = await refreshProject(projectRoot);
-      setProjectContext(data.context);
-      setProjectContextLoadedAt(new Date().toISOString());
-    } catch (err) {
-      onError?.(err instanceof Error ? err.message : 'Failed to refresh project');
-    } finally {
-      setProjectLoading(false);
-    }
-  }, [projectRoot, onError]);
+    shouldRefreshRef.current = true;
+    refresh();
+  }, [projectRoot, refresh]);
 
   return {
-    projectContext,
-    projectContextLoadedAt,
-    projectLoading,
+    projectContext: data?.context ?? null,
+    projectContextLoadedAt: data?.loadedAt ?? null,
+    projectLoading: loading,
     handleRefreshProject,
   };
 }

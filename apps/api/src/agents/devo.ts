@@ -8,6 +8,7 @@
 
 import type { AgentDefinition } from './types.js';
 import { DEVO_SYSTEM_PROMPT } from '../prompts/devo.js';
+import { registerMetaTools, registerAgentTools } from '../tools/registry.js';
 
 export const DEVO_AGENT: AgentDefinition = {
   name: 'devo',
@@ -106,3 +107,7 @@ export const DEVO_META_TOOLS = [
     requiresConfirmation: false,
   },
 ];
+
+// Register DEVO's meta-tools and agent access in the unified registry
+registerMetaTools(DEVO_META_TOOLS, 'devo');
+registerAgentTools('devo', DEVO_AGENT.tools);

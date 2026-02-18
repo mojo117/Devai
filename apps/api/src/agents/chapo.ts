@@ -7,6 +7,7 @@
 
 import type { AgentDefinition } from './types.js';
 import { CHAPO_SYSTEM_PROMPT } from '../prompts/chapo.js';
+import { registerMetaTools, registerAgentTools } from '../tools/registry.js';
 
 export const CHAPO_AGENT: AgentDefinition = {
   name: 'chapo',
@@ -150,3 +151,7 @@ export const CHAPO_META_TOOLS = [
     requiresConfirmation: false,
   },
 ];
+
+// Register CHAPO's meta-tools and agent access in the unified registry
+registerMetaTools(CHAPO_META_TOOLS, 'chapo');
+registerAgentTools('chapo', CHAPO_AGENT.tools);

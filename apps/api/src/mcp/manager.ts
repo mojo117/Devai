@@ -10,6 +10,7 @@ import { loadMcpConfig } from './config.js';
 import type { McpServerConfig } from './config.js';
 import type { McpToolInfo } from './client.js';
 import type { ToolDefinition } from '../tools/registry.js';
+import { toolRegistry } from '../tools/registry.js';
 import type { ToolExecutionResult } from '../tools/executor.js';
 
 interface McpToolMapping {
@@ -97,12 +98,13 @@ class McpManager {
 
       this.toolDefinitions.push(toolDef);
 
-      // Track per-agent access
+      // Track per-agent access (local map + unified registry)
       for (const agent of serverConfig.enabledForAgents) {
         if (!this.agentToolAccess.has(agent)) {
           this.agentToolAccess.set(agent, []);
         }
         this.agentToolAccess.get(agent)!.push(prefixedName);
+        toolRegistry.grantAccess(agent, prefixedName);
       }
     }
   }

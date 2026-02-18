@@ -35,7 +35,7 @@ import type {
 } from './types.js';
 import * as stateManager from './stateManager.js';
 import { llmRouter } from '../llm/router.js';
-import { getToolsForLLM } from '../tools/registry.js';
+import { getToolsForLLM, toolRegistry } from '../tools/registry.js';
 import { mcpManager } from '../mcp/index.js';
 import { executeToolWithApprovalBridge } from '../actions/approvalBridge.js';
 import type { LLMMessage, ToolCall } from '../llm/types.js';
@@ -158,16 +158,22 @@ export function getAgent(name: AgentName): AgentDefinition {
   return AGENTS[name];
 }
 
-// Get tools for a specific agent (native + MCP)
+// Get tools for a specific agent (native + MCP + meta — via unified registry)
 export function getToolsForAgent(agent: AgentName): string[] {
-  const nativeTools = AGENTS[agent].tools;
+  // Primary source: unified registry (includes native + meta tools registered at module load)
+  const registryTools = toolRegistry.getAgentTools(agent);
+
+  // Also include MCP tools (registered at runtime, may not be in agent access yet)
   const mcpTools = mcpManager.getToolsForAgent(agent);
-  return [...nativeTools, ...mcpTools];
+  const combined = new Set([...registryTools, ...mcpTools]);
+  return Array.from(combined);
 }
 
 // Check if an agent can use a specific tool
 export function canAgentUseTool(agent: AgentName, toolName: string): boolean {
-  return getToolsForAgent(agent).includes(toolName);
+  // Check unified registry first, then fall back to MCP manager
+  return toolRegistry.canAccess(agent, toolName) ||
+    mcpManager.getToolsForAgent(agent).includes(toolName);
 }
 
 /**

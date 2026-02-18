@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type {
   ProjectContext,
   SkillSummary,
@@ -11,6 +11,7 @@ import { GlobalContext } from './GlobalContext';
 import { MemoryPanelContent } from './MemoryPanelContent';
 import { UserfilesPanelContent } from './UserfilesPanelContent';
 import { getTrustMode, setTrustMode } from '../api';
+import { useAsyncData } from '../hooks/useAsyncData';
 
 type TabType = 'history' | 'prompts' | 'tools' | 'files' | 'memory' | 'context';
 
@@ -48,27 +49,25 @@ interface BurgerMenuProps {
 export function BurgerMenu({ isOpen, onClose, ...props }: BurgerMenuProps) {
   const [activeTab, setActiveTab] = useState<TabType>('history');
   const [isGlobalContextOpen, setIsGlobalContextOpen] = useState(false);
-  const [trustMode, setTrustModeState] = useState<'default' | 'trusted'>('default');
-  const [trustLoading, setTrustLoading] = useState(false);
+  const [toggling, setToggling] = useState(false);
 
-  useEffect(() => {
-    getTrustMode()
-      .then((res) => setTrustModeState(res.mode))
-      .catch(console.error);
-  }, []);
+  const fetchTrust = useCallback(() => getTrustMode(), []);
+  const { data: trustData, loading: trustFetching, refresh: refreshTrust } = useAsyncData(fetchTrust, []);
+  const trustMode = trustData?.mode ?? 'default';
+  const trustLoading = trustFetching || toggling;
 
-  const handleTrustToggle = async () => {
+  const handleTrustToggle = useCallback(async () => {
     const newMode = trustMode === 'default' ? 'trusted' : 'default';
-    setTrustLoading(true);
+    setToggling(true);
     try {
       await setTrustMode(newMode);
-      setTrustModeState(newMode);
+      refreshTrust();
     } catch (error) {
       console.error('Failed to toggle trust mode:', error);
     } finally {
-      setTrustLoading(false);
+      setToggling(false);
     }
-  };
+  }, [trustMode, refreshTrust]);
 
   // Close on Escape
   useEffect(() => {

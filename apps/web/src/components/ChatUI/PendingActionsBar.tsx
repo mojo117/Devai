@@ -1,4 +1,5 @@
 import { InlineAction, type PendingAction } from '../InlineAction';
+import { Button, Card } from '../ui';
 
 interface PendingActionsBarProps {
   pendingActions: PendingAction[];
@@ -21,25 +22,21 @@ export function PendingActionsBar({
     <div className="border-t border-devai-border px-4 py-2 space-y-2">
       {/* Batch action buttons when multiple actions pending */}
       {pendingActions.length > 1 && (
-        <div className="flex items-center justify-between bg-devai-card rounded-lg px-3 py-2 mb-2">
-          <span className="text-xs text-devai-text-secondary">
-            {pendingActions.length} actions pending
-          </span>
-          <div className="flex gap-2">
-            <button
-              onClick={onBatchApprove}
-              className="text-xs bg-green-600 hover:bg-green-500 text-white px-3 py-1 rounded font-medium transition-colors"
-            >
-              Approve All
-            </button>
-            <button
-              onClick={onBatchReject}
-              className="text-xs bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-medium transition-colors"
-            >
-              Reject All
-            </button>
+        <Card className="mb-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-devai-text-secondary">
+              {pendingActions.length} actions pending
+            </span>
+            <div className="flex gap-2">
+              <Button onClick={onBatchApprove} size="sm" className="bg-green-600 hover:bg-green-500 text-white">
+                Approve All
+              </Button>
+              <Button onClick={onBatchReject} size="sm" variant="danger">
+                Reject All
+              </Button>
+            </div>
           </div>
-        </div>
+        </Card>
       )}
       {pendingActions.map((action) => (
         <InlineAction
