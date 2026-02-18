@@ -12,6 +12,7 @@ import { sessionsRoutes } from './routes/sessions.js';
 import { settingsRoutes } from './routes/settings.js';
 import { memoryRoutes } from './routes/memory.js';
 import { looperRoutes } from './routes/looper.js';
+import { SessionLogger } from './audit/sessionLogger.js';
 import { userfilesRoutes } from './routes/userfiles.js';
 import { authMiddleware, registerAuthRoutes } from './routes/auth.js';
 import { initDb } from './db/index.js';
@@ -81,6 +82,7 @@ await app.register(userfilesRoutes, { prefix: '/api' });
 // Start server
 const start = async () => {
   try {
+    SessionLogger.cleanup();
     await app.listen({ port: config.port, host: '0.0.0.0' });
     console.log(`DevAI API running on http://localhost:${config.port}`);
     console.log(`Environment: ${config.nodeEnv}`);

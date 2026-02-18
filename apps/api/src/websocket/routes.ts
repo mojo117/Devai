@@ -15,6 +15,7 @@ import { ensureStateLoaded, getState, getOrCreateState, setGatheredInfo, setPhas
 import { processRequest, handleUserApproval, handleUserResponse, handlePlanApproval } from '../agents/router.js';
 import type { AgentStreamEvent } from '../agents/types.js';
 import type { ChatMessage } from '@devai/shared';
+import { SessionLogger } from '../audit/sessionLogger.js';
 
 type WorkspaceSessionMode = 'main' | 'shared';
 
@@ -237,6 +238,11 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
           return;
         }
 
+        // Session logger for MD file logging
+        const activeSessionForLog = requestedSessionId || 'pending';
+        const chatLogger = SessionLogger.getOrCreate(activeSessionForLog, message, 'multi-agent');
+        chatLogger.logUser(message);
+
         // Validate project root
         let validatedProjectRoot: string | null = null;
         if (projectRoot) {
@@ -288,7 +294,18 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
           setGatheredInfo(activeSessionId, 'visibility', mode.visibility);
         }
 
-        sendEvent({
+        // Re-bind logger to actual session ID (may differ from initial 'pending')
+        const sessionLogger = SessionLogger.getOrCreate(activeSessionId, message, 'multi-agent');
+        if (activeSessionForLog !== activeSessionId) {
+          sessionLogger.logUser(message);
+        }
+
+        const loggedSendEvent = (event: AgentStreamEvent | Record<string, unknown>) => {
+          sendEvent(event);
+          sessionLogger.logAgentEvent(event as Record<string, unknown>);
+        };
+
+        loggedSendEvent({
           type: 'agent_switch',
           from: 'chapo',
           to: 'chapo',
@@ -301,7 +318,7 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
             message,
             recentHistory,
             validatedProjectRoot || config.allowedRoots[0],
-            sendEvent as any
+            loggedSendEvent as any
           );
 
           const responseMessage = {
@@ -329,7 +346,7 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
           const finalState = getState(activeSessionId);
           const pendingActions = await getPendingActions();
 
-          sendEvent({
+          loggedSendEvent({
             type: 'response',
             response: {
               message: responseMessage,
@@ -338,8 +355,9 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
               agentHistory: finalState?.agentHistory || [],
             },
           });
+          sessionLogger.finalize('completed');
         } catch (err) {
-          sendEvent({
+          loggedSendEvent({
             type: 'response',
             response: {
               message: {
@@ -353,6 +371,7 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
               agentHistory: getState(activeSessionId)?.agentHistory || [],
             },
           });
+          sessionLogger.finalize('error');
         }
         return;
       }

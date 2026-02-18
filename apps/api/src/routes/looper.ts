@@ -22,6 +22,7 @@ import { config } from '../config.js';
 import { createSession, saveMessage, updateSessionTitleIfEmpty, getLooperState, upsertLooperState, deleteLooperState } from '../db/queries.js';
 import type { ChatMessage } from '@devai/shared';
 import type { LooperStreamEvent } from '@devai/shared';
+import { SessionLogger } from '../audit/sessionLogger.js';
 
 const LooperRequestSchema = z.object({
   message: z.string().min(1),
@@ -104,6 +105,9 @@ export const looperRoutes: FastifyPluginAsync = async (app) => {
     };
 
     try {
+      const logger = SessionLogger.getOrCreate(sessionId, message, provider);
+      logger.logUser(message);
+
       // Check if we're continuing an existing loop (clarification flow)
       let engine = activeEngines.get(sessionId);
       let result;
@@ -111,6 +115,7 @@ export const looperRoutes: FastifyPluginAsync = async (app) => {
       if (engine) {
         // Continue the existing loop with the user's clarification
         engine.setStreamCallback(sendEvent);
+        engine.setSessionLogger(logger);
         result = await engine.continueWithClarification(message);
       } else {
         // Try to resume from persisted snapshot (survives API restart)
@@ -119,17 +124,20 @@ export const looperRoutes: FastifyPluginAsync = async (app) => {
           try {
             engine = LooperEngine.fromSnapshot(persisted.snapshot as any);
             engine.setStreamCallback(sendEvent);
+            engine.setSessionLogger(logger);
             result = await engine.continueWithClarification(message);
           } catch (err) {
             app.log.warn({ err }, '[looper] Failed to restore persisted engine snapshot, starting new loop');
             engine = new LooperEngine(provider, looperCfg);
             engine.setStreamCallback(sendEvent);
+            engine.setSessionLogger(logger);
             result = await engine.run(message, validatedProjectRoot || config.allowedRoots[0]);
           }
         } else {
           // Start a new loop
           engine = new LooperEngine(provider, looperCfg);
           engine.setStreamCallback(sendEvent);
+          engine.setSessionLogger(logger);
           result = await engine.run(message, validatedProjectRoot || config.allowedRoots[0]);
         }
       }
@@ -153,6 +161,7 @@ export const looperRoutes: FastifyPluginAsync = async (app) => {
       } else {
         activeEngines.delete(sessionId);
         await deleteLooperState(sessionId);
+        logger.finalize(result.status, result.totalIterations);
       }
 
       // Persist messages

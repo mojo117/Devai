@@ -31,6 +31,7 @@ import type { Action } from '../actions/types.js';
 import { loadWorkspaceMdContext, formatWorkspaceMdBlock } from '../scanner/workspaceMdLoader.js';
 import { loadDevaiMdContext, formatDevaiMdBlock } from '../scanner/devaiMdLoader.js';
 import { MEMORY_BEHAVIOR_BLOCK } from '../prompts/context.js';
+import { SessionLogger } from '../audit/sessionLogger.js';
 
 /** Default configuration values. */
 const DEFAULTS: LooperConfig = {
@@ -81,6 +82,7 @@ export class LooperEngine {
   private steps: LooperStep[] = [];
   private status: LooperStatus = 'idle';
   private onStream?: StreamCallback;
+  private sessionLogger?: SessionLogger;
 
   constructor(
     private provider: LLMProvider,
@@ -117,6 +119,11 @@ export class LooperEngine {
   /** Register a streaming callback for real-time events. */
   setStreamCallback(cb: StreamCallback): void {
     this.onStream = cb;
+  }
+
+  /** Attach a session logger for MD file logging. */
+  setSessionLogger(logger: SessionLogger): void {
+    this.sessionLogger = logger;
   }
 
   /**
@@ -672,6 +679,7 @@ export class LooperEngine {
     if (this.onStream) {
       this.onStream(event);
     }
+    this.sessionLogger?.logLooperEvent(event);
   }
 }
 
