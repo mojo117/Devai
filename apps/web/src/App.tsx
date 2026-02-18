@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ChatUI, type ToolEvent, type ChatSessionState, type ChatSessionCommand, type ChatSessionCommandEnvelope } from './components/ChatUI';
+import { ChatUI, type ChatSessionState, type ChatSessionCommand, type ChatSessionCommandEnvelope } from './components/ChatUI';
 import { type AgentName, type AgentPhase } from './components/AgentStatus';
 import { BurgerMenu } from './components/BurgerMenu';
-import { type FeedEvent, toolEventToFeedEvent } from './components/SystemFeed';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   fetchHealth,
@@ -30,9 +29,7 @@ function App() {
     tokenBudget: number;
     note?: string;
   } | null>(null);
-  const [feedEvents, setFeedEvents] = useState<FeedEvent[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
-  const [clearFeedTrigger, setClearFeedTrigger] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
   const [activeAgent, setActiveAgent] = useState<AgentName | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>('idle');
@@ -58,17 +55,6 @@ function App() {
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
-  // Tool events to feed events
-  const handleToolEvents = useCallback((toolEvents: ToolEvent[]) => {
-    const newFeedEvents = toolEvents.map(toolEventToFeedEvent);
-    setFeedEvents(newFeedEvents);
-  }, []);
-
-  const handleClearFeed = useCallback(() => {
-    setFeedEvents([]);
-    setClearFeedTrigger((prev) => prev + 1);
   }, []);
 
   // Fetch health when authenticated (retry silently on failure — the ●/○ indicator shows status)
@@ -271,10 +257,8 @@ function App() {
             projectContextOverride={settings.projectContextOverride}
             onPinFile={settings.addPinnedFile}
             onContextUpdate={(stats) => setContextStats(stats)}
-            onToolEvent={handleToolEvents}
             onLoadingChange={setChatLoading}
             onAgentChange={handleAgentChange}
-            clearFeedTrigger={clearFeedTrigger}
             showSessionControls={false}
             sessionCommand={sessionCommand}
             onSessionStateChange={setChatSessionState}

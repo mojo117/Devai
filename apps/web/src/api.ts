@@ -359,14 +359,6 @@ export async function saveSetting(key: string, value: unknown): Promise<SettingR
   return res.json();
 }
 
-export async function fetchActions(): Promise<{ actions: Action[] }> {
-  const res = await fetch(`${API_BASE}/actions`, {
-    headers: withAuthHeaders(),
-  });
-  if (!res.ok) throw new Error('Failed to fetch actions');
-  return res.json();
-}
-
 export async function fetchPendingActions(): Promise<{ actions: Action[] }> {
   const res = await fetch(`${API_BASE}/actions/pending`, {
     headers: withAuthHeaders(),
@@ -428,28 +420,6 @@ export async function rejectAction(actionId: string): Promise<{ action: Action }
     throw new Error(await readApiError(res));
   }
 
-  return res.json();
-}
-
-export async function retryAction(actionId: string): Promise<{ action: Action; originalActionId: string }> {
-  const res = await fetch(`${API_BASE}/actions/retry`, {
-    method: 'POST',
-    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ actionId }),
-  });
-
-  if (!res.ok) {
-    throw new Error(await readApiError(res));
-  }
-
-  return res.json();
-}
-
-export async function fetchSystemPrompt(): Promise<{ prompt: string }> {
-  const res = await fetch(`${API_BASE}/system-prompt`, {
-    headers: withAuthHeaders(),
-  });
-  if (!res.ok) throw new Error('Failed to fetch system prompt');
   return res.json();
 }
 

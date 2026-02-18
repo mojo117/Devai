@@ -3,13 +3,11 @@ import type { Dispatch, SetStateAction } from 'react';
 import { sendMultiAgentMessage, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction, globProjectFiles, fetchPendingActions, batchApproveActions, batchRejectActions, uploadUserfile } from '../api';
 import type { ChatStreamEvent } from '../api';
 import type { ChatMessage, ContextStats, SessionSummary, Action } from '../types';
-import type { AgentHistoryEntry } from '../api';
 import { InlineAction, type PendingAction } from './InlineAction';
-import { AgentStatus, type AgentName, type AgentPhase } from './AgentStatus';
-import { AgentTimeline } from './AgentHistory';
+import { type AgentName, type AgentPhase } from './AgentStatus';
 import { useActionWebSocket } from '../hooks/useActionWebSocket';
 
-export interface ToolEvent {
+interface ToolEvent {
   id: string;
   type: 'status' | 'tool_call' | 'tool_result' | 'thinking';
   name?: string;
@@ -55,10 +53,8 @@ interface ChatUIProps {
   projectContextOverride?: { enabled: boolean; summary: string };
   onPinFile?: (file: string) => void;
   onContextUpdate?: (stats: ContextStats) => void;
-  onToolEvent?: (events: ToolEvent[]) => void;
   onLoadingChange?: (loading: boolean) => void;
   onAgentChange?: (agent: AgentName | null, phase: AgentPhase) => void;
-  clearFeedTrigger?: number; // Increment to trigger feed clear
   /** When true, session controls are expected to live in the global header. */
   showSessionControls?: boolean;
   sessionCommand?: ChatSessionCommandEnvelope | null;
@@ -74,10 +70,8 @@ export function ChatUI({
   projectContextOverride,
   onPinFile,
   onContextUpdate,
-  onToolEvent,
   onLoadingChange,
   onAgentChange,
-  clearFeedTrigger,
   showSessionControls = true,
   sessionCommand,
   onSessionStateChange,
@@ -132,9 +126,6 @@ export function ChatUI({
   // Agent state
   const [activeAgent, setActiveAgent] = useState<AgentName | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>('idle');
-  const [agentHistory, setAgentHistory] = useState<AgentHistoryEntry[]>([]);
-  const [showAgentHistory, setShowAgentHistory] = useState(false);
-
   // Notify parent of agent changes
   useEffect(() => {
     onAgentChange?.(activeAgent, agentPhase);
@@ -185,11 +176,6 @@ export function ChatUI({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Emit tool events to parent
-  useEffect(() => {
-    onToolEvent?.(toolEvents);
-  }, [toolEvents, onToolEvent]);
-
   // Emit session state to parent (for header controls)
   useEffect(() => {
     onSessionStateChange?.({
@@ -232,21 +218,6 @@ export function ChatUI({
       // Ignore parse errors
     }
   }, [sessionId]);
-
-  // Clear feed when triggered by parent
-  useEffect(() => {
-    if (clearFeedTrigger && clearFeedTrigger > 0) {
-      setToolEvents([]);
-      if (sessionId) {
-        try {
-          const key = `devai_feed_${sessionId}`;
-          localStorage.removeItem(key);
-        } catch {
-          // Ignore storage errors
-        }
-      }
-    }
-  }, [clearFeedTrigger, sessionId]);
 
   // WebSocket handlers for real-time action updates
   const handleActionPending = useCallback((action: Action) => {
@@ -415,7 +386,6 @@ export function ChatUI({
         setAgentPhase('idle');
         break;
       case 'agent_history':
-        setAgentHistory(event.entries as AgentHistoryEntry[]);
         break;
       case 'delegation':
         // Could show delegation notification
@@ -540,7 +510,6 @@ export function ChatUI({
     setFileHints([]);
 
     // Reset agent state when starting new message
-    setAgentHistory([]);
     setAgentPhase('idle');
     setActiveAgent(null);
 
@@ -552,9 +521,6 @@ export function ChatUI({
         handleStreamEvent
       );
 
-      if (response.agentHistory) {
-        setAgentHistory(response.agentHistory);
-      }
       if (response.sessionId) {
         setSessionId(response.sessionId);
         await saveSetting('lastSessionId', response.sessionId);
