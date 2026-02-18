@@ -28,8 +28,9 @@ import { executeTool } from '../tools/executor.js';
 import type { ConversationSnapshot } from './conversation-manager.js';
 import type { LooperErrorHandlerSnapshot } from './error-handler.js';
 import type { Action } from '../actions/types.js';
-import { readDailyMemory, resolveWorkspaceRoot } from '../memory/workspaceMemory.js';
-import { readFile } from 'fs/promises';
+import { loadWorkspaceMdContext, formatWorkspaceMdBlock } from '../scanner/workspaceMdLoader.js';
+import { loadDevaiMdContext, formatDevaiMdBlock } from '../scanner/devaiMdLoader.js';
+import { MEMORY_BEHAVIOR_BLOCK } from '../prompts/context.js';
 
 /** Default configuration values. */
 const DEFAULTS: LooperConfig = {
@@ -549,29 +550,26 @@ export class LooperEngine {
       }
     }
 
-    // ── Load workspace memory at Looper level ──
+    // ── Load full workspace context (AGENTS, SOUL, USER, TOOLS, Memory) ──
     try {
-      const wsRoot = await resolveWorkspaceRoot();
-
-      // Load today's daily memory
-      const todayMemory = await readDailyMemory();
-      if (todayMemory.content) {
-        parts.push(`\n## Heutiges Gedächtnis (${todayMemory.date})\n${todayMemory.content.slice(0, 3000)}`);
-      }
-
-      // Load long-term memory (MEMORY.md)
-      try {
-        const longTermPath = `${wsRoot}/MEMORY.md`;
-        const longTermContent = await readFile(longTermPath, 'utf-8');
-        if (longTermContent.trim()) {
-          parts.push(`\n## Langzeitgedächtnis\n${longTermContent.slice(0, 3000)}`);
-        }
-      } catch {
-        // No long-term memory file yet – that's fine
-      }
+      const wsCtx = await loadWorkspaceMdContext({ mode: 'main' });
+      const wsBlock = formatWorkspaceMdBlock(wsCtx);
+      if (wsBlock) parts.push(wsBlock);
     } catch {
-      // Memory loading is non-critical
+      // Workspace loading is non-critical
     }
+
+    // ── Load devai.md global instructions ──
+    try {
+      const devaiCtx = await loadDevaiMdContext();
+      const devaiBlock = formatDevaiMdBlock(devaiCtx);
+      if (devaiBlock) parts.push(devaiBlock);
+    } catch {
+      // devai.md loading is non-critical
+    }
+
+    // ── Memory behavior guidance ──
+    parts.push(MEMORY_BEHAVIOR_BLOCK);
 
     return parts.join('\n');
   }

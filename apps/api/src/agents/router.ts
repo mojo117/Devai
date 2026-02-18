@@ -47,7 +47,6 @@ import { KODA_AGENT } from './koda.js';
 import { DEVO_AGENT } from './devo.js';
 import { SCOUT_AGENT } from './scout.js';
 import { config } from '../config.js';
-import { loadDevaiMdContext, formatDevaiMdBlock } from '../scanner/devaiMdLoader.js';
 import { getMessages, getTrustMode } from '../db/queries.js';
 import { rememberNote } from '../memory/workspaceMemory.js';
 import { getCombinedSystemContextBlock, warmSystemContextForSession } from './systemContext.js';
@@ -148,23 +147,6 @@ function getProjectRootFromState(sessionId: string): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
-async function getDevaiMdBlockForSession(sessionId: string): Promise<string> {
-  const state = stateManager.getState(sessionId);
-  if (state?.taskContext.gatheredInfo['devaiMdBlock']) {
-    return String(state.taskContext.gatheredInfo['devaiMdBlock']);
-  }
-
-  const uiHost = (state?.taskContext.gatheredInfo['uiHost'] as string | undefined) || null;
-  try {
-    const ctx = await loadDevaiMdContext();
-    const block = formatDevaiMdBlock(ctx, { uiHost });
-    stateManager.setGatheredInfo(sessionId, 'devaiMdBlock', block);
-    return block;
-  } catch {
-    return '';
-  }
-}
-
 function buildToolResultContent(result: { success: boolean; result?: unknown; error?: string }): { content: string; isError: boolean } {
   if (result.success) {
     const value = result.result === undefined ? '' : JSON.stringify(result.result);
@@ -259,9 +241,6 @@ export async function processRequest(
   // Keep the last actual request for approval/resume flows.
   stateManager.setOriginalRequest(sessionId, userMessage);
   await warmSystemContextForSession(sessionId, projectRoot || getProjectRootFromState(sessionId));
-
-  // Load devai.md global instructions for this session (applies to both routers).
-  await getDevaiMdBlockForSession(sessionId);
 
   // FAST PATH: Early task classification (no LLM call!)
   const taskComplexity = classifyTaskComplexity(userMessage);
