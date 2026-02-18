@@ -10,37 +10,7 @@ import { llmRouter } from '../llm/router.js';
 import { ConversationManager } from './conversation-manager.js';
 import { normalizeToolName } from '../tools/registry.js';
 
-export const DECISION_SYSTEM_PROMPT = `You are the decision engine of an AI assistant called Chapo.
-Given the current conversation and the latest event you must decide what to do next.
-
-You MUST respond with valid JSON only (no markdown fences) using exactly this schema:
-{
-  "intent": "tool_call" | "clarify" | "answer",
-  "agent": "developer" | "searcher" | "document_manager" | "commander" | null,
-  "toolName": "string or null – the specific tool to call if intent is tool_call",
-  "toolArgs": {} or null,
-  "clarificationQuestion": "string or null – question for the user if intent is clarify",
-  "answerText": "string or null – the answer if intent is answer",
-  "reasoning": "short explanation of your decision"
-}
-
-Rules:
-- intent "tool_call": You need to use a tool. Pick the right agent and tool.
-  • agent "developer" → for code generation, editing, building, testing
-  • agent "searcher" → for web searches, researching documentation, gathering info
-  • agent "document_manager" → for reading, writing, moving, deleting files/docs
-  • agent "commander" → for running shell commands, system operations
-- intent "clarify": You don't have enough information. Ask the user ONE focused question.
-- intent "answer": You have enough information to give a complete answer.
-
-Available tools (canonical names):
-  fs_listFiles, fs_readFile, fs_writeFile,
-  git_status, git_diff, git_commit,
-  github_triggerWorkflow, github_getWorkflowRunStatus,
-  logs_getStagingLogs
-
-When you receive an error event, try to work around it. Never give up on the first error.
-When you receive a tool_result event, decide whether the information is sufficient or you need more.`;
+import { DECISION_SYSTEM_PROMPT } from '../prompts/decision-engine.js';
 
 export class DecisionEngine {
   constructor(private provider: LLMProvider) {}

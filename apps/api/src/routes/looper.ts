@@ -8,13 +8,15 @@ import { z } from 'zod';
 import { nanoid } from 'nanoid';
 import { resolve } from 'node:path';
 import { LooperEngine } from '../looper/index.js';
-import { LOOPER_CORE_SYSTEM_PROMPT } from '../looper/engine.js';
-import { DECISION_SYSTEM_PROMPT } from '../looper/decision-engine.js';
-import { VALIDATION_SYSTEM_PROMPT } from '../looper/self-validation.js';
-import { DEV_SYSTEM_PROMPT } from '../looper/agents/developer.js';
-import { SEARCH_SYSTEM_PROMPT } from '../looper/agents/searcher.js';
-import { DOC_SYSTEM_PROMPT } from '../looper/agents/document-manager.js';
-import { CMD_SYSTEM_PROMPT } from '../looper/agents/commander.js';
+import {
+  LOOPER_CORE_SYSTEM_PROMPT,
+  DECISION_SYSTEM_PROMPT,
+  VALIDATION_SYSTEM_PROMPT,
+  DEV_SYSTEM_PROMPT,
+  SEARCH_SYSTEM_PROMPT,
+  DOC_SYSTEM_PROMPT,
+  CMD_SYSTEM_PROMPT,
+} from '../prompts/index.js';
 import { llmRouter } from '../llm/router.js';
 import { config } from '../config.js';
 import { createSession, saveMessage, updateSessionTitleIfEmpty, getLooperState, upsertLooperState, deleteLooperState } from '../db/queries.js';

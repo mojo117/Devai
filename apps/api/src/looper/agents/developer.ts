@@ -9,11 +9,7 @@ import type { ToolExecutionResult } from '../../tools/executor.js';
 import type { LLMProvider } from '../../llm/types.js';
 import { llmRouter } from '../../llm/router.js';
 
-export const DEV_SYSTEM_PROMPT = `You are Chapo's developer agent.
-You receive a development task and tool results, and produce code or technical output.
-Be precise, write clean code, and explain your changes briefly.
-If you need to read or write files, produce the tool calls described in your response.
-Always think step by step before writing code.`;
+import { DEV_SYSTEM_PROMPT } from '../../prompts/agent-developer.js';
 
 export class DeveloperAgent implements LooperAgent {
   readonly type = 'developer' as const;

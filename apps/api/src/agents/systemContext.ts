@@ -4,14 +4,9 @@ import { loadDevaiMdContext, formatDevaiMdBlock } from '../scanner/devaiMdLoader
 import { loadClaudeMdContext, formatClaudeMdBlock } from '../scanner/claudeMdLoader.js';
 import { loadWorkspaceMdContext, formatWorkspaceMdBlock, type WorkspaceLoadMode } from '../scanner/workspaceMdLoader.js';
 import { getSetting } from '../db/queries.js';
+import { MEMORY_BEHAVIOR_BLOCK } from '../prompts/context.js';
 
 const GLOBAL_CONTEXT_MAX_CHARS = 4000;
-const MEMORY_BEHAVIOR_BLOCK = `
-## Memory Behavior
-
-- If the user explicitly asks to remember something, call memory_remember with the exact note.
-- If the user asks what is remembered, use memory_search before answering.
-- Keep memory notes concise and factual.`;
 
 function parseGlobalContextSetting(raw: string | null): { content: string; enabled: boolean } {
   if (!raw) return { content: '', enabled: false };

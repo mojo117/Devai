@@ -7,22 +7,7 @@ import type { ValidationResult } from '@devai/shared';
 import type { LLMProvider, GenerateResponse } from '../llm/types.js';
 import { llmRouter } from '../llm/router.js';
 
-export const VALIDATION_SYSTEM_PROMPT = `You are a quality-assurance reviewer for an AI assistant called Chapo.
-Your job is to evaluate a proposed answer BEFORE it is sent to the user.
-
-Evaluate the following criteria:
-1. COMPLETENESS – Does the answer fully address the user's request?
-2. ACCURACY – Are there factual errors or hallucinations?
-3. SAFETY – Does the answer suggest anything harmful or insecure?
-4. CLARITY – Is the answer well-structured and easy to understand?
-
-Respond ONLY with valid JSON in this exact format (no markdown fences):
-{
-  "isComplete": true/false,
-  "confidence": 0.0-1.0,
-  "issues": ["issue 1", "issue 2"],
-  "suggestion": "optional improvement hint"
-}`;
+import { VALIDATION_SYSTEM_PROMPT } from '../prompts/self-validation.js';
 
 export class SelfValidator {
   constructor(private provider: LLMProvider) {}

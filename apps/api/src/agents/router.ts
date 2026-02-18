@@ -46,7 +46,6 @@ import { CHAPO_AGENT } from './chapo.js';
 import { KODA_AGENT } from './koda.js';
 import { DEVO_AGENT } from './devo.js';
 import { SCOUT_AGENT } from './scout.js';
-import { processRequestNew } from './newRouter.js';
 import { config } from '../config.js';
 import { getMessages, getTrustMode } from '../db/queries.js';
 import { rememberNote } from '../memory/workspaceMemory.js';
@@ -262,12 +261,6 @@ export async function processRequest(
 
   // Load devai.md global instructions for this session (applies to both routers).
   await getDevaiMdBlockForSession(sessionId);
-
-  // New capability-based router (feature-flagged)
-  if (config.useNewAgentRouter) {
-    console.info('[agents] Using NEW capability-based router');
-    return processRequestNew({ sessionId, userMessage, projectRoot, sendEvent, conversationHistory: history });
-  }
 
   // FAST PATH: Early task classification (no LLM call!)
   const taskComplexity = classifyTaskComplexity(userMessage);
@@ -1373,18 +1366,7 @@ export async function handleUserApproval(
     return 'Task abgebrochen durch User.';
   }
 
-  // Some approvals are not "risk approvals" but a "continue" gate (e.g. new router step-limit).
-  // Store a one-shot override in state so the next run can adjust its budget.
-  const ctx = approval.context;
-  if (ctx && typeof ctx === 'object' && ctx.kind === 'new_router_continue') {
-    const maxTurns = (ctx as Record<string, unknown>).maxTurns;
-    if (typeof maxTurns === 'number' && Number.isFinite(maxTurns) && maxTurns > 0) {
-      stateManager.setGatheredInfo(sessionId, 'newRouterMaxTurnsOverride', maxTurns);
-    }
-  } else {
-    // Only grant "global approval" for real risk approvals. Continue-gates should not disable future approval checks.
-    stateManager.grantApproval(sessionId);
-  }
+  stateManager.grantApproval(sessionId);
   await stateManager.flushState(sessionId);
 
   const state = stateManager.getState(sessionId);

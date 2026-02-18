@@ -9,11 +9,7 @@ import type { ToolExecutionResult } from '../../tools/executor.js';
 import type { LLMProvider } from '../../llm/types.js';
 import { llmRouter } from '../../llm/router.js';
 
-export const CMD_SYSTEM_PROMPT = `You are Chapo's commander agent.
-You handle system operations: git commands, GitHub workflows, log retrieval,
-and other infrastructure tasks.
-Always report the exact output of commands. Never hide errors.
-For destructive operations, recommend using the confirmation flow first.`;
+import { CMD_SYSTEM_PROMPT } from '../../prompts/agent-commander.js';
 
 export class CommanderAgent implements LooperAgent {
   readonly type = 'commander' as const;

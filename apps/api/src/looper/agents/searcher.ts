@@ -9,11 +9,7 @@ import type { ToolExecutionResult } from '../../tools/executor.js';
 import type { LLMProvider } from '../../llm/types.js';
 import { llmRouter } from '../../llm/router.js';
 
-export const SEARCH_SYSTEM_PROMPT = `You are Chapo's research agent.
-You help gather information, summarise findings, and present them clearly.
-When you need to read files for research, use the available file tools.
-Always cite your sources when referencing specific files or data.
-Organise your findings in a structured way.`;
+import { SEARCH_SYSTEM_PROMPT } from '../../prompts/agent-searcher.js';
 
 export class SearcherAgent implements LooperAgent {
   readonly type = 'searcher' as const;

@@ -44,9 +44,6 @@ export interface Config {
   supabaseUrl: string;
   supabaseServiceKey: string;
 
-  // Feature flags
-  useNewAgentRouter: boolean;
-
   // Persistence
   dbPath: string;
 
@@ -57,9 +54,6 @@ export interface Config {
   looperMinValidationConfidence: number;
   looperSelfValidationEnabled: boolean;
 
-  // New Agent Router (capability-based)
-  newAgentExecutorMaxTurns: number;
-  newAgentExecutorMaxTurnsOnContinue: number;
 }
 
 export function loadConfig(): Config {
@@ -100,9 +94,6 @@ export function loadConfig(): Config {
       process.env.SUPABASE_SERVICE_KEY ||
       "",
 
-    // Feature flags
-    useNewAgentRouter: process.env.USE_NEW_AGENT_ROUTER === "true",
-
     dbPath: process.env.DB_PATH || resolve(process.cwd(), "../../var/devai.db"),
 
     // Looper-AI
@@ -112,10 +103,6 @@ export function loadConfig(): Config {
     looperMinValidationConfidence: parseFloat(process.env.LOOPER_MIN_VALIDATION_CONFIDENCE || "0.7"),
     looperSelfValidationEnabled: process.env.LOOPER_SELF_VALIDATION !== "false",
 
-    // New Agent Router (capability-based)
-    // 5 turns was too low for real-world tasks (often needs multiple tool calls + synthesis).
-    newAgentExecutorMaxTurns: parseInt(process.env.NEW_AGENT_EXECUTOR_MAX_TURNS || "20", 10),
-    newAgentExecutorMaxTurnsOnContinue: parseInt(process.env.NEW_AGENT_EXECUTOR_MAX_TURNS_ON_CONTINUE || "40", 10),
   };
 }
 

@@ -9,10 +9,7 @@ import type { ToolExecutionResult } from '../../tools/executor.js';
 import type { LLMProvider } from '../../llm/types.js';
 import { llmRouter } from '../../llm/router.js';
 
-export const DOC_SYSTEM_PROMPT = `You are Chapo's document manager agent.
-You handle all file and document operations: reading, writing, listing, organising.
-When writing files, always preview the content to the user first.
-Be careful with destructive operations – always confirm before overwriting.`;
+import { DOC_SYSTEM_PROMPT } from '../../prompts/agent-docmanager.js';
 
 export class DocumentManagerAgent implements LooperAgent {
   readonly type = 'document_manager' as const;
