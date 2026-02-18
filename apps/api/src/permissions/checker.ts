@@ -6,8 +6,9 @@
  */
 
 import { nanoid } from 'nanoid';
-import { getSetting, setSetting } from '../db/queries.js';
-import { toolRequiresConfirmation, getToolDefinition } from '../tools/registry.js';
+import { getSetting, setSetting, getTrustMode } from '../db/queries.js';
+import { getToolDefinition } from '../tools/registry.js';
+import { shouldRequireConfirmation } from '../config/trust.js';
 import type {
   PermissionPattern,
   PermissionCheckResult,
@@ -193,9 +194,7 @@ export async function checkPermission(
     };
   }
 
-  // Check for matching patterns
   const patterns = await getPermissionPatterns(userId);
-
   for (const pattern of patterns) {
     if (matchesPattern(pattern, toolName, toolArgs)) {
       if (pattern.granted) {
@@ -217,11 +216,19 @@ export async function checkPermission(
     }
   }
 
-  // No pattern matched - fall back to requiring confirmation
+  // No pattern matched - apply trust mode policy.
+  const trustMode = await getTrustMode();
+  const trustDecision = shouldRequireConfirmation(
+    toolName,
+    toolArgs,
+    trustMode,
+    true
+  );
+
   return {
     allowed: true,
-    requiresConfirmation: true,
-    reason: 'No matching permission pattern',
+    requiresConfirmation: trustDecision.requiresConfirmation,
+    reason: trustDecision.reason || `No matching permission pattern (trust mode: ${trustMode})`,
   };
 }
 

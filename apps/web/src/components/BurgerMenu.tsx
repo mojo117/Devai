@@ -8,9 +8,10 @@ import { PromptsPanelContent } from './PromptsPanelContent';
 import { ToolsPanelContent } from './ToolsPanelContent';
 import { HistoryPanelContent } from './HistoryPanelContent';
 import { GlobalContext } from './GlobalContext';
+import { MemoryPanelContent } from './MemoryPanelContent';
 import { getTrustMode, setTrustMode } from '../api';
 
-type TabType = 'history' | 'prompts' | 'tools' | 'context';
+type TabType = 'history' | 'prompts' | 'tools' | 'memory' | 'context';
 
 interface BurgerMenuProps {
   isOpen: boolean;
@@ -83,6 +84,7 @@ export function BurgerMenu({ isOpen, onClose, ...props }: BurgerMenuProps) {
     { id: 'history', label: 'History' },
     { id: 'prompts', label: 'Prompts' },
     { id: 'tools', label: 'Tools' },
+    { id: 'memory', label: 'Memory' },
     { id: 'context', label: 'Context' },
   ];
 
@@ -176,6 +178,7 @@ export function BurgerMenu({ isOpen, onClose, ...props }: BurgerMenuProps) {
               mcpServers={props.mcpServers}
             />
           )}
+          {activeTab === 'memory' && <MemoryPanelContent />}
         </div>
       </div>
 

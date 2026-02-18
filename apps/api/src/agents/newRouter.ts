@@ -15,6 +15,7 @@ import { nanoid } from 'nanoid';
 import * as stateManager from './stateManager.js';
 import type { ApprovalRequest, UserQuestion } from './types.js';
 import { config } from '../config.js';
+import { warmSystemContextForSession } from './systemContext.js';
 
 export interface NewProcessRequestOptions {
   sessionId: string;
@@ -33,6 +34,7 @@ export async function processRequestNew(options: NewProcessRequestOptions): Prom
   // Keep state in sync even when using the new router (used by approval flows / persistence).
   await stateManager.ensureStateLoaded(sessionId);
   stateManager.setOriginalRequest(sessionId, userMessage);
+  await warmSystemContextForSession(sessionId, projectRoot);
 
   // Filter history to only valid roles (user/assistant) like legacy router
   const filteredHistory = conversationHistory

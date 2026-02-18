@@ -27,6 +27,10 @@ export const SCOUT_AGENT: AgentDefinition = {
     'fs_grep',
     'git_status',
     'git_diff',
+    // Workspace memory
+    'memory_remember',
+    'memory_search',
+    'memory_readToday',
     // Web tools
     'web_search',
     'web_fetch',

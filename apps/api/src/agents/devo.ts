@@ -48,6 +48,10 @@ export const DEVO_AGENT: AgentDefinition = {
     'fs_readFile',
     // Logs
     'logs_getStagingLogs',
+    // Workspace memory
+    'memory_remember',
+    'memory_search',
+    'memory_readToday',
     // Exploration (spawn SCOUT for searches)
     'delegateToScout',
     // Escalation

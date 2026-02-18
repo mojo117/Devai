@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid';
 import { getSupabase } from './index.js';
 import type { ChatMessage } from '@devai/shared';
+import { DEFAULT_TRUST_MODE } from '../config/trust.js';
 
 const DEFAULT_USER_ID = 'local';
 
@@ -355,7 +356,10 @@ export async function getTrustMode(): Promise<'default' | 'trusted'> {
   if (value === 'trusted') {
     return 'trusted';
   }
-  return 'default';
+  if (value === 'default') {
+    return 'default';
+  }
+  return DEFAULT_TRUST_MODE;
 }
 
 /**

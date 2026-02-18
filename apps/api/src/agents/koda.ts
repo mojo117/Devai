@@ -33,6 +33,10 @@ export const KODA_AGENT: AgentDefinition = {
     'fs_readFile',
     'fs_glob',
     'fs_grep',
+    // Workspace memory
+    'memory_remember',
+    'memory_search',
+    'memory_readToday',
     // Exploration (spawn SCOUT for searches)
     'delegateToScout',
     // Escalation

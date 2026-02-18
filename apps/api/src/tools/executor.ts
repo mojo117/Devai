@@ -8,6 +8,7 @@ import * as sshTools from './ssh.js';
 import * as pm2Tools from './pm2.js';
 import * as webTools from './web.js';
 import * as contextTools from './context.js';
+import * as memoryTools from './memory.js';
 import { config } from '../config.js';
 import { mcpManager } from '../mcp/index.js';
 import { join } from 'path';
@@ -252,6 +253,23 @@ export async function executeTool(
             args.query as string
           );
 
+        // Workspace Memory Tools
+        case 'memory_remember':
+          return memoryTools.memoryRemember(args.content as string, {
+            promoteToLongTerm: args.promoteToLongTerm as boolean | undefined,
+            sessionId: args.sessionId as string | undefined,
+            source: 'tool.memory_remember',
+          });
+
+        case 'memory_search':
+          return memoryTools.memorySearch(args.query as string, {
+            limit: args.limit as number | undefined,
+            includeLongTerm: args.includeLongTerm as boolean | undefined,
+          });
+
+        case 'memory_readToday':
+          return memoryTools.memoryReadToday();
+
         default:
           // Route MCP tools to the MCP manager
           if (mcpManager.isMcpTool(normalizedToolName)) {
@@ -319,6 +337,8 @@ const READ_ONLY_TOOLS = new Set([
   'context_listDocuments',
   'context_readDocument',
   'context_searchDocuments',
+  'memory_search',
+  'memory_readToday',
 ]);
 
 /**

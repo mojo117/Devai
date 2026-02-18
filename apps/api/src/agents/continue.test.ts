@@ -9,6 +9,7 @@ vi.mock('../db/queries.js', () => {
     getAgentState: vi.fn().mockResolvedValue(null),
     upsertAgentState: vi.fn().mockResolvedValue(undefined),
     getMessages: vi.fn().mockResolvedValue([]),
+    getSetting: vi.fn().mockResolvedValue(null),
   };
 });
 

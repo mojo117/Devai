@@ -49,7 +49,11 @@ export type ToolName =
   // Context Tools (read-only document access)
   | 'context_listDocuments'
   | 'context_readDocument'
-  | 'context_searchDocuments';
+  | 'context_searchDocuments'
+  // Workspace Memory Tools
+  | 'memory_remember'
+  | 'memory_search'
+  | 'memory_readToday';
 
 export interface ToolPropertyDefinition {
   type: string;
@@ -847,6 +851,58 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
         },
       },
       required: ['query'],
+    },
+    requiresConfirmation: false,
+  },
+  // Workspace Memory Tools
+  {
+    name: 'memory_remember',
+    description: 'Save an important note to workspace daily memory. Use for explicit remember requests.',
+    parameters: {
+      type: 'object',
+      properties: {
+        content: {
+          type: 'string',
+          description: 'The note to persist',
+        },
+        promoteToLongTerm: {
+          type: 'boolean',
+          description: 'Also append to long-term MEMORY.md',
+        },
+      },
+      required: ['content'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'memory_search',
+    description: 'Search persisted workspace memory (daily + optional long-term memory).',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Text to search in memory',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max number of results (1-50)',
+        },
+        includeLongTerm: {
+          type: 'boolean',
+          description: 'Include MEMORY.md in search',
+        },
+      },
+      required: ['query'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'memory_readToday',
+    description: "Read today's daily memory file.",
+    parameters: {
+      type: 'object',
+      properties: {},
     },
     requiresConfirmation: false,
   },

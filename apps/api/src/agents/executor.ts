@@ -12,8 +12,7 @@ import { getToolsForLLM } from '../tools/registry.js';
 import { llmRouter } from '../llm/router.js';
 import { getAgent, getToolsForAgent } from './router.js';
 import type { LLMMessage, ToolResult } from '../llm/types.js';
-import { loadDevaiMdContext, formatDevaiMdBlock } from '../scanner/devaiMdLoader.js';
-import * as stateManager from './stateManager.js';
+import { getCombinedSystemContextBlock, warmSystemContextForSession } from './systemContext.js';
 
 export interface ExecuteTaskOptions {
   sessionId: string;
@@ -40,17 +39,8 @@ export async function executeAgentTask(
 
   // Build focused prompt for this specific task
   const taskPrompt = buildTaskPrompt(task, dependencyData, projectRoot);
-
-  // Load devai.md as global instructions for every agent run.
-  // If uiHost isn't available here, the block will simply omit it.
-  let devaiMdBlock = '';
-  try {
-    const uiHost = (stateManager.getState(sessionId)?.taskContext.gatheredInfo['uiHost'] as string | undefined) || null;
-    const ctx = await loadDevaiMdContext();
-    devaiMdBlock = formatDevaiMdBlock(ctx, { uiHost });
-  } catch {
-    // optional
-  }
+  await warmSystemContextForSession(sessionId, projectRoot);
+  const systemContextBlock = getCombinedSystemContextBlock(sessionId);
 
   // Include conversation history for context, then the task prompt
   const messages: LLMMessage[] = [
@@ -89,13 +79,13 @@ export async function executeAgentTask(
     }
     turn++;
 
-  const response = await llmRouter.generate('anthropic', {
-    model: agent.model,
-    messages,
-    systemPrompt: `${agent.systemPrompt}\n${devaiMdBlock}`,
-    tools,
-    toolsEnabled: true,
-  });
+    const response = await llmRouter.generate('anthropic', {
+      model: agent.model,
+      messages,
+      systemPrompt: `${agent.systemPrompt}\n${systemContextBlock}`,
+      tools,
+      toolsEnabled: true,
+    });
 
     // No more tool calls - we're done
     if (!response.toolCalls || response.toolCalls.length === 0) {
