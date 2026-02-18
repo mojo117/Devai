@@ -1,10 +1,10 @@
 # DevAI Architecture
 
-This document describes the architecture of DevAI, including the multi-agent system for handling complex tasks.
+This document describes the architecture of DevAI, including the Looper orchestrator and the multi-agent system.
 
 <div style="position: sticky; top: 0; background: #1a1a2e; padding: 12px 16px; border-radius: 8px; border: 1px solid #333; margin-bottom: 20px; z-index: 100;">
 
-**Navigation:** [Overview](#overview) · [Project Structure](#project-structure) · [Single-Agent](#single-agent-mode) · [Multi-Agent](#multi-agent-mode) · [Agents](#agents) · [Request Flow](#request-flow) · [Approval Flow](#approval-flow) · [State Management](#state-management) · [Streaming](#streaming-protocol) · [Tools](#tool-registry) · [Security](#security) · [API](#api-endpoints) · [Frontend](#frontend-integration)
+**Navigation:** [Overview](#overview) · [Project Structure](#project-structure) · [Looper](#looper-ai-orchestrator) · [Multi-Agent](#multi-agent-system) · [Prompts](#prompt-architecture) · [Request Flow](#request-flow) · [Approval Flow](#approval-flow) · [State Management](#state-management) · [Streaming](#streaming-protocol) · [Tools](#tool-registry) · [Security](#security) · [API](#api-endpoints) · [Frontend](#frontend-integration)
 
 </div>
 
@@ -12,10 +12,37 @@ This document describes the architecture of DevAI, including the multi-agent sys
 
 ## Overview
 
-DevAI is an AI-powered development assistant that can execute code changes, manage deployments, and handle DevOps operations. It operates in two modes:
+DevAI is an AI-powered development assistant that can execute code changes, manage deployments, and handle DevOps operations. It uses a two-tier architecture:
 
-1. **Single-Agent Mode**: Traditional chat with one LLM, per-tool confirmation for risky operations
-2. **Multi-Agent Mode**: 3-agent orchestration with task-level approval and autonomous execution
+1. **Looper-AI** (User-facing orchestrator): Iterative loop engine that talks directly to the user, classifies intents, and delegates work to specialized agents
+2. **Multi-Agent System** (Sub-agents): 4 specialized agents (CHAPO, KODA, DEVO, SCOUT) that execute delegated tasks with tool isolation
+
+```
+                    ┌──────────────────────────┐
+                    │         USER             │
+                    └────────────┬─────────────┘
+                                 ▼
+              ┌──────────────────────────────────────┐
+              │          LOOPER-AI ENGINE             │
+              │  Decision Engine → Agent Routing      │
+              │  Self-Validation → Conversation Mgmt  │
+              │                                       │
+              │  Sub-Agents:                          │
+              │  ┌───────────┐ ┌───────────────────┐ │
+              │  │ Developer │ │ Document Manager  │ │
+              │  ├───────────┤ ├───────────────────┤ │
+              │  │ Searcher  │ │ Commander         │ │
+              │  └───────────┘ └───────────────────┘ │
+              └──────────────────┬───────────────────┘
+                                 │ delegates complex tasks
+                                 ▼
+              ┌──────────────────────────────────────┐
+              │        MULTI-AGENT SYSTEM            │
+              │  ┌───────┐ ┌──────┐ ┌──────┐ ┌─────┐│
+              │  │ CHAPO │ │ KODA │ │ DEVO │ │SCOUT││
+              │  └───────┘ └──────┘ └──────┘ └─────┘│
+              └──────────────────────────────────────┘
+```
 
 ---
 
@@ -23,70 +50,162 @@ DevAI is an AI-powered development assistant that can execute code changes, mana
 
 ```
 apps/
-├── api/                      # Fastify API server
+├── api/                          # Fastify API server
 │   └── src/
-│       ├── agents/           # Multi-agent system
-│       │   ├── types.ts      # TypeScript interfaces
-│       │   ├── chapo.ts      # CHAPO agent definition
-│       │   ├── koda.ts       # KODA agent definition
-│       │   ├── devo.ts       # DEVO agent definition
-│       │   ├── router.ts     # Orchestration & routing
-│       │   └── stateManager.ts
-│       ├── tools/            # Tool implementations
-│       │   ├── registry.ts   # Tool definitions
-│       │   ├── executor.ts   # Execution engine
-│       │   ├── fs.ts         # File system
-│       │   ├── git.ts        # Git operations
-│       │   ├── github.ts     # GitHub API
-│       │   ├── bash.ts       # Bash execution
-│       │   ├── ssh.ts        # SSH execution
-│       │   └── pm2.ts        # PM2 management
-│       ├── routes/           # API routes
-│       │   └── chat.ts       # Chat endpoints
-│       ├── llm/              # LLM integration
-│       │   ├── router.ts     # Provider routing
-│       │   └── providers/    # Anthropic, OpenAI, etc.
-│       ├── actions/          # Action approval system
-│       └── audit/            # Audit logging
-├── web/                      # React frontend
+│       ├── prompts/              # Central prompt directory (all German)
+│       │   ├── index.ts          # Re-exports all prompts
+│       │   ├── looper-core.ts    # LOOPER_CORE_SYSTEM_PROMPT
+│       │   ├── decision-engine.ts# DECISION_SYSTEM_PROMPT
+│       │   ├── self-validation.ts# VALIDATION_SYSTEM_PROMPT
+│       │   ├── agent-developer.ts# DEV_SYSTEM_PROMPT
+│       │   ├── agent-searcher.ts # SEARCH_SYSTEM_PROMPT
+│       │   ├── agent-docmanager.ts# DOC_SYSTEM_PROMPT
+│       │   ├── agent-commander.ts# CMD_SYSTEM_PROMPT
+│       │   ├── chapo.ts          # CHAPO_SYSTEM_PROMPT
+│       │   ├── koda.ts           # KODA_SYSTEM_PROMPT
+│       │   ├── devo.ts           # DEVO_SYSTEM_PROMPT
+│       │   ├── scout.ts          # SCOUT_SYSTEM_PROMPT
+│       │   └── context.ts        # MEMORY_BEHAVIOR_BLOCK
+│       ├── looper/               # Looper-AI engine
+│       │   ├── engine.ts         # LooperEngine (main loop)
+│       │   ├── decision-engine.ts# Intent classification
+│       │   ├── conversation-manager.ts # Context management
+│       │   ├── self-validation.ts# Self-validation
+│       │   ├── error-handler.ts  # Error tracking & retry
+│       │   └── agents/           # Looper sub-agents
+│       │       ├── base-agent.ts # LooperAgent interface
+│       │       ├── developer.ts  # Code generation agent
+│       │       ├── searcher.ts   # Research agent
+│       │       ├── document-manager.ts # File operations agent
+│       │       ├── commander.ts  # Shell commands agent
+│       │       └── index.ts      # Agent factory
+│       ├── agents/               # Multi-agent system
+│       │   ├── chapo.ts          # CHAPO agent definition
+│       │   ├── koda.ts           # KODA agent definition
+│       │   ├── devo.ts           # DEVO agent definition
+│       │   ├── scout.ts          # SCOUT agent definition
+│       │   ├── router.ts         # Orchestration & routing
+│       │   ├── stateManager.ts   # Session state
+│       │   ├── events.ts         # Event emitters
+│       │   ├── systemContext.ts  # Context builder
+│       │   └── types.ts          # TypeScript interfaces
+│       ├── tools/                # Tool implementations
+│       │   ├── registry.ts       # Tool definitions
+│       │   ├── executor.ts       # Execution engine
+│       │   ├── fs.ts             # File system
+│       │   ├── git.ts            # Git operations
+│       │   ├── github.ts         # GitHub API
+│       │   ├── bash.ts           # Bash execution
+│       │   ├── ssh.ts            # SSH execution
+│       │   ├── web.ts            # Web search/fetch
+│       │   ├── memory.ts         # Memory tools
+│       │   └── pm2.ts            # PM2 management
+│       ├── routes/               # API routes
+│       │   ├── looper.ts         # POST /api/looper (NDJSON streaming)
+│       │   ├── actions.ts        # Action endpoints
+│       │   ├── auth.ts           # Authentication
+│       │   ├── sessions.ts       # Session management
+│       │   ├── memory.ts         # Memory queries
+│       │   ├── project.ts        # Project management
+│       │   ├── settings.ts       # Settings
+│       │   ├── skills.ts         # Skills registry
+│       │   └── health.ts         # Health check
+│       ├── llm/                  # LLM integration
+│       │   ├── router.ts         # Provider routing
+│       │   ├── modelSelector.ts  # Model selection
+│       │   ├── perplexity.ts     # Perplexity integration
+│       │   ├── types.ts          # Type definitions
+│       │   └── providers/        # Anthropic, OpenAI, Gemini
+│       ├── actions/              # Action approval system
+│       ├── memory/               # Workspace memory
+│       ├── skills/               # Skill loader & registry
+│       ├── db/                   # Database persistence
+│       ├── mcp/                  # Model Context Protocol
+│       ├── audit/                # Audit logging
+│       └── websocket/            # WebSocket handlers
+├── web/                          # React frontend
 │   └── src/
-│       ├── api.ts            # API client
+│       ├── api.ts                # API client
 │       ├── components/
-│       │   ├── ChatUI.tsx    # Main chat interface
+│       │   ├── ChatUI.tsx        # Main chat interface
 │       │   ├── AgentStatus.tsx
 │       │   └── AgentHistory.tsx
 │       └── types.ts
-└── shared/                   # Shared types
+└── shared/                       # Shared types (@devai/shared)
 ```
 
 ---
 
-## Single-Agent Mode
+## Looper-AI Orchestrator
 
-The traditional mode where a single LLM handles all requests:
+The Looper is the primary user-facing system. It runs an iterative loop that processes user messages, classifies intents, delegates to agents, and validates results before responding.
+
+### Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                      SINGLE-AGENT FLOW                           │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  User Message → LLM → Tool Calls → Confirmation* → Execution    │
-│                                                                  │
-│  * Tools with requiresConfirmation: true need user approval     │
-│                                                                  │
-│  POST /api/chat                                                  │
-│  - Uses askForConfirmation tool for risky operations            │
-│  - Creates pending actions for user approval                    │
-│  - Each tool requires individual confirmation                   │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+User message
+  → Decision Engine classifies intent
+    → TOOL_CALL: Route to agent → execute tool → feed result as event
+    → CLARIFY:   Return question → pause loop
+    → ANSWER:    (optionally) self-validate → return to user
+```
+
+### Engine Configuration
+
+```typescript
+interface LooperConfig {
+  maxIterations: 25;           // Max loop iterations per request
+  maxConversationTokens: 120_000; // Token budget
+  maxToolRetries: 3;           // Retries per tool failure
+  minValidationConfidence: 0.7;// Self-validation threshold
+  selfValidationEnabled: true; // Enable/disable self-check
+}
+```
+
+### Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| **LooperEngine** | `looper/engine.ts` | Main loop: iterate until answer or max iterations |
+| **DecisionEngine** | `looper/decision-engine.ts` | Classify intent: `tool_call`, `clarify`, `answer`, `self_validate`, `continue` |
+| **ConversationManager** | `looper/conversation-manager.ts` | Manage dialog context within token budget |
+| **SelfValidator** | `looper/self-validation.ts` | LLM reviews its own draft answer before delivery |
+| **ErrorHandler** | `looper/error-handler.ts` | Track errors, manage retries |
+
+### Looper Sub-Agents
+
+These are lightweight agents used by the Looper to execute specific tool categories:
+
+| Agent | Type | Purpose |
+|-------|------|---------|
+| **Developer** | `developer` | Code generation, editing, building |
+| **Searcher** | `searcher` | Research, web search, documentation lookup |
+| **Document Manager** | `document_manager` | Read, write, move, delete files |
+| **Commander** | `commander` | Shell commands, git, GitHub operations |
+
+Each implements the `LooperAgent` interface:
+
+```typescript
+interface LooperAgent {
+  readonly type: AgentType;
+  readonly description: string;
+  execute(ctx: AgentContext): Promise<AgentResult>;
+}
+
+interface AgentContext {
+  userMessage: string;
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
+  previousResults?: string[];
+  onActionPending?: (action: Action) => void | Promise<void>;
+}
 ```
 
 ---
 
-## Multi-Agent Mode
+## Multi-Agent System
 
-The 3-agent system for complex tasks:
+The 4-agent system for complex tasks. CHAPO coordinates, KODA/DEVO execute, SCOUT explores.
 
 ```
                             ┌─────────────────────────────────────┐
@@ -101,25 +220,41 @@ The 3-agent system for complex tasks:
 │  Capabilities: READ-ONLY tools + delegation + user interaction              │
 │                                                                              │
 │  Actions:                                                                    │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
-│  │ Ask User     │  │ Request      │  │ Delegate to  │  │ Delegate to  │    │
-│  │ (clarify)    │  │ Approval     │  │ KODA (code)  │  │ DEVO (ops)   │    │
-│  └──────────────┘  └──────────────┘  └──────┬───────┘  └──────┬───────┘    │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐       │
+│  │ Ask User     │ │ Request      │ │ Delegate to  │ │ Delegate to  │       │
+│  │ (clarify)    │ │ Approval     │ │ KODA (code)  │ │ DEVO (ops)   │       │
+│  └──────────────┘ └──────────────┘ └──────┬───────┘ └──────┬───────┘       │
 └─────────────────────────────────────────────┼──────────────────┼────────────┘
                                               │                  │
-                    ┌─────────────────────────┴──────────────────┴─────────┐
-                    ▼                                                       ▼
-┌─────────────────────────────────────┐   ┌─────────────────────────────────────┐
-│        KODA (Senior Developer)       │   │        DEVO (DevOps Engineer)        │
-│  Model: Claude Sonnet 4              │   │  Model: Claude Sonnet 4              │
-│                                      │   │                                      │
-│  Capabilities: CODE OPERATIONS       │   │  Capabilities: DEVOPS OPERATIONS     │
-│  • fs.writeFile, fs.edit            │   │  • bash.execute, ssh.execute         │
-│  • fs.mkdir, fs.move, fs.delete     │   │  • git.commit, git.push, git.pull    │
-│  • fs.readFile, fs.glob (read-only) │   │  • pm2.restart, pm2.logs, pm2.status │
-│                                      │   │  • npm.install, npm.run              │
-│  Can escalate to: CHAPO              │   │  Can escalate to: CHAPO              │
-└─────────────────────────────────────┘   └─────────────────────────────────────┘
+                    ┌─────────────────────────┼──────────────────┼────────────┐
+                    ▼                         │                  ▼            │
+┌─────────────────────────────────────┐  │  ┌─────────────────────────────────────┐
+│        KODA (Senior Developer)       │  │  │        DEVO (DevOps Engineer)        │
+│  Model: Claude Sonnet 4              │  │  │  Model: Claude Sonnet 4              │
+│                                      │  │  │                                      │
+│  Capabilities: CODE OPERATIONS       │  │  │  Capabilities: DEVOPS OPERATIONS     │
+│  - fs.writeFile, fs.edit            │  │  │  - bash.execute, ssh.execute         │
+│  - fs.mkdir, fs.move, fs.delete     │  │  │  - git.commit, git.push, git.pull    │
+│  - fs.readFile, fs.glob (read-only) │  │  │  - pm2.restart, pm2.logs, pm2.status │
+│                                      │  │  │  - npm.install, npm.run              │
+│  Can escalate to: CHAPO              │  │  │  Can escalate to: CHAPO              │
+└─────────────────────────────────────┘  │  └─────────────────────────────────────┘
+                                         │
+                                         ▼
+                    ┌─────────────────────────────────────┐
+                    │      SCOUT (Exploration Specialist)  │
+                    │  Model: Claude Sonnet 4              │
+                    │  Fallback: Claude 3.5 Haiku          │
+                    │                                      │
+                    │  Capabilities: READ-ONLY             │
+                    │  - fs.listFiles, fs.readFile         │
+                    │  - fs.glob, fs.grep                  │
+                    │  - git.status, git.diff              │
+                    │  - web.search, web.fetch             │
+                    │  - memory.remember, memory.search    │
+                    │                                      │
+                    │  Can escalate to: CHAPO              │
+                    └─────────────────────────────────────┘
 ```
 
 ---
@@ -143,6 +278,7 @@ askUser, requestApproval                         (user interaction)
 ```
 
 **File:** `apps/api/src/agents/chapo.ts`
+**Prompt:** `apps/api/src/prompts/chapo.ts`
 
 ---
 
@@ -160,6 +296,7 @@ escalateToChapo                                        (escalation)
 ```
 
 **File:** `apps/api/src/agents/koda.ts`
+**Prompt:** `apps/api/src/prompts/koda.ts`
 
 ---
 
@@ -183,12 +320,97 @@ escalateToChapo                                        (escalation)
 ```
 
 **File:** `apps/api/src/agents/devo.ts`
+**Prompt:** `apps/api/src/prompts/devo.ts`
+
+---
+
+### SCOUT - Exploration Specialist
+
+**Role:** Read-only codebase and web exploration. Gathers information without making any changes.
+
+**Model:** `claude-sonnet-4-20250514` (fallback: `claude-3-5-haiku-20241022`)
+
+**Tools:**
+```
+fs.listFiles, fs.readFile, fs.glob, fs.grep            (read-only)
+git.status, git.diff                                    (read-only)
+web.search, web.fetch                                   (web)
+memory.remember, memory.search, memory.readToday       (memory)
+escalateToChapo                                         (escalation)
+```
+
+**File:** `apps/api/src/agents/scout.ts`
+**Prompt:** `apps/api/src/prompts/scout.ts`
+
+---
+
+## Prompt Architecture
+
+All system prompts live in `apps/api/src/prompts/` and are written in German. JSON schema field names remain in English (they're parsed programmatically).
+
+```
+prompts/
+├── index.ts               # Re-exports everything
+│
+├── Looper Prompts (German):
+│   ├── looper-core.ts     # Main loop behavior
+│   ├── decision-engine.ts # Intent classification rules + JSON schema
+│   ├── self-validation.ts # Self-review criteria
+│   ├── agent-developer.ts # Developer agent behavior
+│   ├── agent-searcher.ts  # Searcher agent behavior
+│   ├── agent-docmanager.ts# Document manager behavior
+│   └── agent-commander.ts # Commander agent behavior
+│
+├── Multi-Agent Prompts (German):
+│   ├── chapo.ts           # Coordinator: delegation, planning, review
+│   ├── koda.ts            # Developer: code operations
+│   ├── devo.ts            # DevOps: deployment, git, PM2
+│   └── scout.ts           # Explorer: read-only research
+│
+└── Shared:
+    └── context.ts         # MEMORY_BEHAVIOR_BLOCK (workspace memory rules)
+```
+
+Agent files import their prompt from this central directory:
+```typescript
+import { CHAPO_SYSTEM_PROMPT } from '../prompts/chapo.js';
+```
 
 ---
 
 ## Request Flow
 
-### Phase 1: Qualification (CHAPO)
+### Looper Flow (Primary)
+
+```
+POST /api/looper
+
+1. User message received
+2. LooperEngine starts iteration loop:
+
+   Iteration N:
+   ├── Decision Engine classifies the latest event
+   ├── Intent: tool_call
+   │   ├── Route to appropriate agent (developer/searcher/docmanager/commander)
+   │   ├── Agent executes the tool
+   │   └── Result fed back as event → next iteration
+   ├── Intent: clarify
+   │   ├── Stream question to user
+   │   └── Pause loop (resume on user response)
+   ├── Intent: answer
+   │   ├── Self-validation (if enabled)
+   │   │   ├── Confidence >= 0.7 → deliver answer
+   │   │   └── Confidence < 0.7 → iterate with suggestions
+   │   └── Stream final response
+   └── Intent: continue
+       └── Next iteration (agent needs more steps)
+
+3. Loop ends when: answer delivered, max iterations, or token budget exhausted
+```
+
+### Multi-Agent Flow
+
+#### Phase 1: Qualification (CHAPO)
 
 ```
 1. User request received
@@ -200,17 +422,18 @@ escalateToChapo                                        (escalation)
 3. Task classification:
    - Type: code_change | devops | mixed | unclear
    - Risk: low | medium | high
-   - Target Agent: koda | devo | null (parallel)
+   - Target Agent: koda | devo | scout | null (parallel)
 
 4. Decision:
    - Unclear? → askUser() for clarification
    - High risk? → requestApproval() from user
    - Code work? → delegateToKoda()
    - DevOps work? → delegateToDevo()
+   - Exploration? → SCOUT handles directly
    - Mixed? → parallel execution
 ```
 
-### Phase 2: Execution (KODA and/or DEVO)
+#### Phase 2: Execution (KODA / DEVO / SCOUT)
 
 ```
 Agent receives:
@@ -228,7 +451,7 @@ Parallel Execution (mixed tasks):
 - Results are combined at the end
 ```
 
-### Phase 3: Review (CHAPO)
+#### Phase 3: Review (CHAPO)
 
 ```
 CHAPO reviews execution results:
@@ -246,7 +469,7 @@ The multi-agent system uses a **one-time approval** model:
 
 | Mode | Approval Model |
 |------|----------------|
-| Single-Agent | Each risky tool needs individual confirmation via `askForConfirmation` |
+| Looper | Approval bridge for risky tools via `onActionPending` callback |
 | Multi-Agent | One approval at CHAPO level, then KODA/DEVO execute autonomously |
 
 ```
@@ -275,7 +498,7 @@ Session state is managed in-memory with a 24-hour TTL.
 interface ConversationState {
   sessionId: string;
   currentPhase: 'qualification' | 'execution' | 'review' | 'error' | 'waiting_user';
-  activeAgent: 'chapo' | 'koda' | 'devo';
+  activeAgent: 'chapo' | 'koda' | 'devo' | 'scout';
 
   taskContext: {
     originalRequest: string;
@@ -312,6 +535,11 @@ interface ConversationState {
 Events are streamed via NDJSON (`application/x-ndjson`):
 
 ```typescript
+// Looper events
+{ type: 'looper_step', step: { intent, agent, toolName, ... } }
+{ type: 'looper_thinking', status: 'Iteration 3...' }
+{ type: 'looper_clarify', question: '...' }
+
 // Agent lifecycle
 { type: 'agent_start', agent: 'chapo', phase: 'qualification' }
 { type: 'agent_switch', from: 'chapo', to: 'koda', reason: '...' }
@@ -378,6 +606,11 @@ Tools are defined in `apps/api/src/tools/registry.ts`:
 | `pm2.save` | Save PM2 config | Yes* |
 | `npm.install` | npm install | Yes* |
 | `npm.run` | npm run script | Yes* |
+| `web.search` | Web search | No |
+| `web.fetch` | Fetch URL content | No |
+| `memory.remember` | Store memory | No |
+| `memory.search` | Search memory | No |
+| `memory.readToday` | Read today's memory | No |
 
 *In multi-agent mode, `requiresConfirmation` is bypassed after CHAPO approval.
 
@@ -423,19 +656,43 @@ const HOST_ALIASES: Record<string, string> = {
 
 ## API Endpoints
 
-### Single-Agent Chat
+### Looper Chat (Primary)
 
 ```
-POST /api/chat
+POST /api/looper
 Content-Type: application/json
+Response: application/x-ndjson (streaming)
 
 {
-  "messages": [...],
-  "provider": "anthropic",
+  "message": "Fix the login bug",
+  "provider": "anthropic" | "openai" | "gemini",
+  "sessionId": "optional",
   "projectRoot": "/path/to/project",
   "skillIds": ["skill1"],
-  "pinnedFiles": ["file1.ts"],
-  "sessionId": "optional"
+  "config": {
+    "maxIterations": 25,
+    "maxConversationTokens": 120000,
+    "maxToolRetries": 3,
+    "minValidationConfidence": 0.7,
+    "selfValidationEnabled": true
+  }
+}
+```
+
+### Looper Prompts (Debug)
+
+```
+GET /api/looper/prompts
+
+Response:
+{
+  "looper.core": "...",
+  "looper.decision": "...",
+  "looper.validation": "...",
+  "looper.agent.developer": "...",
+  "looper.agent.searcher": "...",
+  "looper.agent.document_manager": "...",
+  "looper.agent.commander": "..."
 }
 ```
 
@@ -448,6 +705,22 @@ Content-Type: application/json
 {
   "message": "Deploy the latest changes",
   "projectRoot": "/path/to/project",
+  "sessionId": "optional"
+}
+```
+
+### Single-Agent Chat (Legacy)
+
+```
+POST /api/chat
+Content-Type: application/json
+
+{
+  "messages": [...],
+  "provider": "anthropic",
+  "projectRoot": "/path/to/project",
+  "skillIds": ["skill1"],
+  "pinnedFiles": ["file1.ts"],
   "sessionId": "optional"
 }
 ```
@@ -491,7 +764,7 @@ if (multiAgentMode) {
 
 **UI Components:**
 
-- `AgentStatus`: Shows active agent (CHAPO/KODA/DEVO) and current phase
+- `AgentStatus`: Shows active agent (CHAPO/KODA/DEVO/SCOUT) and current phase
 - `AgentTimeline`: Chronological view of agent actions
 - `AgentHistory`: Detailed history with tool calls and results
 
@@ -499,14 +772,17 @@ if (multiAgentMode) {
 
 ## Example Flows
 
-### Code Change (Single-Agent)
+### Code Fix (Looper)
 
 ```
-User: "Add error handling to login.ts"
-LLM: Calls askForConfirmation(fs.edit, {...})
-User: Approves
-System: Executes fs.edit
-LLM: Reports completion
+User: "Fix the login validation bug"
+Looper Decision: tool_call → developer agent
+Developer: fs.readFile("auth/login.ts")
+Looper Decision: tool_call → developer agent
+Developer: fs.edit("auth/login.ts", ...)
+Looper Decision: answer
+Self-Validation: confidence 0.85 → deliver
+Looper: Streams response to user
 ```
 
 ### Code Change (Multi-Agent)
@@ -530,6 +806,17 @@ CHAPO: Delegates to DEVO
 DEVO: git add → git commit → git push
 DEVO: Triggers workflow
 CHAPO: Reviews and reports status
+```
+
+### Exploration (Multi-Agent)
+
+```
+User: "What does the auth module do?"
+CHAPO: Qualifies as exploration, read-only
+SCOUT: fs.glob("**/auth/**")
+SCOUT: fs.readFile(relevant files)
+SCOUT: Summarizes findings
+CHAPO: Reviews and delivers to user
 ```
 
 ### Mixed Task (Multi-Agent)
