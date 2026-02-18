@@ -273,7 +273,11 @@ export async function executeTool(
         default:
           // Route MCP tools to the MCP manager
           if (mcpManager.isMcpTool(normalizedToolName)) {
-            return mcpManager.executeTool(normalizedToolName, args).then((r) => r.result);
+            const mcpResult = await mcpManager.executeTool(normalizedToolName, args);
+            if (!mcpResult.success) {
+              throw new Error(`MCP tool "${normalizedToolName}" failed: ${mcpResult.error}`);
+            }
+            return mcpResult.result;
           }
           throw new Error(`Unknown tool: ${normalizedToolName}`);
       }

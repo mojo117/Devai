@@ -18,17 +18,41 @@ export class DecisionEngine {
 
   /**
    * Build the full system prompt including dynamically registered MCP tools.
+   * Native tools are ALWAYS preferred. MCP tools are only for specialized tasks.
    */
   private buildSystemPrompt(): string {
     const mcpToolDefs = mcpManager.getToolDefinitions();
     if (mcpToolDefs.length === 0) return DECISION_SYSTEM_PROMPT;
 
-    // Group MCP tools by server (extract from description prefix "[servername]")
-    const mcpSection = mcpToolDefs
-      .map(t => `  ${t.name} – ${t.description}`)
-      .join('\n');
+    // Group MCP tools by server
+    const byServer = new Map<string, string[]>();
+    for (const t of mcpToolDefs) {
+      const serverMatch = t.description.match(/^\[(\w+)\]/);
+      const server = serverMatch ? serverMatch[1] : 'other';
+      if (!byServer.has(server)) byServer.set(server, []);
+      byServer.get(server)!.push(t.name);
+    }
 
-    return DECISION_SYSTEM_PROMPT + `\n\nZusätzlich verfügbare MCP-Tools (auch als toolName verwendbar):\n${mcpSection}\n\nBei MCP-Tools verwende den EXAKTEN Namen mit "mcp_" Präfix wie oben gelistet (z.B. "mcp_serena_find_symbol").`;
+    const mcpLines: string[] = [];
+    for (const [server, tools] of byServer) {
+      mcpLines.push(`  [${server}]: ${tools.join(', ')}`);
+    }
+
+    return DECISION_SYSTEM_PROMPT + `
+
+WICHTIG – Native Tools vs. MCP-Tools:
+Die oben gelisteten nativen Tools sind IMMER zu bevorzugen!
+MCP-Tools sind NUR für spezialisierte Aufgaben, die native Tools nicht abdecken.
+
+Konkret:
+- Web-Suche/Recherche → IMMER "web_search" (NIEMALS mcp_github_mcp_search_code oder ähnliches!)
+- Dateien lesen/schreiben → IMMER native "fs_readFile", "fs_writeFile" etc.
+- Git-Operationen → IMMER native "git_status", "git_diff" etc.
+- Code-Symbole finden/analysieren → MCP Serena Tools (mcp_serena_*)
+- GitHub Issues/PRs verwalten → MCP GitHub Tools (mcp_github_mcp_*)
+
+Verfügbare MCP-Tools (NUR für obige spezialisierte Aufgaben):
+${mcpLines.join('\n')}`;
   }
 
   /**
