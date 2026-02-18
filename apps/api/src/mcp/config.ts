@@ -38,28 +38,11 @@ function expandEnvInString(value: string): string {
 }
 
 function resolveProjectPath(path: string): string {
-  const mappedCandidates: string[] = [];
-  if (path.startsWith('/opt/Klyde/projects/')) {
-    mappedCandidates.push(path.replace('/opt/Klyde/projects/', '/mnt/klyde-projects/'));
-  }
-  if (path.startsWith('/mnt/klyde-projects/')) {
-    mappedCandidates.push(path.replace('/mnt/klyde-projects/', '/opt/Klyde/projects/'));
-  }
-
-  const candidates: string[] = [
-    path,
-    // Common cross-host mappings:
-    ...mappedCandidates,
-    path === '/opt/Klyde/projects' ? '/mnt/klyde-projects' : '',
-    path === '/mnt/klyde-projects' ? '/opt/Klyde/projects' : '',
-    // Last-resort locations (Baso runtime)
-    '/mnt/klyde-projects',
-    '/opt/Klyde/projects',
-    '/opt/shared-repos',
-  ].filter(Boolean);
-
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
+  if (existsSync(path)) return path;
+  // Fallback candidates for Clawd server
+  const candidates = ['/opt/Devai', '/opt', '/root/projects'].filter(Boolean);
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
   }
   return path;
 }
