@@ -462,6 +462,24 @@ export interface ScoutResult {
   confidence: ScoutConfidence;
 }
 
+// ============================================
+// CHAPO LOOP TYPES
+// ============================================
+
+export interface ValidationResult {
+  isComplete: boolean;
+  confidence: number;
+  issues: string[];
+  suggestion?: string;
+}
+
+export interface ChapoLoopResult {
+  answer: string;
+  status: 'completed' | 'waiting_for_user' | 'error';
+  totalIterations: number;
+  question?: string; // if status === 'waiting_for_user'
+}
+
 // SCOUT-specific stream events (extend AgentStreamEvent)
 export type ScoutStreamEvent =
   | { type: 'scout_start'; query: string; scope: ScoutScope }
