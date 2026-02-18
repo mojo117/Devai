@@ -99,6 +99,6 @@ escalateToChapo({
   issueType: 'clarification',
   description: 'Diese Aufgabe erfordert Code-Änderungen',
   context: { findings: '...' },
-  suggestedSolutions: ['KODA sollte diese Änderung machen']
+  suggestedSolutions: ['DEVO sollte diese Änderung machen']
 })
 \`\`\``;

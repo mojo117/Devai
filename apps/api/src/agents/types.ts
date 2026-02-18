@@ -1,14 +1,14 @@
 /**
  * Multi-Agent System Types
  *
- * Three agents: CHAPO (Coordinator), KODA (Developer), DEVO (DevOps)
+ * Three agents: CHAPO (Coordinator), DEVO (Developer & DevOps), SCOUT (Explorer)
  */
 
 import type { ActionPreview } from '../actions/types.js';
 
-export type AgentName = 'chapo' | 'koda' | 'devo' | 'scout';
+export type AgentName = 'chapo' | 'devo' | 'scout';
 
-export type AgentRole = 'Task Coordinator' | 'Senior Developer' | 'DevOps Engineer' | 'Exploration Specialist';
+export type AgentRole = 'Task Coordinator' | 'Developer & DevOps Engineer' | 'Exploration Specialist';
 
 export type TaskType = 'code_change' | 'devops' | 'exploration' | 'mixed' | 'unclear';
 
@@ -69,7 +69,6 @@ export interface AgentCapabilities {
   canGitPush?: boolean;
   canTriggerWorkflows?: boolean;
   canManagePM2?: boolean;
-  canDelegateToKoda?: boolean;
   canDelegateToDevo?: boolean;
   canDelegateToScout?: boolean;
   canAskUser?: boolean;
@@ -358,15 +357,6 @@ export interface ChapoPerspective extends AgentPerspective {
   coordinationNeeds: string[];
 }
 
-// KODA's code-focused perspective
-export interface KodaPerspective extends AgentPerspective {
-  agent: 'koda';
-  affectedFiles: string[];
-  codePatterns: string[];
-  potentialBreakingChanges: string[];
-  testingRequirements: string[];
-}
-
 // DEVO's ops-focused perspective
 export interface DevoPerspective extends AgentPerspective {
   agent: 'devo';
@@ -384,7 +374,6 @@ export interface ExecutionPlan {
 
   // Multi-perspective analysis
   chapoPerspective: ChapoPerspective;
-  kodaPerspective?: KodaPerspective;
   devoPerspective?: DevoPerspective;
 
   // Synthesized plan

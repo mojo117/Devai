@@ -16,7 +16,6 @@ export { CMD_SYSTEM_PROMPT } from './agent-commander.js';
 
 // Multi-Agent System Prompts
 export { CHAPO_SYSTEM_PROMPT } from './chapo.js';
-export { KODA_SYSTEM_PROMPT } from './koda.js';
 export { DEVO_SYSTEM_PROMPT } from './devo.js';
 export { SCOUT_SYSTEM_PROMPT } from './scout.js';
 

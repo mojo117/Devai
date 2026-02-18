@@ -436,7 +436,7 @@ export async function fetchLooperPrompts(): Promise<LooperPromptsResponse> {
 export interface AgentHistoryEntry {
   entryId: string;
   timestamp: string;
-  agent: 'chapo' | 'koda' | 'devo';
+  agent: 'chapo' | 'devo' | 'scout';
   action: string;
   input?: unknown;
   output?: unknown;

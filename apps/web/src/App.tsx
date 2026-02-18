@@ -77,8 +77,6 @@ function App() {
   // Agent icon/phase for header
   const agentIcon = activeAgent === 'chapo'
     ? '🎯'
-    : activeAgent === 'koda'
-    ? '💻'
     : activeAgent === 'devo'
     ? '🔧'
     : activeAgent === 'scout'

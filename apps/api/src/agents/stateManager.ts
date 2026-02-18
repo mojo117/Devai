@@ -25,7 +25,6 @@ import type {
   ExecutionPlan,
   PlanStatus,
   ChapoPerspective,
-  KodaPerspective,
   DevoPerspective,
   RiskLevel,
   // Task Tracking types
@@ -743,21 +742,6 @@ export function createPlan(
 }
 
 /**
- * Add KODA's code-focused perspective to the current plan
- */
-export function addKodaPerspective(
-  sessionId: string,
-  perspective: KodaPerspective
-): ExecutionPlan | undefined {
-  const state = getState(sessionId);
-  if (!state?.currentPlan) return undefined;
-
-  state.currentPlan.kodaPerspective = perspective;
-  schedulePersist(sessionId);
-  return state.currentPlan;
-}
-
-/**
  * Add DEVO's ops-focused perspective to the current plan
  */
 export function addDevoPerspective(
@@ -795,10 +779,7 @@ export function finalizePlan(
 
   // Calculate overall risk from all perspectives
   const risks: RiskLevel[] = [state.currentPlan.chapoPerspective.riskAssessment];
-  // KODA and DEVO don't have riskAssessment, but their concerns affect overall risk
-  if (state.currentPlan.kodaPerspective?.potentialBreakingChanges?.length) {
-    risks.push('medium');
-  }
+  // DEVO doesn't have riskAssessment, but concerns affect overall risk
   if (state.currentPlan.devoPerspective?.infrastructureChanges?.length) {
     risks.push('medium');
   }

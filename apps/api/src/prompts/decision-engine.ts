@@ -29,7 +29,7 @@ Regeln:
 
 KRITISCH – toolName muss EXAKT ein Tool aus der Liste unten sein!
 NIEMALS erfundene Tool-Namen verwenden. Insbesondere VERBOTEN:
-- "delegateToScout", "delegateToKoda", "delegateToDevo", "escalateToChapo" (Delegations-Tools existieren NICHT)
+- "delegateToScout", "delegateToDevo", "escalateToChapo" (Delegations-Tools existieren NICHT)
 - "mcp_web_mcp_search", "mcp_web_search" oder andere "mcp_*"-Präfixe (NICHT verwenden!)
 - Jeder Name der NICHT exakt in der Tool-Liste unten steht
 

@@ -3,7 +3,7 @@
  *
  * Role: Handles codebase exploration and web search tasks.
  * Returns structured JSON summaries without modifying files.
- * Can be spawned by CHAPO, KODA, or DEVO for research tasks.
+ * Can be spawned by CHAPO or DEVO for research tasks.
  */
 
 import type { AgentDefinition } from './types.js';
