@@ -31,7 +31,6 @@ describe('workspaceMdLoader', () => {
     yesterday.setDate(today.getDate() - 1);
 
     await writeWorkspaceFile(workspaceRoot, 'AGENTS.md', '# AGENTS');
-    await writeWorkspaceFile(workspaceRoot, 'IDENTITY.md', '# IDENTITY');
     await writeWorkspaceFile(workspaceRoot, 'SOUL.md', '# SOUL');
     await writeWorkspaceFile(workspaceRoot, 'USER.md', '# USER');
     await writeWorkspaceFile(workspaceRoot, 'TOOLS.md', '# TOOLS');
@@ -56,7 +55,7 @@ describe('workspaceMdLoader', () => {
     const context = await loadWorkspaceMdContext({ mode: 'main', workspaceRoot });
 
     expect(context.diagnostics.missingFiles).toEqual(
-      expect.arrayContaining(['IDENTITY.md', 'SOUL.md', 'USER.md', 'TOOLS.md'])
+      expect.arrayContaining(['SOUL.md', 'USER.md', 'TOOLS.md'])
     );
   });
 });

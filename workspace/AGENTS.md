@@ -6,11 +6,10 @@ This folder is DevAI's persistent workspace context.
 
 Before responding to a new request, load:
 
-1. `IDENTITY.md`
-2. `SOUL.md`
-3. `USER.md`
-4. `memory/YYYY-MM-DD.md` (today + yesterday, when present)
-5. `MEMORY.md` (only for private/main session mode)
+1. `SOUL.md`
+2. `USER.md`
+3. `memory/YYYY-MM-DD.md` (today + yesterday, when present)
+4. `MEMORY.md` (only for private/main session mode)
 
 ## Memory Rules
 
