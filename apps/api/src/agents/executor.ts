@@ -42,6 +42,17 @@ export async function executeAgentTask(
   await warmSystemContextForSession(sessionId, projectRoot);
   const systemContextBlock = getCombinedSystemContextBlock(sessionId);
 
+  // Load devai.md as global instructions for every agent run.
+  // If uiHost isn't available here, the block will simply omit it.
+  let devaiMdBlock = '';
+  try {
+    const uiHost = (stateManager.getState(sessionId)?.taskContext.gatheredInfo['uiHost'] as string | undefined) || null;
+    const ctx = await loadDevaiMdContext();
+    devaiMdBlock = formatDevaiMdBlock(ctx, { uiHost });
+  } catch {
+    // optional
+  }
+
   // Include conversation history for context, then the task prompt
   const messages: LLMMessage[] = [
     ...conversationHistory.map(m => ({
