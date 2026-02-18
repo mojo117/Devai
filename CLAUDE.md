@@ -20,15 +20,6 @@ You are editing files in `/opt/Klyde/projects/Devai/` on the Klyde server.
 
 ## Filesystem Access Policy (DevAI)
 
-DevAI is intentionally restricted to exactly these filesystem roots:
-- `/opt/Klyde/projects/DeviSpace` (sandbox workspace where DevAI can do anything)
-- `/opt/Klyde/projects/Devai` (this repo worktree)
-
-If a user asks about another repo under `/opt/Klyde/projects/*`, do not access it directly. Ask them to copy it into `DeviSpace` or explicitly expand access.
-
-Default behavior:
-- New demo projects (e.g. Hello World sites) go into `DeviSpace`.
-- Do not overwrite DevAI UI entrypoints unless the user explicitly requests modifying DevAI itself.
 
 ```
 Your Edits                    Mutagen Sync                  Live Preview
@@ -145,7 +136,8 @@ ssh root@10.0.0.5 "pm2 status"
 | Branch | Purpose | How to Deploy |
 |--------|---------|---------------|
 | `dev` | Active development | Auto-syncs via Mutagen |
-| `main` | Production | Run project's deploy-main script |
+| `staging` | staging branch
+| `main` | Production | 
 
 ## Project Info
 
