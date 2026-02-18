@@ -8,12 +8,28 @@ import type { DecisionResult, LooperEvent, AgentType } from '@devai/shared';
 import type { LLMProvider } from '../llm/types.js';
 import { llmRouter } from '../llm/router.js';
 import { ConversationManager } from './conversation-manager.js';
-import { normalizeToolName } from '../tools/registry.js';
+import { normalizeToolName, isToolWhitelisted } from '../tools/registry.js';
+import { mcpManager } from '../mcp/index.js';
 
 import { DECISION_SYSTEM_PROMPT } from '../prompts/decision-engine.js';
 
 export class DecisionEngine {
   constructor(private provider: LLMProvider) {}
+
+  /**
+   * Build the full system prompt including dynamically registered MCP tools.
+   */
+  private buildSystemPrompt(): string {
+    const mcpToolDefs = mcpManager.getToolDefinitions();
+    if (mcpToolDefs.length === 0) return DECISION_SYSTEM_PROMPT;
+
+    // Group MCP tools by server (extract from description prefix "[servername]")
+    const mcpSection = mcpToolDefs
+      .map(t => `  ${t.name} – ${t.description}`)
+      .join('\n');
+
+    return DECISION_SYSTEM_PROMPT + `\n\nZusätzlich verfügbare MCP-Tools (auch als toolName verwendbar):\n${mcpSection}\n\nBei MCP-Tools verwende den EXAKTEN Namen mit "mcp_" Präfix wie oben gelistet (z.B. "mcp_serena_find_symbol").`;
+  }
 
   /**
    * Given the full conversation context and the latest event, classify
@@ -44,7 +60,7 @@ export class DecisionEngine {
     try {
       const response = await llmRouter.generate(this.provider, {
         messages,
-        systemPrompt: DECISION_SYSTEM_PROMPT,
+        systemPrompt: this.buildSystemPrompt(),
         maxTokens: 1000,
       });
 
@@ -92,10 +108,14 @@ export class DecisionEngine {
       const intent = this.validIntent(parsed.intent);
       const agent = this.validAgent(parsed.agent);
 
+      const toolName = typeof parsed.toolName === 'string'
+        ? this.sanitizeToolName(normalizeToolName(parsed.toolName))
+        : undefined;
+
       return {
         intent,
         agent: agent ?? undefined,
-        toolName: typeof parsed.toolName === 'string' ? normalizeToolName(parsed.toolName) : undefined,
+        toolName,
         toolArgs: parsed.toolArgs ?? undefined,
         clarificationQuestion: parsed.clarificationQuestion ?? undefined,
         answerText: parsed.answerText ?? undefined,
@@ -120,6 +140,52 @@ export class DecisionEngine {
       return value as AgentType;
     }
     return null;
+  }
+
+  /**
+   * Fix hallucinated tool names.
+   * LLMs sometimes invent MCP-style names like "mcp_web_mcp_search" instead of "web_search".
+   * This method tries to recover the correct tool name.
+   */
+  private sanitizeToolName(name: string): string {
+    // Already valid – return as-is
+    if (isToolWhitelisted(name)) return name;
+
+    // Known hallucination patterns → correct tool name
+    const TOOL_CORRECTIONS: Record<string, string> = {
+      'mcp_web_mcp_search': 'web_search',
+      'mcp_web_search': 'web_search',
+      'mcp_web_mcp_fetch': 'web_fetch',
+      'mcp_web_fetch': 'web_fetch',
+      'mcp_fs_mcp_readFile': 'fs_readFile',
+      'mcp_fs_mcp_writeFile': 'fs_writeFile',
+      'mcp_fs_mcp_listFiles': 'fs_listFiles',
+      'mcp_git_mcp_status': 'git_status',
+      'mcp_git_mcp_diff': 'git_diff',
+      'mcp_memory_mcp_remember': 'memory_remember',
+      'mcp_memory_mcp_search': 'memory_search',
+    };
+
+    if (TOOL_CORRECTIONS[name]) {
+      console.warn(`[decision-engine] Corrected hallucinated tool name: "${name}" → "${TOOL_CORRECTIONS[name]}"`);
+      return TOOL_CORRECTIONS[name];
+    }
+
+    // Generic fix: strip "mcp_" prefix and "_mcp" infix, then check
+    if (name.startsWith('mcp_')) {
+      const stripped = name
+        .replace(/^mcp_/, '')     // Remove leading mcp_
+        .replace(/_mcp_/g, '_')   // Remove _mcp_ infix
+        .replace(/_mcp$/g, '');   // Remove trailing _mcp
+      if (isToolWhitelisted(stripped)) {
+        console.warn(`[decision-engine] Corrected hallucinated tool name: "${name}" → "${stripped}"`);
+        return stripped;
+      }
+    }
+
+    // Return as-is – executor will handle the "not whitelisted" error
+    console.warn(`[decision-engine] Unknown tool name: "${name}" – could not auto-correct`);
+    return name;
   }
 
   private fallbackDecision(raw: string): DecisionResult {

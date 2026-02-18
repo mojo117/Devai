@@ -4,7 +4,7 @@ This document describes the architecture of DevAI, including the Looper orchestr
 
 <div style="position: sticky; top: 0; background: #1a1a2e; padding: 12px 16px; border-radius: 8px; border: 1px solid #333; margin-bottom: 20px; z-index: 100;">
 
-**Navigation:** [Overview](#overview) · [Project Structure](#project-structure) · [Looper](#looper-ai-orchestrator) · [Multi-Agent](#multi-agent-system) · [Prompts](#prompt-architecture) · [Request Flow](#request-flow) · [Approval Flow](#approval-flow) · [State Management](#state-management) · [Streaming](#streaming-protocol) · [Tools](#tool-registry) · [Security](#security) · [API](#api-endpoints) · [Frontend](#frontend-integration)
+**Navigation:** [Overview](#overview) · [Project Structure](#project-structure) · [Looper](#looper-ai-orchestrator) · [Decision Routing](#decision-routing) · [Agents](#looper-sub-agents) · [Memory](#memory-architecture) · [Prompts](#prompt-architecture) · [Request Flow](#request-flow) · [Streaming](#streaming-protocol) · [Tools](#tool-registry) · [Security](#security) · [API](#api-endpoints) · [Frontend](#frontend-integration)
 
 </div>
 
@@ -12,37 +12,51 @@ This document describes the architecture of DevAI, including the Looper orchestr
 
 ## Overview
 
-DevAI is an AI-powered development assistant that can execute code changes, manage deployments, and handle DevOps operations. It uses a two-tier architecture:
+DevAI is an AI-powered assistant platform. The user interacts with **Chapo** – a versatile AI agent, orchestrator, and personal assistant who helps with coding, automation, task management, research, and casual conversation.
 
-1. **Looper-AI** (User-facing orchestrator): Iterative loop engine that talks directly to the user, classifies intents, and delegates work to specialized agents
-2. **Multi-Agent System** (Sub-agents): 4 specialized agents (CHAPO, KODA, DEVO, SCOUT) that execute delegated tasks with tool isolation
+**Architecture: Looper-AI with 4 Sub-Agents**
 
 ```
                     ┌──────────────────────────┐
                     │         USER             │
                     └────────────┬─────────────┘
+                                 │
                                  ▼
               ┌──────────────────────────────────────┐
-              │          LOOPER-AI ENGINE             │
-              │  Decision Engine → Agent Routing      │
-              │  Self-Validation → Conversation Mgmt  │
+              │     CHAPO – LOOPER-AI ENGINE          │
               │                                       │
-              │  Sub-Agents:                          │
+              │  ┌─────────────┐  ┌───────────────┐  │
+              │  │  Decision   │  │ Conversation  │  │
+              │  │  Engine     │  │ Manager       │  │
+              │  └──────┬──────┘  └───────────────┘  │
+              │         │                             │
+              │  ┌──────▼──────┐  ┌───────────────┐  │
+              │  │  Agent      │  │ Self-         │  │
+              │  │  Router     │  │ Validator     │  │
+              │  └──────┬──────┘  └───────────────┘  │
+              │         │                             │
+              │  ┌──────▼──────────────────────────┐  │
+              │  │  Memory (direkt vom Looper)     │  │
+              │  │  memory_remember/search/readToday│  │
+              │  └────────────────────────────────┘  │
+              │                                       │
+              │  Sub-Agents (via agent-Feld):         │
               │  ┌───────────┐ ┌───────────────────┐ │
               │  │ Developer │ │ Document Manager  │ │
+              │  │ (Koda)    │ │ (Devo)            │ │
               │  ├───────────┤ ├───────────────────┤ │
               │  │ Searcher  │ │ Commander         │ │
+              │  │ (Scout)   │ │ (Chapo-Ops)       │ │
               │  └───────────┘ └───────────────────┘ │
-              └──────────────────┬───────────────────┘
-                                 │ delegates complex tasks
-                                 ▼
-              ┌──────────────────────────────────────┐
-              │        MULTI-AGENT SYSTEM            │
-              │  ┌───────┐ ┌──────┐ ┌──────┐ ┌─────┐│
-              │  │ CHAPO │ │ KODA │ │ DEVO │ │SCOUT││
-              │  └───────┘ └──────┘ └──────┘ └─────┘│
               └──────────────────────────────────────┘
 ```
+
+**Key design principles:**
+- Chapo is a versatile assistant, not just a dev tool
+- Agent routing via `agent` field in Decision Engine JSON – no delegation meta-tools
+- Memory tools executed directly by Looper (not delegated to agents)
+- Approval system deactivated (trusted/sandboxed mode)
+- Loop exhaustion generates LLM summary and asks user for next steps
 
 ---
 
@@ -54,20 +68,20 @@ apps/
 │   └── src/
 │       ├── prompts/              # Central prompt directory (all German)
 │       │   ├── index.ts          # Re-exports all prompts
-│       │   ├── looper-core.ts    # LOOPER_CORE_SYSTEM_PROMPT
-│       │   ├── decision-engine.ts# DECISION_SYSTEM_PROMPT
+│       │   ├── looper-core.ts    # LOOPER_CORE_SYSTEM_PROMPT (Chapo identity)
+│       │   ├── decision-engine.ts# DECISION_SYSTEM_PROMPT (intent + routing)
 │       │   ├── self-validation.ts# VALIDATION_SYSTEM_PROMPT
 │       │   ├── agent-developer.ts# DEV_SYSTEM_PROMPT
 │       │   ├── agent-searcher.ts # SEARCH_SYSTEM_PROMPT
 │       │   ├── agent-docmanager.ts# DOC_SYSTEM_PROMPT
 │       │   ├── agent-commander.ts# CMD_SYSTEM_PROMPT
-│       │   ├── chapo.ts          # CHAPO_SYSTEM_PROMPT
+│       │   ├── chapo.ts          # CHAPO_SYSTEM_PROMPT (personality)
 │       │   ├── koda.ts           # KODA_SYSTEM_PROMPT
 │       │   ├── devo.ts           # DEVO_SYSTEM_PROMPT
 │       │   ├── scout.ts          # SCOUT_SYSTEM_PROMPT
 │       │   └── context.ts        # MEMORY_BEHAVIOR_BLOCK
 │       ├── looper/               # Looper-AI engine
-│       │   ├── engine.ts         # LooperEngine (main loop)
+│       │   ├── engine.ts         # LooperEngine (main loop, memory, exhaustion)
 │       │   ├── decision-engine.ts# Intent classification
 │       │   ├── conversation-manager.ts # Context management
 │       │   ├── self-validation.ts# Self-validation
@@ -79,20 +93,10 @@ apps/
 │       │       ├── document-manager.ts # File operations agent
 │       │       ├── commander.ts  # Shell commands agent
 │       │       └── index.ts      # Agent factory
-│       ├── agents/               # Multi-agent system
-│       │   ├── chapo.ts          # CHAPO agent definition
-│       │   ├── koda.ts           # KODA agent definition
-│       │   ├── devo.ts           # DEVO agent definition
-│       │   ├── scout.ts          # SCOUT agent definition
-│       │   ├── router.ts         # Orchestration & routing
-│       │   ├── stateManager.ts   # Session state
-│       │   ├── events.ts         # Event emitters
-│       │   ├── systemContext.ts  # Context builder
-│       │   └── types.ts          # TypeScript interfaces
 │       ├── tools/                # Tool implementations
-│       │   ├── registry.ts       # Tool definitions
-│       │   ├── executor.ts       # Execution engine
-│       │   ├── fs.ts             # File system
+│       │   ├── registry.ts       # Tool definitions & whitelist
+│       │   ├── executor.ts       # Execution engine (switch/case)
+│       │   ├── fs.ts             # File system tools
 │       │   ├── git.ts            # Git operations
 │       │   ├── github.ts         # GitHub API
 │       │   ├── bash.ts           # Bash execution
@@ -116,9 +120,9 @@ apps/
 │       │   ├── perplexity.ts     # Perplexity integration
 │       │   ├── types.ts          # Type definitions
 │       │   └── providers/        # Anthropic, OpenAI, Gemini
-│       ├── actions/              # Action approval system
 │       ├── memory/               # Workspace memory
-│       ├── skills/               # Skill loader & registry
+│       ├── config/               # Configuration (trust.ts etc.)
+│       ├── actions/              # Action approval system (deactivated)
 │       ├── db/                   # Database persistence
 │       ├── mcp/                  # Model Context Protocol
 │       ├── audit/                # Audit logging
@@ -140,25 +144,15 @@ apps/
 
 The Looper is the primary user-facing system. It runs an iterative loop that processes user messages, classifies intents, delegates to agents, and validates results before responding.
 
-### Architecture
-
-```
-User message
-  → Decision Engine classifies intent
-    → TOOL_CALL: Route to agent → execute tool → feed result as event
-    → CLARIFY:   Return question → pause loop
-    → ANSWER:    (optionally) self-validate → return to user
-```
-
 ### Engine Configuration
 
 ```typescript
 interface LooperConfig {
-  maxIterations: 25;           // Max loop iterations per request
+  maxIterations: 25;              // Max loop iterations per request
   maxConversationTokens: 120_000; // Token budget
-  maxToolRetries: 3;           // Retries per tool failure
-  minValidationConfidence: 0.7;// Self-validation threshold
-  selfValidationEnabled: true; // Enable/disable self-check
+  maxToolRetries: 3;              // Retries per tool failure
+  minValidationConfidence: 0.7;   // Self-validation threshold
+  selfValidationEnabled: true;    // Enable/disable self-check
 }
 ```
 
@@ -166,22 +160,177 @@ interface LooperConfig {
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| **LooperEngine** | `looper/engine.ts` | Main loop: iterate until answer or max iterations |
+| **LooperEngine** | `looper/engine.ts` | Main loop, agent dispatch, memory handling, exhaustion summary |
 | **DecisionEngine** | `looper/decision-engine.ts` | Classify intent: `tool_call`, `clarify`, `answer`, `self_validate`, `continue` |
-| **ConversationManager** | `looper/conversation-manager.ts` | Manage dialog context within token budget |
+| **ConversationManager** | `looper/conversation-manager.ts` | Manage dialog context within 120k token budget |
 | **SelfValidator** | `looper/self-validation.ts` | LLM reviews its own draft answer before delivery |
-| **ErrorHandler** | `looper/error-handler.ts` | Track errors, manage retries |
+| **ErrorHandler** | `looper/error-handler.ts` | Track errors, manage retries (max 3 per tool) |
 
-### Looper Sub-Agents
+---
 
-These are lightweight agents used by the Looper to execute specific tool categories:
+## Decision Routing
 
-| Agent | Type | Purpose |
-|-------|------|---------|
-| **Developer** | `developer` | Code generation, editing, building |
-| **Searcher** | `searcher` | Research, web search, documentation lookup |
-| **Document Manager** | `document_manager` | Read, write, move, delete files |
-| **Commander** | `commander` | Shell commands, git, GitHub operations |
+The Decision Engine is the core routing logic. It receives the conversation history + latest event, and outputs a JSON decision that determines what happens next.
+
+### Decision Flow
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    USER MESSAGE                               │
+│  z.B. "Wie ist das Wetter?" / "Fix den Bug" / "Hallo!"      │
+└──────────────────────────┬───────────────────────────────────┘
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│                   LOOPER ENGINE                               │
+│  1. System Prompt bauen (Chapo-Core + Memory + Projekt)      │
+│  2. User-Message zur Conversation hinzufügen                 │
+│  3. Initiales Event: { type: 'user_message' }               │
+└──────────────────────────┬───────────────────────────────────┘
+                           ▼
+          ┌────────── ITERATION LOOP (max 25) ──────────┐
+          │                                              │
+          │    ┌─────────────────────────────────┐       │
+          │    │     DECISION ENGINE (LLM)       │       │
+          │    │                                 │       │
+          │    │ Input:                          │       │
+          │    │ - Full conversation history     │       │
+          │    │ - Latest event (described)      │       │
+          │    │ - Token budget status           │       │
+          │    │                                 │       │
+          │    │ Output JSON:                    │       │
+          │    │ {                               │       │
+          │    │   intent: "tool_call"|          │       │
+          │    │          "answer"|"clarify",    │       │
+          │    │   agent: "developer"|           │       │
+          │    │         "searcher"|             │       │
+          │    │         "document_manager"|     │       │
+          │    │         "commander"|null,       │       │
+          │    │   toolName: "web_search"|...,   │       │
+          │    │   toolArgs: {...},              │       │
+          │    │   answerText: "...",            │       │
+          │    │   clarificationQuestion: "..."  │       │
+          │    │ }                               │       │
+          │    └───────────┬─────────────────────┘       │
+          │                │                             │
+          │    ┌───────────▼─────────────────┐           │
+          │    │      INTENT SWITCH          │           │
+          │    └──┬────┬────┬────┬────┬──────┘           │
+          │       │    │    │    │    │                   │
+          └───────┼────┼────┼────┼────┼──────────────────┘
+                  │    │    │    │    │
+   ┌──────────────┘    │    │    │    └───────────────┐
+   ▼                   │    │    │                    ▼
+ ANSWER                │    │    │              CONTINUE /
+ ┌──────────────┐      │    │    │              SELF_VALIDATE
+ │ answerText   │      │    │    │              ┌─────────────┐
+ │              │      │    │    │              │ Loop again   │
+ │ Self-Validate│      │    │    │              │ same event   │
+ │ conf ≥ 0.7 →│      │    │    │              └─────────────┘
+ │   deliver    │      │    │    │
+ │ conf < 0.7 →│      │    │    └──────────────┐
+ │   iterate   │      │    │                   ▼
+ └──────────────┘      │    │            CLARIFY
+                       │    │            ┌──────────────┐
+                       │    │            │ Question →   │
+                       │    │            │ User         │
+                       │    │            │ Loop PAUSE   │
+                       │    │            │ status:      │
+                       │    │            │ waiting_for_ │
+                       │    │            │ user         │
+                       │    │            └──────────────┘
+                       │    │
+           ┌───────────┘    └──────────────────┐
+           ▼                                   ▼
+     TOOL_CALL                          TOOL_CALL
+     (Memory Tool)                      (Agent Tool)
+     ┌──────────────────┐              ┌──────────────────┐
+     │ toolName starts  │              │ agent field      │
+     │ with "memory_"   │              │ determines which │
+     │                  │              │ agent executes   │
+     │ Executed directly│              │                  │
+     │ by Looper via    │              │ No delegation    │
+     │ executeTool()    │              │ meta-tools!      │
+     │                  │              │                  │
+     │ memory_remember  │              │ Route via:       │
+     │ memory_search    │              │ agents.get(      │
+     │ memory_readToday │              │   decision.agent │
+     │                  │              │ )                │
+     │ Result → Event   │              │                  │
+     │ → next iteration │              │ Result → Event   │
+     └──────────────────┘              │ → next iteration │
+                                       └────────┬─────────┘
+                                                │
+                                   ┌────────────▼────────────┐
+                                   │     AGENT DISPATCH      │
+                                   │                         │
+                                   │  "developer" → Koda     │
+                                   │    fs_*, git_*          │
+                                   │                         │
+                                   │  "searcher" → Scout     │
+                                   │    web_search, web_fetch│
+                                   │    context_*            │
+                                   │                         │
+                                   │  "document_manager"     │
+                                   │    → Devo               │
+                                   │    fs_*                 │
+                                   │                         │
+                                   │  "commander" → Ops      │
+                                   │    bash_execute,        │
+                                   │    ssh_execute, git_*,  │
+                                   │    pm2_*, npm_*         │
+                                   └─────────────────────────┘
+```
+
+### Decision Engine Prompt Rules
+
+The Decision Engine LLM uses `DECISION_SYSTEM_PROMPT` with these rules:
+
+1. **intent "answer"** (preferred for chat): Conversations, questions, explanations, brainstorming
+2. **intent "tool_call"**: Concrete action needed. Agent + real tool name required
+3. **intent "clarify"**: Only when truly unclear what the user wants
+
+**Critical constraint:** `toolName` must ALWAYS be a real tool from the registry. Never `delegateToScout`, `delegateToKoda`, etc. Agent routing happens via the `agent` field.
+
+### Routing Examples
+
+| User says | intent | agent | toolName | toolArgs |
+|-----------|--------|-------|----------|----------|
+| "Hallo!" | `answer` | null | null | null |
+| "Wie ist das Wetter?" | `tool_call` | `searcher` | `web_search` | `{ query: "Wetter..." }` |
+| "Zeig mir die Datei" | `tool_call` | `document_manager` | `fs_readFile` | `{ path: "..." }` |
+| "Fix den Bug in login.ts" | `tool_call` | `developer` | `fs_readFile` | `{ path: "login.ts" }` |
+| "Merk dir: X ist wichtig" | `tool_call` | null | `memory_remember` | `{ content: "X..." }` |
+| "Deploy to staging" | `tool_call` | `commander` | `bash_execute` | `{ command: "..." }` |
+| "Git Status" | `tool_call` | `commander` | `git_status` | `{}` |
+
+### Loop Exhaustion
+
+When the 25-iteration limit is reached:
+
+```
+1. buildExhaustionSummary() calls LLM to generate summary (German):
+   - Was wurde erledigt?
+   - Was ist noch offen?
+   - Welche nächsten Schritte?
+   - Frage an den User: weitermachen / Priorität ändern / abbrechen
+
+2. status = 'waiting_for_user'
+3. emit({ type: 'clarify', data: { question: summary } })
+4. User responds → continueWithClarification() → fresh 25-iteration loop
+```
+
+---
+
+## Looper Sub-Agents
+
+These are lightweight agents used by the Looper to execute specific tool categories. They are routed via the `agent` field in the Decision Engine's JSON output.
+
+| Agent | Type Key | Name | Tools |
+|-------|----------|------|-------|
+| **Developer** | `developer` | Koda | `fs_*`, `git_*` (code operations) |
+| **Searcher** | `searcher` | Scout | `web_search`, `web_fetch`, `context_*` |
+| **Document Manager** | `document_manager` | Devo | `fs_*` (file organization) |
+| **Commander** | `commander` | Chapo-Ops | `bash_execute`, `ssh_execute`, `git_*`, `pm2_*`, `npm_*`, `github_*` |
 
 Each implements the `LooperAgent` interface:
 
@@ -201,146 +350,35 @@ interface AgentContext {
 }
 ```
 
----
-
-## Multi-Agent System
-
-The 4-agent system for complex tasks. CHAPO coordinates, KODA/DEVO execute, SCOUT explores.
-
-```
-                            ┌─────────────────────────────────────┐
-                            │           USER REQUEST              │
-                            └─────────────────┬───────────────────┘
-                                              ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        CHAPO (Task Coordinator)                              │
-│  Model: Claude Opus 4.5                                                      │
-│  Role: Task qualification, context gathering, delegation, review             │
-│                                                                              │
-│  Capabilities: READ-ONLY tools + delegation + user interaction              │
-│                                                                              │
-│  Actions:                                                                    │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐       │
-│  │ Ask User     │ │ Request      │ │ Delegate to  │ │ Delegate to  │       │
-│  │ (clarify)    │ │ Approval     │ │ KODA (code)  │ │ DEVO (ops)   │       │
-│  └──────────────┘ └──────────────┘ └──────┬───────┘ └──────┬───────┘       │
-└─────────────────────────────────────────────┼──────────────────┼────────────┘
-                                              │                  │
-                    ┌─────────────────────────┼──────────────────┼────────────┐
-                    ▼                         │                  ▼            │
-┌─────────────────────────────────────┐  │  ┌─────────────────────────────────────┐
-│        KODA (Senior Developer)       │  │  │        DEVO (DevOps Engineer)        │
-│  Model: Claude Sonnet 4              │  │  │  Model: Claude Sonnet 4              │
-│                                      │  │  │                                      │
-│  Capabilities: CODE OPERATIONS       │  │  │  Capabilities: DEVOPS OPERATIONS     │
-│  - fs.writeFile, fs.edit            │  │  │  - bash.execute, ssh.execute         │
-│  - fs.mkdir, fs.move, fs.delete     │  │  │  - git.commit, git.push, git.pull    │
-│  - fs.readFile, fs.glob (read-only) │  │  │  - pm2.restart, pm2.logs, pm2.status │
-│                                      │  │  │  - npm.install, npm.run              │
-│  Can escalate to: CHAPO              │  │  │  Can escalate to: CHAPO              │
-└─────────────────────────────────────┘  │  └─────────────────────────────────────┘
-                                         │
-                                         ▼
-                    ┌─────────────────────────────────────┐
-                    │      SCOUT (Exploration Specialist)  │
-                    │  Model: Claude Sonnet 4              │
-                    │  Fallback: Claude 3.5 Haiku          │
-                    │                                      │
-                    │  Capabilities: READ-ONLY             │
-                    │  - fs.listFiles, fs.readFile         │
-                    │  - fs.glob, fs.grep                  │
-                    │  - git.status, git.diff              │
-                    │  - web.search, web.fetch             │
-                    │  - memory.remember, memory.search    │
-                    │                                      │
-                    │  Can escalate to: CHAPO              │
-                    └─────────────────────────────────────┘
-```
+**Important:** Agents do NOT handle memory tools. Memory is executed directly by the Looper engine.
 
 ---
 
-## Agents
+## Memory Architecture
 
-### CHAPO - Task Coordinator
+Memory is managed at the Looper level, not delegated to agents.
 
-**Role:** Orchestrates the multi-agent workflow. Analyzes requests, gathers context, and delegates to specialized agents.
+### Loading (System Prompt)
 
-**Model:** `claude-opus-4-20250514`
+When the Looper starts, `buildSystemPrompt()` loads:
 
-**Tools:**
+1. **Looper Core Prompt** – Chapo's identity and capabilities
+2. **Project Context** – scanned from project root
+3. **Today's Daily Memory** – via `readDailyMemory()` (max 3000 chars)
+4. **Long-Term Memory** – from `MEMORY.md` in workspace root (max 3000 chars)
+
+### Execution
+
+Memory tool calls (`memory_remember`, `memory_search`, `memory_readToday`) are intercepted by the Looper before agent dispatch:
+
+```typescript
+// In engine.ts
+if (decisionResult.toolName && this.isMemoryTool(decisionResult.toolName)) {
+  // Execute directly, bypass agent routing
+  const result = await this.executeMemoryTool(toolName, toolArgs);
+  // Result fed back as event → next iteration
+}
 ```
-fs.listFiles, fs.readFile, fs.glob, fs.grep     (read-only)
-git.status, git.diff                             (read-only)
-github.getWorkflowRunStatus                      (read-only)
-logs.getStagingLogs                              (read-only)
-delegateToKoda, delegateToDevo                   (delegation)
-askUser, requestApproval                         (user interaction)
-```
-
-**File:** `apps/api/src/agents/chapo.ts`
-**Prompt:** `apps/api/src/prompts/chapo.ts`
-
----
-
-### KODA - Senior Developer
-
-**Role:** Handles all code-related tasks including writing, editing, and deleting files.
-
-**Model:** `claude-sonnet-4-20250514`
-
-**Tools:**
-```
-fs.writeFile, fs.edit, fs.mkdir, fs.move, fs.delete   (write)
-fs.listFiles, fs.readFile, fs.glob, fs.grep           (read-only)
-escalateToChapo                                        (escalation)
-```
-
-**File:** `apps/api/src/agents/koda.ts`
-**Prompt:** `apps/api/src/prompts/koda.ts`
-
----
-
-### DEVO - DevOps Engineer
-
-**Role:** Handles DevOps operations including deployments, server management, and CI/CD.
-
-**Model:** `claude-sonnet-4-20250514`
-
-**Tools:**
-```
-bash.execute, ssh.execute                              (execution)
-git.commit, git.push, git.pull, git.add               (git)
-git.status, git.diff                                   (read-only)
-github.triggerWorkflow, github.getWorkflowRunStatus   (CI/CD)
-pm2.status, pm2.restart, pm2.stop, pm2.start          (PM2)
-pm2.logs, pm2.reloadAll, pm2.save
-npm.install, npm.run                                   (npm)
-fs.listFiles, fs.readFile                              (read-only)
-escalateToChapo                                        (escalation)
-```
-
-**File:** `apps/api/src/agents/devo.ts`
-**Prompt:** `apps/api/src/prompts/devo.ts`
-
----
-
-### SCOUT - Exploration Specialist
-
-**Role:** Read-only codebase and web exploration. Gathers information without making any changes.
-
-**Model:** `claude-sonnet-4-20250514` (fallback: `claude-3-5-haiku-20241022`)
-
-**Tools:**
-```
-fs.listFiles, fs.readFile, fs.glob, fs.grep            (read-only)
-git.status, git.diff                                    (read-only)
-web.search, web.fetch                                   (web)
-memory.remember, memory.search, memory.readToday       (memory)
-escalateToChapo                                         (escalation)
-```
-
-**File:** `apps/api/src/agents/scout.ts`
-**Prompt:** `apps/api/src/prompts/scout.ts`
 
 ---
 
@@ -352,28 +390,23 @@ All system prompts live in `apps/api/src/prompts/` and are written in German. JS
 prompts/
 ├── index.ts               # Re-exports everything
 │
-├── Looper Prompts (German):
-│   ├── looper-core.ts     # Main loop behavior
-│   ├── decision-engine.ts # Intent classification rules + JSON schema
-│   ├── self-validation.ts # Self-review criteria
+├── Looper Prompts:
+│   ├── looper-core.ts     # Chapo's identity (versatile assistant)
+│   ├── decision-engine.ts # Intent classification + agent routing rules
+│   ├── self-validation.ts # Self-review criteria (completeness, tone, etc.)
 │   ├── agent-developer.ts # Developer agent behavior
 │   ├── agent-searcher.ts  # Searcher agent behavior
 │   ├── agent-docmanager.ts# Document manager behavior
 │   └── agent-commander.ts # Commander agent behavior
 │
-├── Multi-Agent Prompts (German):
-│   ├── chapo.ts           # Coordinator: delegation, planning, review
-│   ├── koda.ts            # Developer: code operations
-│   ├── devo.ts            # DevOps: deployment, git, PM2
-│   └── scout.ts           # Explorer: read-only research
+├── Legacy Multi-Agent Prompts (still present but secondary):
+│   ├── chapo.ts           # Chapo personality & capabilities overview
+│   ├── koda.ts            # Developer agent identity
+│   ├── devo.ts            # DevOps agent identity
+│   └── scout.ts           # Explorer agent identity
 │
 └── Shared:
     └── context.ts         # MEMORY_BEHAVIOR_BLOCK (workspace memory rules)
-```
-
-Agent files import their prompt from this central directory:
-```typescript
-import { CHAPO_SYSTEM_PROMPT } from '../prompts/chapo.js';
 ```
 
 ---
@@ -386,147 +419,99 @@ import { CHAPO_SYSTEM_PROMPT } from '../prompts/chapo.js';
 POST /api/looper
 
 1. User message received
-2. LooperEngine starts iteration loop:
+2. LooperEngine.run(message):
+   a. Build system prompt (Chapo core + memory + project context)
+   b. Add user message to conversation
+   c. Start iteration loop
 
    Iteration N:
-   ├── Decision Engine classifies the latest event
-   ├── Intent: tool_call
-   │   ├── Route to appropriate agent (developer/searcher/docmanager/commander)
+   ├── Decision Engine classifies the latest event → JSON
+   │
+   ├── Intent: tool_call + memory tool
+   │   ├── Looper executes memory tool directly
+   │   └── Result fed back as event → next iteration
+   │
+   ├── Intent: tool_call + agent tool
+   │   ├── Route to agent via agent field (developer/searcher/docmanager/commander)
    │   ├── Agent executes the tool
    │   └── Result fed back as event → next iteration
+   │
    ├── Intent: clarify
    │   ├── Stream question to user
-   │   └── Pause loop (resume on user response)
+   │   └── Pause loop (status: waiting_for_user)
+   │
    ├── Intent: answer
    │   ├── Self-validation (if enabled)
    │   │   ├── Confidence >= 0.7 → deliver answer
    │   │   └── Confidence < 0.7 → iterate with suggestions
-   │   └── Stream final response
-   └── Intent: continue
-       └── Next iteration (agent needs more steps)
+   │   └── Stream final response (status: completed)
+   │
+   └── Intent: continue / self_validate
+       └── Next iteration (same event context)
 
-3. Loop ends when: answer delivered, max iterations, or token budget exhausted
+3. Loop ends when:
+   - answer delivered (status: completed)
+   - clarification needed (status: waiting_for_user)
+   - max 25 iterations reached → LLM summary + ask user (status: waiting_for_user)
+
+4. User responds to waiting_for_user:
+   - continueWithClarification() → fresh iteration counter, same conversation
 ```
 
-### Multi-Agent Flow
+### Concrete Examples
 
-#### Phase 1: Qualification (CHAPO)
-
+**Weather Query (Searcher):**
 ```
-1. User request received
-2. CHAPO gathers context using read-only tools:
-   - fs.glob() → find relevant files
-   - fs.readFile() → understand code
-   - git.status() → check current state
-
-3. Task classification:
-   - Type: code_change | devops | mixed | unclear
-   - Risk: low | medium | high
-   - Target Agent: koda | devo | scout | null (parallel)
-
-4. Decision:
-   - Unclear? → askUser() for clarification
-   - High risk? → requestApproval() from user
-   - Code work? → delegateToKoda()
-   - DevOps work? → delegateToDevo()
-   - Exploration? → SCOUT handles directly
-   - Mixed? → parallel execution
+User: "Wie ist das Wetter in Darmstadt?"
+→ Decision: { intent: "tool_call", agent: "searcher", toolName: "web_search", toolArgs: { query: "Wetter Darmstadt" } }
+→ isMemoryTool("web_search") = false
+→ Agent: searcher executes web_search
+→ Result: Weather data as event
+→ Decision: { intent: "answer", answerText: "In Darmstadt sind es aktuell..." }
+→ Self-Validation: confidence 0.9 → deliver
 ```
 
-#### Phase 2: Execution (KODA / DEVO / SCOUT)
-
+**Smalltalk (Direct Answer):**
 ```
-Agent receives:
-- Original request
-- Context gathered by CHAPO
-- Specific instructions
-
-Agent executes:
-- Uses specialized tools
-- Tools execute directly (no per-tool confirmation)
-- On error: escalateToChapo() for help
-
-Parallel Execution (mixed tasks):
-- KODA and DEVO work simultaneously
-- Results are combined at the end
+User: "Hallo, wie geht's?"
+→ Decision: { intent: "answer", answerText: "Hey! Mir geht's gut..." }
+→ Self-Validation: confidence 0.95 → deliver
+→ No agent, no tool, direct response
 ```
 
-#### Phase 3: Review (CHAPO)
-
+**Code Fix (Developer):**
 ```
-CHAPO reviews execution results:
-1. Verifies changes were made correctly
-2. Checks for errors
-3. Creates user-friendly summary
-4. Suggests next steps if needed
+User: "Fix the login validation bug"
+→ Decision: { intent: "tool_call", agent: "developer", toolName: "fs_readFile", toolArgs: { path: "auth/login.ts" } }
+→ Developer agent reads file
+→ Decision: { intent: "tool_call", agent: "developer", toolName: "fs_edit", toolArgs: { ... } }
+→ Developer agent edits file
+→ Decision: { intent: "answer", answerText: "Bug gefixt: ..." }
+→ Self-Validation: confidence 0.85 → deliver
+```
+
+**Memory (Looper Direct):**
+```
+User: "Merk dir: API Key ist abc123"
+→ Decision: { intent: "tool_call", agent: null, toolName: "memory_remember", toolArgs: { content: "API Key ist abc123" } }
+→ isMemoryTool("memory_remember") = true
+→ Looper executes directly via executeTool()
+→ Result: "[Looper/Memory] memory_remember: Gespeichert"
+→ Decision: { intent: "answer", answerText: "Hab ich mir gemerkt!" }
 ```
 
 ---
 
-## Approval Flow
+## Approval System (Deactivated)
 
-The multi-agent system uses a **one-time approval** model:
-
-| Mode | Approval Model |
-|------|----------------|
-| Looper | Approval bridge for risky tools via `onActionPending` callback |
-| Multi-Agent | One approval at CHAPO level, then KODA/DEVO execute autonomously |
-
-```
-Multi-Agent Approval Flow:
-
-1. CHAPO qualifies the task
-2. If risky (high risk level):
-   → CHAPO requests user approval
-   → User sees: task description, risk level, target agent
-   → User approves or rejects
-3. Once approved:
-   → approvalGranted = true (stored in session state)
-   → KODA/DEVO execute ALL tools directly
-   → No per-tool confirmation popups
-```
-
----
-
-## State Management
-
-Session state is managed in-memory with a 24-hour TTL.
-
-**File:** `apps/api/src/agents/stateManager.ts`
+The approval system is currently **deactivated**. All tools execute in sandbox/trusted mode without user confirmation.
 
 ```typescript
-interface ConversationState {
-  sessionId: string;
-  currentPhase: 'qualification' | 'execution' | 'review' | 'error' | 'waiting_user';
-  activeAgent: 'chapo' | 'koda' | 'devo' | 'scout';
-
-  taskContext: {
-    originalRequest: string;
-    qualificationResult?: QualificationResult;
-    gatheredFiles: string[];
-    gatheredInfo: Record<string, unknown>;
-    approvalGranted: boolean;
-    approvalTimestamp?: string;
-  };
-
-  agentHistory: AgentHistoryEntry[];
-  pendingApprovals: ApprovalRequest[];
-  pendingQuestions: UserQuestion[];
-  parallelExecutions: ParallelExecution[];
-}
+// config/trust.ts
+export const DEFAULT_TRUST_MODE: TrustMode = 'trusted';
 ```
 
-### Key Functions
-
-| Function | Description |
-|----------|-------------|
-| `getOrCreateState(sessionId)` | Get or initialize session state |
-| `setPhase(sessionId, phase)` | Update current phase |
-| `setActiveAgent(sessionId, agent)` | Switch active agent |
-| `grantApproval(sessionId)` | Mark session as approved |
-| `isApprovalGranted(sessionId)` | Check if approval was granted |
-| `addHistoryEntry(...)` | Log agent action to history |
-| `startParallelExecution(...)` | Begin parallel KODA+DEVO execution |
+In trusted mode, all tools bypass the confirmation flow. The `onActionPending` callback in agents still exists but is not triggered.
 
 ---
 
@@ -535,103 +520,66 @@ interface ConversationState {
 Events are streamed via NDJSON (`application/x-ndjson`):
 
 ```typescript
-// Looper events
-{ type: 'looper_step', step: { intent, agent, toolName, ... } }
-{ type: 'looper_thinking', status: 'Iteration 3...' }
-{ type: 'looper_clarify', question: '...' }
-
-// Agent lifecycle
-{ type: 'agent_start', agent: 'chapo', phase: 'qualification' }
-{ type: 'agent_switch', from: 'chapo', to: 'koda', reason: '...' }
-{ type: 'agent_thinking', agent: 'koda', status: 'Turn 1...' }
-{ type: 'agent_complete', agent: 'koda', result: '...' }
+// Looper lifecycle
+{ type: 'status',     data: { status: 'running' } }
+{ type: 'thinking',   data: { iteration: 3, event: 'tool_result', tokenUsage: {...} } }
+{ type: 'step',       data: { iteration: 3, decision: { intent, agent, toolName, ... } } }
 
 // Tool execution
-{ type: 'tool_call', agent: 'koda', toolName: 'fs.edit', args: {...} }
-{ type: 'tool_result', agent: 'koda', toolName: 'fs.edit', result: {...}, success: true }
+{ type: 'tool_call',  data: { agent: 'searcher', tool: 'web_search', args: {...} } }
+{ type: 'tool_result',data: { agent: 'searcher', success: true, output: '...' } }
 
-// Delegation & escalation
-{ type: 'delegation', from: 'chapo', to: 'koda', task: '...' }
-{ type: 'escalation', from: 'koda', issue: {...} }
+// Memory (agent: 'looper')
+{ type: 'tool_call',  data: { agent: 'looper', tool: 'memory_remember', args: {...} } }
+{ type: 'tool_result',data: { agent: 'looper', success: true, output: '...' } }
 
-// User interaction
-{ type: 'user_question', question: {...} }
-{ type: 'approval_request', request: {...} }
+// Validation
+{ type: 'validation', data: { isComplete: true, confidence: 0.85, issues: [] } }
 
-// Parallel execution
-{ type: 'parallel_start', agents: ['koda', 'devo'], tasks: [...] }
-{ type: 'parallel_complete', results: [...] }
+// Final outcomes
+{ type: 'answer',     data: { answer: '...' } }
+{ type: 'clarify',    data: { question: '...' } }
 
-// History & errors
-{ type: 'agent_history', entries: [...] }
-{ type: 'error', agent: 'devo', error: '...' }
-
-// Final response
-{ type: 'response', response: {...} }
+// Errors
+{ type: 'error',      data: { agent: 'developer', error: '...' } }
 ```
 
 ---
 
 ## Tool Registry
 
-Tools are defined in `apps/api/src/tools/registry.ts`:
+Tools are defined in `apps/api/src/tools/registry.ts`. No delegation meta-tools exist – agent routing is handled by the Decision Engine's `agent` field.
 
-| Tool | Description | Requires Confirmation |
-|------|-------------|----------------------|
-| `fs.listFiles` | List directory contents | No |
-| `fs.readFile` | Read file contents | No |
-| `fs.writeFile` | Write file | Yes* |
-| `fs.edit` | Edit file (find/replace) | Yes* |
-| `fs.mkdir` | Create directory | Yes* |
-| `fs.move` | Move/rename file | Yes* |
-| `fs.delete` | Delete file/directory | Yes* |
-| `fs.glob` | Find files by pattern | No |
-| `fs.grep` | Search file contents | No |
-| `git.status` | Git status | No |
-| `git.diff` | Git diff | No |
-| `git.commit` | Create commit | Yes* |
-| `git.push` | Push to remote | Yes* |
-| `git.pull` | Pull from remote | Yes* |
-| `git.add` | Stage files | No |
-| `github.triggerWorkflow` | Trigger GitHub Action | Yes* |
-| `github.getWorkflowRunStatus` | Get workflow status | No |
-| `bash.execute` | Execute bash command | Yes* |
-| `ssh.execute` | Execute via SSH | Yes* |
-| `pm2.status` | PM2 status | No |
-| `pm2.restart` | Restart PM2 process | Yes* |
-| `pm2.stop` | Stop PM2 process | Yes* |
-| `pm2.start` | Start PM2 process | Yes* |
-| `pm2.logs` | Get PM2 logs | No |
-| `pm2.reloadAll` | Reload all processes | Yes* |
-| `pm2.save` | Save PM2 config | Yes* |
-| `npm.install` | npm install | Yes* |
-| `npm.run` | npm run script | Yes* |
-| `web.search` | Web search | No |
-| `web.fetch` | Fetch URL content | No |
-| `memory.remember` | Store memory | No |
-| `memory.search` | Search memory | No |
-| `memory.readToday` | Read today's memory | No |
+### Available Tools
 
-*In multi-agent mode, `requiresConfirmation` is bypassed after CHAPO approval.
+| Category | Tools |
+|----------|-------|
+| **Filesystem** | `fs_listFiles`, `fs_readFile`, `fs_writeFile`, `fs_glob`, `fs_grep`, `fs_edit`, `fs_mkdir`, `fs_move`, `fs_delete` |
+| **Git** | `git_status`, `git_diff`, `git_commit`, `git_push`, `git_pull`, `git_add` |
+| **GitHub** | `github_triggerWorkflow`, `github_getWorkflowRunStatus` |
+| **DevOps** | `bash_execute`, `ssh_execute`, `pm2_status`, `pm2_restart`, `pm2_stop`, `pm2_start`, `pm2_logs`, `npm_install`, `npm_run` |
+| **Web** | `web_search`, `web_fetch` |
+| **Context** | `context_listDocuments`, `context_readDocument`, `context_searchDocuments` |
+| **Memory** | `memory_remember`, `memory_search`, `memory_readToday` |
+| **Logs** | `logs_getStagingLogs` |
+
+### Agent → Tool Mapping
+
+| Agent | Allowed Tools |
+|-------|---------------|
+| `developer` | `fs_*`, `git_*` |
+| `searcher` | `web_search`, `web_fetch`, `context_*` |
+| `document_manager` | `fs_*` |
+| `commander` | `bash_execute`, `ssh_execute`, `git_*`, `github_*`, `pm2_*`, `npm_*` |
+| Looper (direct) | `memory_*` |
 
 ---
 
 ## Security
 
-### Agent Tool Isolation
+### Tool Whitelist
 
-Each agent can only execute tools in its allowed list:
-
-```typescript
-// In router.ts
-if (!canAgentUseTool(targetAgent, toolCall.name)) {
-  return error; // Tool blocked
-}
-```
-
-### Whitelist Enforcement
-
-All tools must be in the registry whitelist:
+All tools must be in the registry whitelist. Unknown tool names are rejected by the executor:
 
 ```typescript
 // In executor.ts
@@ -640,9 +588,17 @@ if (!isToolWhitelisted(toolName)) {
 }
 ```
 
-### SSH Host Aliases
+### Sandbox Mode
 
-SSH connections use predefined host aliases:
+Currently operating in trusted/sandbox mode (`DEFAULT_TRUST_MODE: 'trusted'`). All tools execute without per-tool user confirmation.
+
+### Filesystem Restrictions
+
+Allowed root paths:
+- `/opt/Klyde/projects/DeviSpace`
+- `/opt/Klyde/projects/Devai`
+
+### SSH Host Aliases
 
 ```typescript
 const HOST_ALIASES: Record<string, string> = {
@@ -664,7 +620,7 @@ Content-Type: application/json
 Response: application/x-ndjson (streaming)
 
 {
-  "message": "Fix the login bug",
+  "message": "Wie ist das Wetter in Darmstadt?",
   "provider": "anthropic" | "openai" | "gemini",
   "sessionId": "optional",
   "projectRoot": "/path/to/project",
@@ -696,137 +652,33 @@ Response:
 }
 ```
 
-### Multi-Agent Chat
+### Continue After Pause
 
-```
-POST /api/chat/agents
-Content-Type: application/json
-
-{
-  "message": "Deploy the latest changes",
-  "projectRoot": "/path/to/project",
-  "sessionId": "optional"
-}
-```
-
-### Single-Agent Chat (Legacy)
-
-```
-POST /api/chat
-Content-Type: application/json
-
-{
-  "messages": [...],
-  "provider": "anthropic",
-  "projectRoot": "/path/to/project",
-  "skillIds": ["skill1"],
-  "pinnedFiles": ["file1.ts"],
-  "sessionId": "optional"
-}
-```
-
-### Get Agent State
-
-```
-GET /api/chat/agents/:sessionId/state
-
-Response:
-{
-  "sessionId": "...",
-  "currentPhase": "execution",
-  "activeAgent": "koda",
-  "agentHistory": [...],
-  "pendingApprovals": [],
-  "pendingQuestions": []
-}
-```
+When the loop pauses (clarify / exhaustion), the user sends another message to the same session. The engine calls `continueWithClarification()` which resets the iteration counter and resumes the conversation.
 
 ---
 
 ## Frontend Integration
 
-The `ChatUI.tsx` component supports both modes:
+The `ChatUI.tsx` component connects to the Looper via NDJSON streaming:
 
 ```typescript
-// Multi-agent mode state
-const [multiAgentMode, setMultiAgentMode] = useState(false);
-const [activeAgent, setActiveAgent] = useState<AgentName | null>(null);
-const [agentPhase, setAgentPhase] = useState<AgentPhase>('idle');
-const [agentHistory, setAgentHistory] = useState<AgentHistoryEntry[]>([]);
-
-// Mode selection
-if (multiAgentMode) {
-  await sendMultiAgentMessage(content, projectRoot, sessionId, handleEvent);
-} else {
-  await sendMessage(messages, provider, ...);
+// Process streaming events
+handleEvent(event: LooperStreamEvent) {
+  switch (event.type) {
+    case 'thinking':  // Show iteration indicator
+    case 'step':      // Show decision details
+    case 'tool_call': // Show tool being called
+    case 'tool_result': // Show tool output
+    case 'answer':    // Display final answer
+    case 'clarify':   // Show question, enable user input
+    case 'validation': // Show confidence score
+    case 'error':     // Display error
+  }
 }
 ```
 
 **UI Components:**
-
-- `AgentStatus`: Shows active agent (CHAPO/KODA/DEVO/SCOUT) and current phase
-- `AgentTimeline`: Chronological view of agent actions
+- `ChatUI`: Main chat interface with streaming support
+- `AgentStatus`: Shows which agent is active
 - `AgentHistory`: Detailed history with tool calls and results
-
----
-
-## Example Flows
-
-### Code Fix (Looper)
-
-```
-User: "Fix the login validation bug"
-Looper Decision: tool_call → developer agent
-Developer: fs.readFile("auth/login.ts")
-Looper Decision: tool_call → developer agent
-Developer: fs.edit("auth/login.ts", ...)
-Looper Decision: answer
-Self-Validation: confidence 0.85 → deliver
-Looper: Streams response to user
-```
-
-### Code Change (Multi-Agent)
-
-```
-User: "Add error handling to login.ts"
-CHAPO: Qualifies as code_change, low risk
-CHAPO: Delegates to KODA
-KODA: Executes fs.edit directly (no confirmation)
-CHAPO: Reviews and reports
-```
-
-### Deployment (Multi-Agent)
-
-```
-User: "Deploy to staging"
-CHAPO: Qualifies as devops, medium risk
-CHAPO: Requests approval
-User: Approves
-CHAPO: Delegates to DEVO
-DEVO: git add → git commit → git push
-DEVO: Triggers workflow
-CHAPO: Reviews and reports status
-```
-
-### Exploration (Multi-Agent)
-
-```
-User: "What does the auth module do?"
-CHAPO: Qualifies as exploration, read-only
-SCOUT: fs.glob("**/auth/**")
-SCOUT: fs.readFile(relevant files)
-SCOUT: Summarizes findings
-CHAPO: Reviews and delivers to user
-```
-
-### Mixed Task (Multi-Agent)
-
-```
-User: "Fix the bug and deploy"
-CHAPO: Qualifies as mixed, requests approval
-User: Approves
-CHAPO: Starts parallel execution
-KODA: Fixes bug (fs.edit)       ─┐
-DEVO: Waits, then deploys        ├─ Parallel
-CHAPO: Combines results and reports
-```

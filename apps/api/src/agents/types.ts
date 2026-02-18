@@ -33,6 +33,7 @@ export interface ModelTier {
 }
 
 export type AgentPhase =
+  | 'idle'
   | 'qualification'
   | 'planning'              // Multi-perspective planning phase
   | 'waiting_plan_approval' // Waiting for user to approve plan

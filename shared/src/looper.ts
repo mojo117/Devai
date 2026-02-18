@@ -95,7 +95,7 @@ export type LooperStatus =
 
 /** Streamed event sent to the client via NDJSON. */
 export interface LooperStreamEvent {
-  type: 'step' | 'thinking' | 'answer' | 'clarify' | 'error' | 'status' | 'tool_call' | 'tool_result' | 'validation' | 'action_pending';
+  type: 'step' | 'thinking' | 'answer' | 'clarify' | 'error' | 'status' | 'tool_call' | 'tool_result' | 'validation' | 'action_pending' | 'iteration_summary';
   data: unknown;
   timestamp: string;
 }

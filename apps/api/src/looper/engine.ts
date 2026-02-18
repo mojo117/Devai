@@ -15,6 +15,7 @@ import type {
   ValidationResult,
 } from '@devai/shared';
 import type { LLMProvider } from '../llm/types.js';
+import { llmRouter } from '../llm/router.js';
 import { DecisionEngine } from './decision-engine.js';
 import { ConversationManager } from './conversation-manager.js';
 import { SelfValidator } from './self-validation.js';
@@ -23,9 +24,12 @@ import { createAgents, type LooperAgent, type AgentResult } from './agents/index
 import { getProjectContext } from '../scanner/projectScanner.js';
 import { config as appConfig } from '../config.js';
 import { normalizeToolName } from '../tools/registry.js';
+import { executeTool } from '../tools/executor.js';
 import type { ConversationSnapshot } from './conversation-manager.js';
 import type { LooperErrorHandlerSnapshot } from './error-handler.js';
 import type { Action } from '../actions/types.js';
+import { readDailyMemory, resolveWorkspaceRoot } from '../memory/workspaceMemory.js';
+import { readFile } from 'fs/promises';
 
 /** Default configuration values. */
 const DEFAULTS: LooperConfig = {
@@ -178,6 +182,20 @@ export class LooperEngine {
       switch (decisionResult.intent) {
         // ── TOOL CALL ──────────────────────
         case 'tool_call': {
+          // Memory tools are handled directly by the Looper (not delegated to agents)
+          if (decisionResult.toolName && this.isMemoryTool(decisionResult.toolName)) {
+            const memResult = await this.executeMemoryTool(decisionResult.toolName, decisionResult.toolArgs || {});
+            this.conversation.addMessage({ role: 'assistant', content: memResult.output });
+            this.recordStep(iteration, decisionResult, memResult.output, memResult.success ? undefined : 'Memory tool error', stepStart);
+            currentEvent = {
+              id: nanoid(),
+              type: memResult.success ? 'tool_result' : 'error',
+              payload: memResult.output,
+              timestamp: now(),
+            };
+            break;
+          }
+
           const agentResult = await this.executeAgent(decisionResult, userMessage);
           this.conversation.addMessage({
             role: 'assistant',
@@ -284,23 +302,31 @@ export class LooperEngine {
     }
 
     // ─── LOOP EXHAUSTED ──────────────────────
-    this.status = this.status === 'running' ? 'completed' : this.status;
-    const exhaustionAnswer = this.buildExhaustionSummary();
-    this.emit({ type: 'answer', data: { answer: exhaustionAnswer }, timestamp: now() });
+    // Generate a summary and ask the user how to proceed
+    const exhaustionSummary = await this.buildExhaustionSummary(userMessage);
+    this.conversation.addMessage({ role: 'assistant', content: exhaustionSummary });
+    this.status = 'waiting_for_user';
+
+    this.emit({ type: 'clarify', data: { question: exhaustionSummary }, timestamp: now() });
 
     return {
-      answer: exhaustionAnswer,
+      answer: exhaustionSummary,
       steps: this.steps,
       totalIterations: iteration,
-      status: this.status,
+      status: 'waiting_for_user',
     };
   }
 
   /**
-   * Continue the loop after the user provides a clarification.
+   * Continue the loop after the user provides a clarification or
+   * decides how to proceed after an exhaustion summary.
+   * Resets the iteration counter so the user gets a fresh set of iterations.
    */
   async continueWithClarification(clarification: string): Promise<LoopRunResult> {
     this.status = 'running';
+    // Reset steps so the iteration counter starts fresh for the new round
+    this.steps = [];
+    this.errorHandler.clear();
     this.conversation.addMessage({ role: 'user', content: clarification });
 
     const event: LooperEvent = {
@@ -340,6 +366,20 @@ export class LooperEngine {
 
       switch (decisionResult.intent) {
         case 'tool_call': {
+          // Memory tools handled directly by the Looper
+          if (decisionResult.toolName && this.isMemoryTool(decisionResult.toolName)) {
+            const memResult = await this.executeMemoryTool(decisionResult.toolName, decisionResult.toolArgs || {});
+            this.conversation.addMessage({ role: 'assistant', content: memResult.output });
+            this.recordStep(iteration, decisionResult, memResult.output, memResult.success ? undefined : 'Memory tool error', stepStart);
+            currentEvent = {
+              id: nanoid(),
+              type: memResult.success ? 'tool_result' : 'error',
+              payload: memResult.output,
+              timestamp: now(),
+            };
+            break;
+          }
+
           const agentResult = await this.executeAgent(decisionResult, userMessage);
           this.conversation.addMessage({ role: 'assistant', content: agentResult.output });
           this.recordStep(iteration, decisionResult, agentResult.output, agentResult.success ? undefined : 'Agent error', stepStart);
@@ -374,9 +414,14 @@ export class LooperEngine {
       }
     }
 
-    const exhaustion = this.buildExhaustionSummary();
-    this.status = 'completed';
-    return { answer: exhaustion, steps: this.steps, totalIterations: iteration, status: 'completed' };
+    const originalUserMsg = this.conversation.getMessages().find(m => m.role === 'user');
+    const exhaustion = await this.buildExhaustionSummary(originalUserMsg?.content || userMessage);
+    this.conversation.addMessage({ role: 'assistant', content: exhaustion });
+    this.status = 'waiting_for_user';
+
+    this.emit({ type: 'clarify', data: { question: exhaustion }, timestamp: now() });
+
+    return { answer: exhaustion, steps: this.steps, totalIterations: iteration, status: 'waiting_for_user' };
   }
 
   private async executeAgent(decision: DecisionResult, userMessage: string): Promise<AgentResult> {
@@ -504,27 +549,125 @@ export class LooperEngine {
       }
     }
 
+    // ── Load workspace memory at Looper level ──
+    try {
+      const wsRoot = await resolveWorkspaceRoot();
+
+      // Load today's daily memory
+      const todayMemory = await readDailyMemory();
+      if (todayMemory.content) {
+        parts.push(`\n## Heutiges Gedächtnis (${todayMemory.date})\n${todayMemory.content.slice(0, 3000)}`);
+      }
+
+      // Load long-term memory (MEMORY.md)
+      try {
+        const longTermPath = `${wsRoot}/MEMORY.md`;
+        const longTermContent = await readFile(longTermPath, 'utf-8');
+        if (longTermContent.trim()) {
+          parts.push(`\n## Langzeitgedächtnis\n${longTermContent.slice(0, 3000)}`);
+        }
+      } catch {
+        // No long-term memory file yet – that's fine
+      }
+    } catch {
+      // Memory loading is non-critical
+    }
+
     return parts.join('\n');
   }
 
-  private buildExhaustionSummary(): string {
+  /** Check if a tool name is a memory tool (handled directly by Looper). */
+  private isMemoryTool(toolName: string): boolean {
+    return toolName.startsWith('memory_');
+  }
+
+  /** Execute memory tools directly at Looper level without agent delegation. */
+  private async executeMemoryTool(
+    toolName: string,
+    toolArgs: Record<string, unknown>
+  ): Promise<{ success: boolean; output: string }> {
+    this.emit({
+      type: 'tool_call',
+      data: { agent: 'looper', tool: toolName, args: toolArgs },
+      timestamp: now(),
+    });
+
+    const result = await executeTool(toolName, toolArgs, { bypassConfirmation: true });
+
+    const output = result.success
+      ? `[Looper/Memory] ${toolName}: ${typeof result.result === 'string' ? result.result : JSON.stringify(result.result, null, 2)}`
+      : `[Looper/Memory] ${toolName} failed: ${result.error}`;
+
+    this.emit({
+      type: 'tool_result',
+      data: { agent: 'looper', success: result.success, output: output.slice(0, 500) },
+      timestamp: now(),
+    });
+
+    return { success: result.success, output };
+  }
+
+  /**
+   * Build an LLM-generated summary when the loop reaches its iteration limit.
+   * Returns a summary + asks the user how to proceed.
+   */
+  private async buildExhaustionSummary(userMessage: string): Promise<string> {
     const successSteps = this.steps.filter(s => !s.error);
     const errorSteps = this.steps.filter(s => s.error);
-    const lastOutput = this.steps.length > 0
-      ? String(this.steps[this.steps.length - 1].output || '')
-      : '';
 
-    return [
-      `I've completed ${this.steps.length} steps (${successSteps.length} successful, ${errorSteps.length} with issues).`,
+    // Build a condensed step log for the LLM
+    const stepSummary = this.steps.map(s => {
+      const status = s.error ? 'FEHLER' : 'OK';
+      const tool = s.toolName ? ` (${s.toolName})` : '';
+      const out = s.output ? String(s.output).slice(0, 200) : '';
+      return `- Step ${s.stepIndex} [${status}]${tool}: ${out}`;
+    }).join('\n');
+
+    const summaryPrompt = [
+      `Die Loop hat das Iterationslimit (${this.cfg.maxIterations}) erreicht.`,
+      `Ursprüngliche Nutzeranfrage: "${userMessage}"`,
       '',
-      lastOutput ? `Latest result:\n${lastOutput}` : '',
+      `Durchgeführte Schritte (${successSteps.length} erfolgreich, ${errorSteps.length} mit Fehlern):`,
+      stepSummary,
       '',
-      errorSteps.length > 0
-        ? `Issues encountered:\n${errorSteps.map(s => `- Step ${s.stepIndex}: ${s.error}`).join('\n')}`
-        : '',
+      'Erstelle eine kurze, strukturierte Zusammenfassung auf Deutsch:',
+      '1. Was wurde erledigt?',
+      '2. Was ist noch offen?',
+      '3. Welche nächsten Schritte sind möglich?',
       '',
-      `Loop reached the maximum iteration limit (${this.cfg.maxIterations}). If you need more work done, please send a follow-up message.`,
-    ].filter(Boolean).join('\n');
+      'Frage den Nutzer am Ende, wie er weiter vorgehen möchte (z.B. weitermachen, Priorität ändern, abbrechen).',
+    ].join('\n');
+
+    try {
+      const response = await llmRouter.generate(this.provider, {
+        messages: [{ role: 'user', content: summaryPrompt }],
+        systemPrompt: 'Du bist Chapo, ein KI-Assistent. Fasse den aktuellen Arbeitsstand zusammen und frage den Nutzer nach dem weiteren Vorgehen. Antworte direkt, ohne JSON.',
+        maxTokens: 1500,
+      });
+      return response.content;
+    } catch {
+      // Fallback: static summary if LLM call fails
+      const lastOutput = this.steps.length > 0
+        ? String(this.steps[this.steps.length - 1].output || '')
+        : '';
+
+      return [
+        `Ich habe ${this.steps.length} Schritte durchgeführt (${successSteps.length} erfolgreich, ${errorSteps.length} mit Problemen).`,
+        '',
+        lastOutput ? `Letztes Ergebnis:\n${lastOutput.slice(0, 500)}` : '',
+        '',
+        errorSteps.length > 0
+          ? `Aufgetretene Probleme:\n${errorSteps.map(s => `- Step ${s.stepIndex}: ${s.error}`).join('\n')}`
+          : '',
+        '',
+        `Das Iterationslimit (${this.cfg.maxIterations}) wurde erreicht.`,
+        '',
+        'Wie möchtest du weitermachen?',
+        '- **Weitermachen**: Ich setze die Arbeit fort',
+        '- **Priorität ändern**: Sag mir, worauf ich mich fokussieren soll',
+        '- **Abbrechen**: Wir belassen es beim aktuellen Stand',
+      ].filter(Boolean).join('\n');
+    }
   }
 
   private emit(event: LooperStreamEvent): void {

@@ -47,6 +47,7 @@ import { KODA_AGENT } from './koda.js';
 import { DEVO_AGENT } from './devo.js';
 import { SCOUT_AGENT } from './scout.js';
 import { config } from '../config.js';
+import { loadDevaiMdContext, formatDevaiMdBlock } from '../scanner/devaiMdLoader.js';
 import { getMessages, getTrustMode } from '../db/queries.js';
 import { rememberNote } from '../memory/workspaceMemory.js';
 import { getCombinedSystemContextBlock, warmSystemContextForSession } from './systemContext.js';

@@ -38,14 +38,6 @@ export type ToolName =
   // Web Tools (SCOUT agent)
   | 'web_search'
   | 'web_fetch'
-  // Agent Meta-Tools
-  | 'delegateToKoda'
-  | 'delegateToDevo'
-  | 'delegateToScout'
-  | 'escalateToChapo'
-  | 'askUser'
-  | 'requestApproval'
-  | 'askForConfirmation'
   // Context Tools (read-only document access)
   | 'context_listDocuments'
   | 'context_readDocument'
@@ -395,30 +387,6 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     },
     requiresConfirmation: false,
   },
-  {
-    name: 'askForConfirmation',
-    description: 'Request user approval for a tool action. Returns an actionId.',
-    parameters: {
-      type: 'object',
-      properties: {
-        toolName: {
-          type: 'string',
-          description: 'The tool to run after approval (must require confirmation)',
-        },
-        toolArgs: {
-          type: 'object',
-          description: 'Arguments for the tool',
-        },
-        description: {
-          type: 'string',
-          description: 'Short human-readable description of the action',
-        },
-      },
-      required: ['toolName', 'toolArgs'],
-    },
-    requiresConfirmation: false,
-  },
-
   // Web Tools (SCOUT agent)
   {
     name: 'web_search',
@@ -668,150 +636,6 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
       required: ['script'],
     },
     requiresConfirmation: true,
-  },
-
-  // Agent Meta-Tools
-  {
-    name: 'delegateToKoda',
-    description: 'Delegate a code-related task to KODA (Senior Developer). Only available to CHAPO.',
-    parameters: {
-      type: 'object',
-      properties: {
-        task: {
-          type: 'string',
-          description: 'Description of the coding task',
-        },
-        context: {
-          type: 'object',
-          description: 'Gathered context and relevant information',
-        },
-        files: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'List of relevant file paths',
-        },
-      },
-      required: ['task'],
-    },
-    requiresConfirmation: false,
-  },
-  {
-    name: 'delegateToDevo',
-    description: 'Delegate a DevOps task to DEVO (DevOps Engineer). Only available to CHAPO.',
-    parameters: {
-      type: 'object',
-      properties: {
-        task: {
-          type: 'string',
-          description: 'Description of the DevOps task',
-        },
-        context: {
-          type: 'object',
-          description: 'Gathered context and relevant information',
-        },
-        commands: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Suggested commands to execute',
-        },
-      },
-      required: ['task'],
-    },
-    requiresConfirmation: false,
-  },
-  {
-    name: 'delegateToScout',
-    description: 'Delegate exploration or research task to SCOUT. Available to CHAPO, KODA, and DEVO.',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: {
-          type: 'string',
-          description: 'What to explore or search for',
-        },
-        scope: {
-          type: 'string',
-          description: 'Where to search: "codebase", "web", or "both" (default: "both")',
-        },
-        context: {
-          type: 'string',
-          description: 'Additional context to help SCOUT understand the task',
-        },
-      },
-      required: ['query'],
-    },
-    requiresConfirmation: false,
-  },
-  {
-    name: 'escalateToChapo',
-    description: 'Escalate a problem to CHAPO (Task Coordinator). Available to KODA and DEVO.',
-    parameters: {
-      type: 'object',
-      properties: {
-        issueType: {
-          type: 'string',
-          description: 'Type of issue: error, clarification, or blocker',
-        },
-        description: {
-          type: 'string',
-          description: 'Description of the problem',
-        },
-        context: {
-          type: 'object',
-          description: 'Relevant context (error messages, logs, etc.)',
-        },
-        suggestedSolutions: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Possible solutions to the problem',
-        },
-      },
-      required: ['issueType', 'description'],
-    },
-    requiresConfirmation: false,
-  },
-  {
-    name: 'askUser',
-    description: 'Ask the user a question for clarification. Only available to CHAPO.',
-    parameters: {
-      type: 'object',
-      properties: {
-        question: {
-          type: 'string',
-          description: 'The question to ask the user',
-        },
-        options: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Possible answer options (optional)',
-        },
-      },
-      required: ['question'],
-    },
-    requiresConfirmation: false,
-  },
-  {
-    name: 'requestApproval',
-    description: 'Request user approval for a risky action. Only available to CHAPO.',
-    parameters: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          description: 'Description of the action requiring approval',
-        },
-        risk: {
-          type: 'string',
-          description: 'Risk level: low, medium, or high',
-        },
-        details: {
-          type: 'object',
-          description: 'Additional details about the action',
-        },
-      },
-      required: ['action', 'risk'],
-    },
-    requiresConfirmation: false,
   },
 
   // Context Tools (read-only document access)
