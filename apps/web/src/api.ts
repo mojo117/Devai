@@ -12,6 +12,7 @@ import type {
   SessionsResponse,
   SessionMessagesResponse,
   SettingResponse,
+  LooperPromptsResponse,
 } from './types';
 
 const API_BASE = '/api';
@@ -449,6 +450,14 @@ export async function fetchSystemPrompt(): Promise<{ prompt: string }> {
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch system prompt');
+  return res.json();
+}
+
+export async function fetchLooperPrompts(): Promise<LooperPromptsResponse> {
+  const res = await fetch(`${API_BASE}/looper/prompts`, {
+    headers: withAuthHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to fetch looper prompts');
   return res.json();
 }
 
