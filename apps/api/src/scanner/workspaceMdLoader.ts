@@ -62,6 +62,7 @@ function getWorkspaceFileSpecs(mode: WorkspaceLoadMode): WorkspaceFileSpec[] {
 
   const specs: WorkspaceFileSpec[] = [
     { role: 'AGENTS', relativePath: 'AGENTS.md', required: true },
+    { role: 'IDENTITY', relativePath: 'IDENTITY.md', required: true },
     { role: 'SOUL', relativePath: 'SOUL.md', required: true },
     { role: 'USER', relativePath: 'USER.md', required: true },
     { role: 'TOOLS', relativePath: 'TOOLS.md', required: true },
