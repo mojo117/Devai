@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import { sendMultiAgentMessage, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction, globProjectFiles, fetchPendingActions, batchApproveActions, batchRejectActions } from '../api';
+import { sendMultiAgentMessage, fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle, approveAction, rejectAction, globProjectFiles, fetchPendingActions, batchApproveActions, batchRejectActions, uploadUserfile } from '../api';
 import type { ChatStreamEvent } from '../api';
 import type { ChatMessage, ContextStats, SessionSummary, Action } from '../types';
 import type { AgentHistoryEntry } from '../api';
@@ -141,6 +141,8 @@ export function ChatUI({
   }, [activeAgent, agentPhase, onAgentChange]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isFileUploading, setIsFileUploading] = useState(false);
 
   const refreshSessions = async (selectId?: string | null) => {
     const sessionList = await fetchSessions();
@@ -599,6 +601,29 @@ export function ChatUI({
     await sendChatMessage(content);
   };
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setIsFileUploading(true);
+    for (const file of Array.from(files)) {
+      try {
+        await uploadUserfile(file);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Upload failed';
+        setMessages((prev) => [
+          ...prev,
+          { id: `err-${Date.now()}`, role: 'system' as const, content: `Upload failed: ${msg}`, timestamp: new Date().toISOString() },
+        ]);
+      }
+    }
+    setIsFileUploading(false);
+    e.target.value = '';
+    setMessages((prev) => [
+      ...prev,
+      { id: `upload-${Date.now()}`, role: 'system' as const, content: `${files.length} file${files.length > 1 ? 's' : ''} uploaded to /opt/Userfiles`, timestamp: new Date().toISOString() },
+    ]);
+  };
+
   const handleRetry = async () => {
     if (!retryState) return;
     setIsLoading(true);
@@ -913,26 +938,6 @@ export function ChatUI({
           </div>
         )}
 
-        {/* Agent Status */}
-        <div className="space-y-2">
-          <AgentStatus
-            activeAgent={activeAgent}
-            phase={agentPhase}
-          />
-          {agentHistory.length > 0 && (
-            <button
-              onClick={() => setShowAgentHistory(!showAgentHistory)}
-              className="text-[11px] text-devai-accent hover:text-devai-accent-hover"
-            >
-              {showAgentHistory ? 'Hide Agent History' : `Show Agent History (${agentHistory.length} entries)`}
-            </button>
-          )}
-          {showAgentHistory && agentHistory.length > 0 && (
-            <div className="bg-devai-card border border-devai-border rounded-lg p-2">
-              <AgentTimeline entries={agentHistory} />
-            </div>
-          )}
-        </div>
 
         {messages.length === 0 && (
           <div className="text-center text-devai-text-muted mt-8">
@@ -1111,6 +1116,31 @@ export function ChatUI({
             className="bg-devai-accent hover:bg-devai-accent-hover disabled:bg-devai-border disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl font-medium transition-colors"
           >
             Send
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            onChange={handleFileUpload}
+            multiple
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isFileUploading}
+            className="bg-devai-card hover:bg-devai-card/80 border border-devai-border text-devai-text-secondary hover:text-devai-text disabled:opacity-50 px-3 py-2.5 rounded-xl transition-colors"
+            title="Upload files to /opt/Userfiles"
+          >
+            {isFileUploading ? (
+              <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            ) : (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+              </svg>
+            )}
           </button>
         </div>
       </form>

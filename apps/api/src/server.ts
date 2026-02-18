@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import fastifyWebsocket from '@fastify/websocket';
+import multipart from '@fastify/multipart';
 import { config } from './config.js';
 import { healthRoutes } from './routes/health.js';
 import { actionRoutes } from './routes/actions.js';
@@ -11,6 +12,7 @@ import { sessionsRoutes } from './routes/sessions.js';
 import { settingsRoutes } from './routes/settings.js';
 import { memoryRoutes } from './routes/memory.js';
 import { looperRoutes } from './routes/looper.js';
+import { userfilesRoutes } from './routes/userfiles.js';
 import { authMiddleware, registerAuthRoutes } from './routes/auth.js';
 import { initDb } from './db/index.js';
 import { websocketRoutes } from './websocket/routes.js';
@@ -50,6 +52,9 @@ await app.register(rateLimit, {
 // Register WebSocket support
 await app.register(fastifyWebsocket);
 
+// Register multipart support for file uploads (10MB limit)
+await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
+
 // Register auth routes
 await registerAuthRoutes(app);
 
@@ -71,6 +76,7 @@ await app.register(settingsRoutes, { prefix: '/api' });
 await app.register(memoryRoutes, { prefix: '/api' });
 await app.register(looperRoutes, { prefix: '/api' });
 await app.register(websocketRoutes, { prefix: '/api' });
+await app.register(userfilesRoutes, { prefix: '/api' });
 
 // Start server
 const start = async () => {

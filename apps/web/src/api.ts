@@ -995,7 +995,9 @@ export async function saveGlobalContext(context: GlobalContext): Promise<GlobalC
 }
 
 export async function getTrustMode(): Promise<{ mode: 'default' | 'trusted' }> {
-  const response = await fetch(`${API_BASE}/settings/trust-mode`);
+  const response = await fetch(`${API_BASE}/settings/trust-mode`, {
+    headers: withAuthHeaders(),
+  });
   if (!response.ok) {
     throw new Error('Failed to get trust mode');
   }
@@ -1005,7 +1007,7 @@ export async function getTrustMode(): Promise<{ mode: 'default' | 'trusted' }> {
 export async function setTrustMode(mode: 'default' | 'trusted'): Promise<void> {
   const response = await fetch(`${API_BASE}/settings/trust-mode`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ mode }),
   });
   if (!response.ok) {
@@ -1067,4 +1069,40 @@ export async function fetchDailyWorkspaceMemory(date: string): Promise<{
   });
   if (!res.ok) throw new Error(await readApiError(res));
   return res.json();
+}
+
+// ============ Userfiles API ============
+
+export interface UserfileInfo {
+  name: string;
+  size: number;
+  modifiedAt: string;
+}
+
+export async function listUserfiles(): Promise<{ files: UserfileInfo[] }> {
+  const res = await fetch(`${API_BASE}/userfiles`, {
+    headers: withAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(await readApiError(res));
+  return res.json();
+}
+
+export async function uploadUserfile(file: File): Promise<{ success: boolean; file: UserfileInfo }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${API_BASE}/userfiles`, {
+    method: 'POST',
+    headers: withAuthHeaders(),
+    body: formData,
+  });
+  if (!res.ok) throw new Error(await readApiError(res));
+  return res.json();
+}
+
+export async function deleteUserfile(filename: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/userfiles/${encodeURIComponent(filename)}`, {
+    method: 'DELETE',
+    headers: withAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(await readApiError(res));
 }

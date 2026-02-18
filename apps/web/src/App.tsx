@@ -6,12 +6,8 @@ import { type FeedEvent, toolEventToFeedEvent } from './components/SystemFeed';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   fetchHealth,
-  fetchActions,
-  approveAction,
-  rejectAction,
-  retryAction,
 } from './api';
-import type { Action, HealthResponse } from './types';
+import type { HealthResponse } from './types';
 import { useAuth } from './hooks/useAuth';
 import { useSkills } from './hooks/useSkills';
 import { useProject } from './hooks/useProject';
@@ -27,9 +23,6 @@ function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const project = useProject(auth.isAuthed, health?.projectRoot, handleError);
   const settings = usePersistedSettings(auth.isAuthed);
-
-  // Actions state
-  const [actions, setActions] = useState<Action[]>([]);
 
   // UI state
   const [contextStats, setContextStats] = useState<{
@@ -78,55 +71,22 @@ function App() {
     setClearFeedTrigger((prev) => prev + 1);
   }, []);
 
-  // Fetch health when authenticated
+  // Fetch health when authenticated (retry silently on failure — the ●/○ indicator shows status)
   useEffect(() => {
     if (!auth.isAuthed) return;
-    fetchHealth()
-      .then(setHealth)
-      .catch((err) => setError(err.message));
+    let cancelled = false;
+    const tryFetch = (retries: number) => {
+      fetchHealth()
+        .then((h) => { if (!cancelled) setHealth(h); })
+        .catch(() => {
+          if (!cancelled && retries > 0) {
+            setTimeout(() => tryFetch(retries - 1), 2000);
+          }
+        });
+    };
+    tryFetch(3);
+    return () => { cancelled = true; };
   }, [auth.isAuthed]);
-
-  // Poll actions
-  useEffect(() => {
-    if (!auth.isAuthed) return;
-    const interval = setInterval(() => {
-      fetchActions()
-        .then((data) => setActions(data.actions))
-        .catch(console.error);
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [auth.isAuthed]);
-
-  // Action handlers
-  const handleApprove = async (actionId: string) => {
-    try {
-      await approveAction(actionId);
-      const data = await fetchActions();
-      setActions(data.actions);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to approve');
-    }
-  };
-
-  const handleReject = async (actionId: string) => {
-    try {
-      await rejectAction(actionId);
-      const data = await fetchActions();
-      setActions(data.actions);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to reject');
-    }
-  };
-
-  const handleRetry = async (actionId: string) => {
-    try {
-      await retryAction(actionId);
-      const data = await fetchActions();
-      setActions(data.actions);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to retry');
-    }
-  };
 
   // Agent icon/phase for header
   const agentIcon = activeAgent === 'chapo'

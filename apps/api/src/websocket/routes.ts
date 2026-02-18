@@ -496,10 +496,3 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
     return getChatGatewayStats();
   });
 };
-
-function buildSessionTitle(content: string): string | null {
-  const trimmed = String(content || '').replace(/\s+/g, ' ').trim();
-  if (!trimmed) return null;
-  if (trimmed.length <= 60) return trimmed;
-  return `${trimmed.slice(0, 57)}...`;
-}
