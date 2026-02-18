@@ -7,8 +7,8 @@ loadEnv({ path: resolve(process.cwd(), "../../.env") });
 // Hardcoded allowed roots for file access security
 // These paths are enforced regardless of environment variables
 const HARDCODED_ALLOWED_ROOTS: readonly string[] = [
-  "/opt/Klyde/projects/DeviSpace", // DevAI sandbox workspace (canonical)
-  "/opt/Klyde/projects/Devai", // DevAI worktree (canonical)
+  "/root",   // Clawd home — projects, OpenClaw workspace
+  "/opt",    // Clawd /opt — includes /opt/Devai itself
 ] as const;
 
 export interface Config {

@@ -1,4 +1,4 @@
-import { isToolWhitelisted, getToolDefinition } from './registry.js';
+import { isToolWhitelisted, getToolDefinition, normalizeToolName } from './registry.js';
 import * as fsTools from './fs.js';
 import * as gitTools from './git.js';
 import * as githubTools from './github.js';
@@ -8,6 +8,7 @@ import * as sshTools from './ssh.js';
 import * as pm2Tools from './pm2.js';
 import * as webTools from './web.js';
 import * as contextTools from './context.js';
+import * as memoryTools from './memory.js';
 import { config } from '../config.js';
 import { mcpManager } from '../mcp/index.js';
 import { join } from 'path';
@@ -23,15 +24,31 @@ export interface ToolExecutionResult {
 
 type ToolArgs = Record<string, unknown>;
 
+export interface ToolExecutionOptions {
+  // Internal escape hatch used only after explicit user approval (e.g. approved action queue).
+  bypassConfirmation?: boolean;
+}
+
 export async function executeTool(
   toolName: string,
-  args: ToolArgs
+  args: ToolArgs,
+  options?: ToolExecutionOptions
 ): Promise<ToolExecutionResult> {
+  const normalizedToolName = normalizeToolName(toolName);
+
   // Verify the tool is whitelisted
-  if (!isToolWhitelisted(toolName)) {
+  if (!isToolWhitelisted(normalizedToolName)) {
     return {
       success: false,
       error: `Tool "${toolName}" is not whitelisted`,
+    };
+  }
+
+  const toolDef = getToolDefinition(normalizedToolName);
+  if (toolDef?.requiresConfirmation && !options?.bypassConfirmation) {
+    return {
+      success: false,
+      error: `Tool "${normalizedToolName}" requires user confirmation before execution`,
     };
   }
 
@@ -52,7 +69,7 @@ export async function executeTool(
     };
 
     const execution = (async () => {
-      switch (toolName) {
+      switch (normalizedToolName) {
         // File System Tools
         case 'fs_listFiles':
           return fsTools.listFiles(args.path as string);
@@ -236,16 +253,33 @@ export async function executeTool(
             args.query as string
           );
 
+        // Workspace Memory Tools
+        case 'memory_remember':
+          return memoryTools.memoryRemember(args.content as string, {
+            promoteToLongTerm: args.promoteToLongTerm as boolean | undefined,
+            sessionId: args.sessionId as string | undefined,
+            source: 'tool.memory_remember',
+          });
+
+        case 'memory_search':
+          return memoryTools.memorySearch(args.query as string, {
+            limit: args.limit as number | undefined,
+            includeLongTerm: args.includeLongTerm as boolean | undefined,
+          });
+
+        case 'memory_readToday':
+          return memoryTools.memoryReadToday();
+
         default:
           // Route MCP tools to the MCP manager
-          if (mcpManager.isMcpTool(toolName)) {
-            return mcpManager.executeTool(toolName, args).then((r) => r.result);
+          if (mcpManager.isMcpTool(normalizedToolName)) {
+            return mcpManager.executeTool(normalizedToolName, args).then((r) => r.result);
           }
-          throw new Error(`Unknown tool: ${toolName}`);
+          throw new Error(`Unknown tool: ${normalizedToolName}`);
       }
     })();
 
-    const result = await withTimeout(execution, config.toolTimeoutMs, toolName);
+    const result = await withTimeout(execution, config.toolTimeoutMs, normalizedToolName);
 
     return {
       success: true,
@@ -303,6 +337,8 @@ const READ_ONLY_TOOLS = new Set([
   'context_listDocuments',
   'context_readDocument',
   'context_searchDocuments',
+  'memory_search',
+  'memory_readToday',
 ]);
 
 /**

@@ -1,99 +1,107 @@
 import type { WebSocket } from 'ws';
 
-export type ChatGatewayEvent = Record<string, unknown> & { type: string };
-
-export interface SequencedChatEvent extends ChatGatewayEvent {
-  seq: number;
-  sessionId: string;
-  timestamp: string;
+/** Per-session state: connected clients, event ring buffer, sequence counter. */
+interface ChatSessionState {
+  clients: Set<WebSocket>;
+  events: Array<Record<string, unknown> & { seq: number }>;
+  currentSeq: number;
 }
 
-const clientsBySession = new Map<string, Set<WebSocket>>();
+const MAX_EVENTS_PER_SESSION = 500;
 
-// Per-session ring buffer for reconnect/replay.
-const buffers = new Map<string, SequencedChatEvent[]>();
-const seqBySession = new Map<string, number>();
+const chatSessions = new Map<string, ChatSessionState>();
 
-const BUFFER_LIMIT = 600;
-
-function getNextSeq(sessionId: string): number {
-  const next = (seqBySession.get(sessionId) ?? 0) + 1;
-  seqBySession.set(sessionId, next);
-  return next;
-}
-
-function pushToBuffer(sessionId: string, event: SequencedChatEvent): void {
-  const buf = buffers.get(sessionId) ?? [];
-  buf.push(event);
-  if (buf.length > BUFFER_LIMIT) {
-    buf.splice(0, buf.length - BUFFER_LIMIT);
+function getOrCreateSession(sessionId: string): ChatSessionState {
+  let session = chatSessions.get(sessionId);
+  if (!session) {
+    session = { clients: new Set(), events: [], currentSeq: 0 };
+    chatSessions.set(sessionId, session);
   }
-  buffers.set(sessionId, buf);
+  return session;
 }
 
-function safeSend(ws: WebSocket, data: string): void {
-  if (ws.readyState !== 1) return; // WebSocket.OPEN
-  try {
-    ws.send(data);
-  } catch {
-    // Ignore send errors; caller unregisters on close/error.
-  }
-}
-
+/**
+ * Register a WebSocket client for chat event streaming in a session.
+ */
 export function registerChatClient(ws: WebSocket, sessionId: string): void {
-  const set = clientsBySession.get(sessionId) ?? new Set<WebSocket>();
-  set.add(ws);
-  clientsBySession.set(sessionId, set);
+  const session = getOrCreateSession(sessionId);
+  session.clients.add(ws);
+  console.log(`[ChatGW] Client registered for session ${sessionId}. Clients: ${session.clients.size}`);
 }
 
+/**
+ * Unregister a WebSocket client from a chat session.
+ */
 export function unregisterChatClient(ws: WebSocket, sessionId: string): void {
-  const set = clientsBySession.get(sessionId);
-  if (!set) return;
-  set.delete(ws);
-  if (set.size === 0) {
-    clientsBySession.delete(sessionId);
+  const session = chatSessions.get(sessionId);
+  if (!session) return;
+  session.clients.delete(ws);
+  if (session.clients.size === 0 && session.events.length === 0) {
+    chatSessions.delete(sessionId);
   }
+  console.log(`[ChatGW] Client unregistered from session ${sessionId}. Remaining: ${session?.clients.size ?? 0}`);
 }
 
-export function emitChatEvent(sessionId: string, event: ChatGatewayEvent): SequencedChatEvent {
-  const seq = getNextSeq(sessionId);
-  const enriched: SequencedChatEvent = {
-    ...event,
-    sessionId,
-    seq,
-    timestamp: new Date().toISOString(),
-  };
+/**
+ * Assign a sequence number, store in ring buffer, and broadcast to all
+ * connected clients in the given session.
+ */
+export function emitChatEvent(sessionId: string, event: Record<string, unknown>): void {
+  const session = getOrCreateSession(sessionId);
+  session.currentSeq += 1;
+  const seqEvent = { ...event, seq: session.currentSeq };
 
-  pushToBuffer(sessionId, enriched);
+  // Ring buffer: keep last N events
+  session.events.push(seqEvent);
+  if (session.events.length > MAX_EVENTS_PER_SESSION) {
+    session.events = session.events.slice(-MAX_EVENTS_PER_SESSION);
+  }
 
-  const payload = JSON.stringify(enriched);
-  const clients = clientsBySession.get(sessionId);
-  if (clients) {
-    for (const ws of clients) {
-      safeSend(ws, payload);
+  const message = JSON.stringify(seqEvent);
+  for (const ws of session.clients) {
+    if (ws.readyState === 1) { // WebSocket.OPEN
+      try {
+        ws.send(message);
+      } catch (err) {
+        console.error('[ChatGW] Failed to send event:', err);
+      }
     }
   }
-
-  return enriched;
 }
 
-export function getEventsSince(sessionId: string, sinceSeq: number): SequencedChatEvent[] {
-  const buf = buffers.get(sessionId);
-  if (!buf || buf.length === 0) return [];
-  return buf.filter((e) => e.seq > sinceSeq);
+/**
+ * Return all stored events with seq > sinceSeq for replay on reconnect.
+ */
+export function getEventsSince(sessionId: string, sinceSeq: number): Array<Record<string, unknown> & { seq: number }> {
+  const session = chatSessions.get(sessionId);
+  if (!session) return [];
+  return session.events.filter((e) => e.seq > sinceSeq);
 }
 
+/**
+ * Return the current sequence number for a session (0 if unknown).
+ */
 export function getCurrentSeq(sessionId: string): number {
-  return seqBySession.get(sessionId) ?? 0;
+  return chatSessions.get(sessionId)?.currentSeq ?? 0;
 }
 
-export function getChatGatewayStats(): { sessions: number; clients: number; buffers: number } {
-  let clients = 0;
-  for (const set of clientsBySession.values()) clients += set.size;
+/**
+ * Return connection and event stats for debugging.
+ */
+export function getChatGatewayStats(): {
+  totalSessions: number;
+  totalClients: number;
+  totalBufferedEvents: number;
+} {
+  let totalClients = 0;
+  let totalBufferedEvents = 0;
+  for (const session of chatSessions.values()) {
+    totalClients += session.clients.size;
+    totalBufferedEvents += session.events.length;
+  }
   return {
-    sessions: clientsBySession.size,
-    clients,
-    buffers: buffers.size,
+    totalSessions: chatSessions.size,
+    totalClients,
+    totalBufferedEvents,
   };
 }
-

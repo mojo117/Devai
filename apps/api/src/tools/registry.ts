@@ -49,7 +49,11 @@ export type ToolName =
   // Context Tools (read-only document access)
   | 'context_listDocuments'
   | 'context_readDocument'
-  | 'context_searchDocuments';
+  | 'context_searchDocuments'
+  // Workspace Memory Tools
+  | 'memory_remember'
+  | 'memory_search'
+  | 'memory_readToday';
 
 export interface ToolPropertyDefinition {
   type: string;
@@ -850,6 +854,58 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     },
     requiresConfirmation: false,
   },
+  // Workspace Memory Tools
+  {
+    name: 'memory_remember',
+    description: 'Save an important note to workspace daily memory. Use for explicit remember requests.',
+    parameters: {
+      type: 'object',
+      properties: {
+        content: {
+          type: 'string',
+          description: 'The note to persist',
+        },
+        promoteToLongTerm: {
+          type: 'boolean',
+          description: 'Also append to long-term MEMORY.md',
+        },
+      },
+      required: ['content'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'memory_search',
+    description: 'Search persisted workspace memory (daily + optional long-term memory).',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Text to search in memory',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max number of results (1-50)',
+        },
+        includeLongTerm: {
+          type: 'boolean',
+          description: 'Include MEMORY.md in search',
+        },
+      },
+      required: ['query'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'memory_readToday',
+    description: "Read today's daily memory file.",
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+    requiresConfirmation: false,
+  },
 ];
 
 // Dynamic MCP tools (registered at runtime by McpManager)
@@ -873,18 +929,31 @@ function getAllTools(): ToolDefinition[] {
 
 // Get tool definition by name
 export function getToolDefinition(name: string): ToolDefinition | undefined {
-  return getAllTools().find((t) => t.name === name);
+  const normalized = normalizeToolName(name);
+  return getAllTools().find((t) => t.name === normalized);
 }
 
 // Check if a tool is whitelisted
 export function isToolWhitelisted(name: string): boolean {
-  return getAllTools().some((t) => t.name === name);
+  const normalized = normalizeToolName(name);
+  return getAllTools().some((t) => t.name === normalized);
 }
 
 // Check if a tool requires confirmation
 export function toolRequiresConfirmation(name: string): boolean {
   const tool = getToolDefinition(name);
   return tool?.requiresConfirmation ?? true; // Default to requiring confirmation for unknown tools
+}
+
+/**
+ * Normalize tool names to canonical registry format.
+ * Legacy dotted names like "fs.listFiles" are converted to "fs_listFiles".
+ */
+export function normalizeToolName(name: string): string {
+  const raw = String(name || '').trim();
+  if (!raw) return raw;
+  if (!raw.includes('.')) return raw;
+  return raw.replace(/\./g, '_');
 }
 
 // Convert to LLM tool format

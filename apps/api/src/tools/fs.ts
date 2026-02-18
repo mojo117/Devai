@@ -3,12 +3,8 @@ import { join, resolve, relative, dirname, basename } from 'path';
 import fg from 'fast-glob';
 import { config } from '../config.js';
 
-// Path mapping for cross-server compatibility
-// When running on Baso (77.42.90.193), files from Klyde are mounted at /mnt/klyde-projects
-// But the canonical path is /opt/Klyde/projects
-const PATH_MAPPINGS: Array<{ canonical: string; mounted: string }> = [
-  { canonical: '/opt/Klyde/projects', mounted: '/mnt/klyde-projects' },
-];
+// Path mapping for cross-server compatibility (empty — DevAI runs directly on Clawd)
+const PATH_MAPPINGS: Array<{ canonical: string; mounted: string }> = [];
 
 // Translate canonical path to actual filesystem path
 function translatePath(path: string): string {
@@ -160,7 +156,7 @@ async function validatePath(path: string): Promise<string> {
 
   throw new Error(
     `Path "${path}" not found within allowed roots: ${allowedRoots.join(', ')}. ` +
-    `Try: fs.listFiles("${allowedRoots[0]}")`
+    `Try: fs_listFiles("${allowedRoots[0]}")`
   );
 }
 

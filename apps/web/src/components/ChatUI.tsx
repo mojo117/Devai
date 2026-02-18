@@ -114,6 +114,21 @@ export function ChatUI({
     runRequest: () => Promise<{ message: ChatMessage; sessionId?: string } | null>;
   }>(null);
 
+  // Inline system events state
+  const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set());
+
+  const toggleEventExpanded = useCallback((eventId: string) => {
+    setExpandedEvents((prev) => {
+      const next = new Set(prev);
+      if (next.has(eventId)) {
+        next.delete(eventId);
+      } else {
+        next.add(eventId);
+      }
+      return next;
+    });
+  }, []);
+
   // Agent state
   const [activeAgent, setActiveAgent] = useState<AgentName | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>('idle');
@@ -720,7 +735,7 @@ export function ChatUI({
       let content = `**Batch Approval Results:**\n\n`;
 
       if (succeeded.length > 0) {
-        content += `✅ **${succeeded.length} action(s) completed:**\n`;
+        content += `**${succeeded.length} action(s) completed:**\n`;
         for (const r of succeeded) {
           const desc = actionDescriptions.get(r.actionId) || r.actionId;
           content += `- ${desc}\n`;
@@ -729,7 +744,7 @@ export function ChatUI({
       }
 
       if (failed.length > 0) {
-        content += `❌ **${failed.length} action(s) failed:**\n`;
+        content += `**${failed.length} action(s) failed:**\n`;
         for (const r of failed) {
           const desc = actionDescriptions.get(r.actionId) || r.actionId;
           content += `- ${desc}: ${r.error || 'Unknown error'}\n`;
@@ -859,14 +874,14 @@ export function ChatUI({
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
         {showSessionControls && (
-          <div className="flex items-center justify-between text-xs text-gray-400">
+          <div className="flex items-center justify-between text-xs text-devai-text-secondary">
             <div className="flex items-center gap-2">
               <span>Session</span>
               <select
                 value={sessionId || ''}
                 onChange={(e) => handleSelectSession(e.target.value)}
                 disabled={sessionsLoading || sessions.length === 0}
-                className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200"
+                className="bg-devai-card border border-devai-border rounded px-2 py-1 text-xs text-devai-text"
               >
                 {sessions.length === 0 && (
                   <option value="">No sessions</option>
@@ -882,7 +897,7 @@ export function ChatUI({
               <button
                 onClick={handleRestartChat}
                 disabled={sessionsLoading || messages.length === 0}
-                className="text-[11px] text-orange-400 hover:text-orange-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="text-[11px] text-devai-accent hover:text-devai-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Save current conversation to history and start fresh"
               >
                 {sessionsLoading ? 'Loading...' : 'Restart Chat'}
@@ -890,7 +905,7 @@ export function ChatUI({
               <button
                 onClick={handleNewChat}
                 disabled={sessionsLoading}
-                className="text-[11px] text-gray-300 hover:text-white disabled:opacity-50"
+                className="text-[11px] text-devai-text-secondary hover:text-devai-text disabled:opacity-50"
               >
                 {sessionsLoading ? 'Loading...' : 'New Chat'}
               </button>
@@ -907,20 +922,20 @@ export function ChatUI({
           {agentHistory.length > 0 && (
             <button
               onClick={() => setShowAgentHistory(!showAgentHistory)}
-              className="text-[11px] text-blue-400 hover:text-blue-300"
+              className="text-[11px] text-devai-accent hover:text-devai-accent-hover"
             >
               {showAgentHistory ? 'Hide Agent History' : `Show Agent History (${agentHistory.length} entries)`}
             </button>
           )}
           {showAgentHistory && agentHistory.length > 0 && (
-            <div className="bg-gray-900 border border-gray-700 rounded-lg p-2">
+            <div className="bg-devai-card border border-devai-border rounded-lg p-2">
               <AgentTimeline entries={agentHistory} />
             </div>
           )}
         </div>
 
         {messages.length === 0 && (
-          <div className="text-center text-gray-500 mt-8">
+          <div className="text-center text-devai-text-muted mt-8">
             <p className="text-lg">Welcome to DevAI</p>
             <p className="text-sm mt-2">
               Start a conversation to get help with your code.
@@ -936,10 +951,10 @@ export function ChatUI({
             }`}
           >
             <div
-              className={`group relative max-w-[80%] rounded-lg px-4 py-2 ${
+              className={`group relative max-w-[80%] px-4 py-2.5 ${
                 message.role === 'user'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-700 text-gray-100'
+                  ? 'bg-devai-accent text-white rounded-2xl rounded-br-sm'
+                  : 'bg-devai-card text-devai-text rounded-2xl rounded-bl-sm border border-devai-border'
               }`}
             >
               <button
@@ -947,7 +962,7 @@ export function ChatUI({
                 className={`absolute top-2 right-2 p-1 rounded transition-all ${
                   copiedMessageId === message.id
                     ? 'opacity-100 text-green-400'
-                    : 'opacity-0 group-hover:opacity-100 text-gray-400 hover:text-white'
+                    : 'opacity-0 group-hover:opacity-100 text-devai-text-muted hover:text-devai-text'
                 }`}
                 title={copiedMessageId === message.id ? 'Copied!' : 'Copy message'}
               >
@@ -964,20 +979,36 @@ export function ChatUI({
               <div className="pr-6">
                 {renderMessageContent(message.content)}
               </div>
-              <p className="text-xs opacity-50 mt-1">
+              <p className={`text-xs mt-1 ${
+                message.role === 'user' ? 'opacity-60' : 'text-devai-text-muted'
+              }`}>
                 {new Date(message.timestamp).toLocaleTimeString()}
               </p>
             </div>
           </div>
         ))}
 
+        {/* Inline System Events */}
+        {toolEvents.length > 0 && (
+          <div className="space-y-1.5">
+            {toolEvents.slice(-10).map((event) => (
+              <InlineSystemEvent
+                key={event.id}
+                event={event}
+                isExpanded={expandedEvents.has(event.id)}
+                onToggle={() => toggleEventExpanded(event.id)}
+              />
+            ))}
+          </div>
+        )}
+
         {isLoading && (
           <div className="flex justify-start">
-            <div className="bg-gray-700 rounded-lg px-4 py-2">
-              <div className="flex space-x-1">
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-100" />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-200" />
+            <div className="bg-devai-card border border-devai-border rounded-2xl rounded-bl-sm px-4 py-3">
+              <div className="flex space-x-1.5">
+                <span className="w-2 h-2 bg-devai-accent rounded-full animate-bounce" />
+                <span className="w-2 h-2 bg-devai-accent rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+                <span className="w-2 h-2 bg-devai-accent rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
               </div>
             </div>
           </div>
@@ -988,11 +1019,11 @@ export function ChatUI({
 
       {/* Pending Actions - Fixed above input, always visible */}
       {pendingActions.length > 0 && (
-        <div className="border-t border-gray-700 px-4 py-2 space-y-2">
+        <div className="border-t border-devai-border px-4 py-2 space-y-2">
           {/* Batch action buttons when multiple actions pending */}
           {pendingActions.length > 1 && (
-            <div className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2 mb-2">
-              <span className="text-xs text-gray-400">
+            <div className="flex items-center justify-between bg-devai-card rounded-lg px-3 py-2 mb-2">
+              <span className="text-xs text-devai-text-secondary">
                 {pendingActions.length} actions pending
               </span>
               <div className="flex gap-2">
@@ -1023,14 +1054,14 @@ export function ChatUI({
       )}
 
       {/* Input */}
-      <form onSubmit={handleSubmit} className="border-t border-gray-700 p-4">
+      <form onSubmit={handleSubmit} className="border-t border-devai-border p-4">
         {retryState && !isLoading && (
-          <div className="mb-2 flex items-center justify-between bg-gray-800 border border-gray-700 rounded px-3 py-2 text-xs text-gray-300">
+          <div className="mb-2 flex items-center justify-between bg-devai-card border border-devai-border rounded px-3 py-2 text-xs text-devai-text-secondary">
             <span>Last message failed.</span>
             <button
               type="button"
               onClick={handleRetry}
-              className="text-blue-300 hover:text-blue-200"
+              className="text-devai-accent hover:text-devai-accent-hover"
             >
               Retry
             </button>
@@ -1045,17 +1076,17 @@ export function ChatUI({
               onKeyDown={handleInputKeyDown}
               placeholder="Type your message... (use @ to quick-open files)"
               disabled={isLoading}
-              className="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+              className="w-full bg-devai-card border border-devai-border rounded-xl px-4 py-2.5 text-devai-text placeholder-devai-text-muted focus:outline-none focus:border-devai-border-light focus:ring-1 focus:ring-devai-accent/30 disabled:opacity-50"
             />
             {fileHints.length > 0 && (
-              <div className="absolute bottom-12 left-0 right-0 bg-gray-900 border border-gray-700 rounded-lg shadow-lg max-h-48 overflow-y-auto text-xs">
+              <div className="absolute bottom-12 left-0 right-0 bg-devai-surface border border-devai-border rounded-lg shadow-lg max-h-48 overflow-y-auto text-xs">
                 {fileHints.map((hint, idx) => (
                   <button
                     type="button"
                     key={hint}
                     onClick={() => handlePickHint(hint)}
                     className={`w-full text-left px-3 py-2 ${
-                      idx === activeHintIndex ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-800'
+                      idx === activeHintIndex ? 'bg-devai-card text-devai-text' : 'text-devai-text-secondary hover:bg-devai-card'
                     }`}
                   >
                     {hint}
@@ -1064,12 +1095,12 @@ export function ChatUI({
               </div>
             )}
             {fileHintsLoading && (
-              <div className="absolute bottom-12 left-0 right-0 text-[10px] text-gray-400 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2">
+              <div className="absolute bottom-12 left-0 right-0 text-[10px] text-devai-text-muted bg-devai-surface border border-devai-border rounded-lg px-3 py-2">
                 Searching files...
               </div>
             )}
             {fileHintsError && (
-              <div className="absolute bottom-12 left-0 right-0 text-[10px] text-red-300 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2">
+              <div className="absolute bottom-12 left-0 right-0 text-[10px] text-red-300 bg-devai-surface border border-devai-border rounded-lg px-3 py-2">
                 {fileHintsError}
               </div>
             )}
@@ -1077,7 +1108,7 @@ export function ChatUI({
           <button
             type="submit"
             disabled={isLoading || !input.trim()}
-            className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg font-medium transition-colors"
+            className="bg-devai-accent hover:bg-devai-accent-hover disabled:bg-devai-border disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl font-medium transition-colors"
           >
             Send
           </button>
@@ -1087,12 +1118,111 @@ export function ChatUI({
   );
 }
 
-function renderMessageContent(content: string) {
+/** Inline System Event - compact badge shown in the chat stream */
+function InlineSystemEvent({
+  event,
+  isExpanded,
+  onToggle,
+}: {
+  event: ToolEvent;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  const getEventLabel = () => {
+    if (event.type === 'thinking') return 'Thinking...';
+    if (event.type === 'status') return String(event.result || 'Status');
+    if (event.type === 'tool_call') return `Using: ${event.name || 'tool'}`;
+    if (event.type === 'tool_result') return `Result: ${event.name || 'tool'}`;
+    return event.type;
+  };
+
+  const getEventColor = () => {
+    if (event.type === 'thinking') return 'border-cyan-500/30 bg-cyan-500/5 text-cyan-400';
+    if (event.type === 'tool_call') return 'border-devai-accent/30 bg-devai-accent/5 text-devai-accent';
+    if (event.type === 'tool_result') return 'border-emerald-500/30 bg-emerald-500/5 text-emerald-400';
+    return 'border-devai-border bg-devai-surface/50 text-devai-text-secondary';
+  };
+
+  const hasContent = event.arguments || event.result;
+
   return (
-    <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-      {content}
+    <div className="flex justify-center">
+      <div
+        className={`inline-flex flex-col rounded-lg border text-xs ${getEventColor()} max-w-[90%]`}
+      >
+        <button
+          onClick={hasContent ? onToggle : undefined}
+          className={`flex items-center gap-2 px-3 py-1.5 ${hasContent ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
+        >
+          {event.type === 'thinking' && (
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+          )}
+          {event.type === 'tool_call' && <span className="text-[10px]">&#9654;</span>}
+          {event.type === 'tool_result' && <span className="text-[10px]">&#9664;</span>}
+          <span className="font-mono text-[11px]">{getEventLabel()}</span>
+          {hasContent && (
+            <span className="text-[10px] opacity-60">{isExpanded ? '▲' : '▼'}</span>
+          )}
+        </button>
+        {isExpanded && hasContent && (
+          <div className="border-t border-current/10 px-3 py-2">
+            <pre className="text-[10px] text-devai-text-secondary whitespace-pre-wrap break-all font-mono max-h-32 overflow-y-auto">
+              {formatPayloadCompact(event.arguments || event.result)}
+            </pre>
+          </div>
+        )}
+      </div>
     </div>
   );
+}
+
+function renderMessageContent(content: string) {
+  // Simple markdown-like rendering for bold, code blocks, and inline code
+  const parts = content.split(/(```[\s\S]*?```|\*\*.*?\*\*|`[^`]+`)/g);
+
+  return (
+    <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+      {parts.map((part, i) => {
+        // Code block
+        if (part.startsWith('```') && part.endsWith('```')) {
+          const codeContent = part.slice(3, -3);
+          // Strip optional language identifier from first line
+          const firstNewline = codeContent.indexOf('\n');
+          const code = firstNewline > -1 ? codeContent.slice(firstNewline + 1) : codeContent;
+          return (
+            <pre key={i} className="bg-devai-bg border border-devai-border rounded-lg p-3 my-2 text-xs overflow-x-auto font-mono text-devai-text-secondary">
+              {code}
+            </pre>
+          );
+        }
+        // Bold
+        if (part.startsWith('**') && part.endsWith('**')) {
+          return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>;
+        }
+        // Inline code
+        if (part.startsWith('`') && part.endsWith('`') && !part.startsWith('```')) {
+          return (
+            <code key={i} className="bg-devai-bg border border-devai-border rounded px-1.5 py-0.5 text-xs font-mono text-devai-accent">
+              {part.slice(1, -1)}
+            </code>
+          );
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </div>
+  );
+}
+
+function formatPayloadCompact(payload: unknown): string {
+  try {
+    const text = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
+    if (text.length > 300) {
+      return `${text.slice(0, 300)}\n...`;
+    }
+    return text;
+  } catch {
+    return String(payload);
+  }
 }
 
 function extractAtToken(input: string): { value: string; start: number; end: number } | null {

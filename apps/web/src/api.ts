@@ -12,6 +12,7 @@ import type {
   SessionsResponse,
   SessionMessagesResponse,
   SettingResponse,
+  LooperPromptsResponse,
 } from './types';
 
 const API_BASE = '/api';
@@ -452,6 +453,14 @@ export async function fetchSystemPrompt(): Promise<{ prompt: string }> {
   return res.json();
 }
 
+export async function fetchLooperPrompts(): Promise<LooperPromptsResponse> {
+  const res = await fetch(`${API_BASE}/looper/prompts`, {
+    headers: withAuthHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to fetch looper prompts');
+  return res.json();
+}
+
 // Multi-Agent API
 
 export interface AgentHistoryEntry {
@@ -475,6 +484,45 @@ export interface MultiAgentResponse {
   pendingActions: Action[];
   sessionId?: string;
   agentHistory?: AgentHistoryEntry[];
+}
+
+export type WorkspaceChatMode = 'main' | 'shared';
+
+export interface MultiAgentSessionOptions {
+  workspaceContextMode?: WorkspaceChatMode;
+  chatMode?: WorkspaceChatMode;
+  sessionMode?: WorkspaceChatMode;
+  visibility?: WorkspaceChatMode;
+}
+
+function buildSessionModePayload(
+  options?: MultiAgentSessionOptions
+): {
+  workspaceContextMode: WorkspaceChatMode;
+  chatMode: WorkspaceChatMode;
+  metadata: Record<string, unknown>;
+  sessionMode?: WorkspaceChatMode;
+  visibility?: WorkspaceChatMode;
+} {
+  const workspaceContextMode = options?.workspaceContextMode ?? 'main';
+  const chatMode = options?.chatMode ?? workspaceContextMode;
+  const sessionMode = options?.sessionMode;
+  const visibility = options?.visibility;
+
+  const metadata: Record<string, unknown> = {
+    workspaceContextMode,
+    chatMode,
+  };
+  if (sessionMode) metadata.sessionMode = sessionMode;
+  if (visibility) metadata.visibility = visibility;
+
+  return {
+    workspaceContextMode,
+    chatMode,
+    metadata,
+    ...(sessionMode ? { sessionMode } : {}),
+    ...(visibility ? { visibility } : {}),
+  };
 }
 
 // ===========================================
@@ -737,7 +785,8 @@ async function sendMultiAgentMessageWs(
   message: string,
   projectRoot?: string,
   sessionId?: string,
-  onEvent?: (event: ChatStreamEvent) => void
+  onEvent?: (event: ChatStreamEvent) => void,
+  options?: MultiAgentSessionOptions
 ): Promise<MultiAgentResponse> {
   let remove: (() => void) | null = null;
   if (sessionId && onEvent) {
@@ -745,7 +794,13 @@ async function sendMultiAgentMessageWs(
   }
   try {
     if (sessionId) await wsHello(sessionId);
-    return await sendWsCommand({ type: 'request', message, projectRoot, sessionId }, onEvent);
+    return await sendWsCommand({
+      type: 'request',
+      message,
+      projectRoot,
+      sessionId,
+      ...buildSessionModePayload(options),
+    }, onEvent);
   } finally {
     remove?.();
   }
@@ -859,21 +914,28 @@ export async function sendMultiAgentMessage(
   message: string,
   projectRoot?: string,
   sessionId?: string,
-  onEvent?: (event: ChatStreamEvent) => void
+  onEvent?: (event: ChatStreamEvent) => void,
+  options?: MultiAgentSessionOptions
 ): Promise<MultiAgentResponse> {
   // Prefer WebSocket control plane; fall back to HTTP NDJSON.
   try {
     if (typeof window !== 'undefined' && typeof WebSocket !== 'undefined' && getAuthToken()) {
-      return await sendMultiAgentMessageWs(message, projectRoot, sessionId, onEvent);
+      return await sendMultiAgentMessageWs(message, projectRoot, sessionId, onEvent, options);
     }
   } catch {
     // fall back
   }
 
+  const sessionModePayload = buildSessionModePayload(options);
   const res = await fetch(`${API_BASE}/chat/agents`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ message, projectRoot, sessionId }),
+    body: JSON.stringify({
+      message,
+      projectRoot,
+      sessionId,
+      ...sessionModePayload,
+    }),
   });
 
   if (!res.ok) {
@@ -949,4 +1011,60 @@ export async function setTrustMode(mode: 'default' | 'trusted'): Promise<void> {
   if (!response.ok) {
     throw new Error('Failed to set trust mode');
   }
+}
+
+// Workspace Memory API
+
+export async function rememberWorkspaceNote(
+  content: string,
+  options?: { promoteToLongTerm?: boolean; sessionId?: string; source?: string }
+): Promise<{
+  saved: boolean;
+  daily: { date: string; filePath: string };
+  longTerm: { filePath: string } | null;
+}> {
+  const res = await fetch(`${API_BASE}/memory/remember`, {
+    method: 'POST',
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      content,
+      promoteToLongTerm: options?.promoteToLongTerm ?? false,
+      sessionId: options?.sessionId,
+      source: options?.source,
+    }),
+  });
+  if (!res.ok) throw new Error(await readApiError(res));
+  return res.json();
+}
+
+export async function searchWorkspaceMemory(
+  query: string,
+  options?: { limit?: number; includeLongTerm?: boolean }
+): Promise<{
+  query: string;
+  count: number;
+  hits: Array<{ filePath: string; line: number; snippet: string }>;
+}> {
+  const params = new URLSearchParams({
+    query,
+    limit: String(options?.limit ?? 10),
+    includeLongTerm: String(options?.includeLongTerm ?? true),
+  });
+  const res = await fetch(`${API_BASE}/memory/search?${params.toString()}`, {
+    headers: withAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(await readApiError(res));
+  return res.json();
+}
+
+export async function fetchDailyWorkspaceMemory(date: string): Promise<{
+  date: string;
+  filePath: string;
+  content: string;
+}> {
+  const res = await fetch(`${API_BASE}/memory/daily/${encodeURIComponent(date)}`, {
+    headers: withAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(await readApiError(res));
+  return res.json();
 }

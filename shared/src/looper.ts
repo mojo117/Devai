@@ -95,7 +95,7 @@ export type LooperStatus =
 
 /** Streamed event sent to the client via NDJSON. */
 export interface LooperStreamEvent {
-  type: 'step' | 'thinking' | 'answer' | 'clarify' | 'error' | 'status' | 'tool_call' | 'tool_result' | 'validation';
+  type: 'step' | 'thinking' | 'answer' | 'clarify' | 'error' | 'status' | 'tool_call' | 'tool_result' | 'validation' | 'action_pending';
   data: unknown;
   timestamp: string;
 }
@@ -105,6 +105,7 @@ export interface LooperRequest {
   message: string;
   provider: 'anthropic' | 'openai' | 'gemini';
   sessionId?: string;
+  projectRoot?: string;
   skillIds?: string[];
   config?: Partial<LooperConfig>;
 }

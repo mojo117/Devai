@@ -92,6 +92,17 @@ export interface HealthResponse {
   allowedRoots: string[];
 }
 
+export interface LooperPrompt {
+  id: string;
+  title: string;
+  prompt: string;
+}
+
+export interface LooperPromptsResponse {
+  runtime: 'looper';
+  prompts: LooperPrompt[];
+}
+
 export interface SkillSummary {
   id: string;
   name: string;

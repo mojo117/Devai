@@ -12,17 +12,17 @@ interface McpStatusProps {
 export function McpStatus({ servers }: McpStatusProps) {
   if (servers.length === 0) {
     return (
-      <div className="text-gray-500 text-sm">No MCP servers configured</div>
+      <div className="text-devai-text-muted text-sm">No MCP servers configured</div>
     );
   }
 
   return (
     <div className="space-y-2">
-      <h3 className="text-sm font-medium text-gray-400">MCP Servers</h3>
+      <h3 className="text-sm font-medium text-devai-text-secondary">MCP Servers</h3>
       {servers.map((server) => (
         <div
           key={server.name}
-          className="flex items-center justify-between p-2 bg-gray-800 rounded-lg"
+          className="flex items-center justify-between p-2 bg-devai-card rounded-lg"
         >
           <div className="flex items-center gap-2">
             <span
@@ -36,7 +36,7 @@ export function McpStatus({ servers }: McpStatusProps) {
             />
             <span className="text-sm text-white">{server.name}</span>
           </div>
-          <span className="text-xs text-gray-400">
+          <span className="text-xs text-devai-text-secondary">
             {server.status === 'connected'
               ? `${server.toolCount} tools`
               : server.error || 'Disconnected'}

@@ -1,17 +1,9 @@
 {
   "mcpServers": [
     {
-      "name": "serena",
-      "command": "/root/.local/bin/uvx",
-      "args": ["--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server", "--project", "/mnt/klyde-projects/Devai"],
-      "requiresConfirmation": true,
-      "toolPrefix": "serena",
-      "enabledForAgents": ["chapo", "koda"]
-    },
-    {
       "name": "filesystem",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/mnt/klyde-projects"],
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/opt", "/root"],
       "requiresConfirmation": true,
       "toolPrefix": "fs_mcp",
       "enabledForAgents": ["chapo", "koda", "devo"]

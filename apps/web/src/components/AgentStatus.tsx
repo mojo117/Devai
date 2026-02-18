@@ -21,25 +21,25 @@ const agentInfo: Record<AgentName, { name: string; role: string; color: string; 
   chapo: {
     name: 'CHAPO',
     role: 'Task Coordinator',
-    color: 'text-purple-400 border-purple-500 bg-purple-900/20',
+    color: 'text-purple-300 border-purple-500/40 bg-purple-900/10',
     icon: '🎯',
   },
   koda: {
     name: 'KODA',
     role: 'Senior Developer',
-    color: 'text-blue-400 border-blue-500 bg-blue-900/20',
+    color: 'text-cyan-300 border-cyan-500/40 bg-cyan-900/10',
     icon: '💻',
   },
   devo: {
     name: 'DEVO',
     role: 'DevOps Engineer',
-    color: 'text-green-400 border-green-500 bg-green-900/20',
+    color: 'text-emerald-300 border-emerald-500/40 bg-emerald-900/10',
     icon: '🔧',
   },
   scout: {
     name: 'SCOUT',
     role: 'Explorer & Researcher',
-    color: 'text-orange-400 border-orange-500 bg-orange-900/20',
+    color: 'text-devai-accent border-devai-accent/40 bg-devai-accent/10',
     icon: '🔍',
   },
 };
@@ -64,11 +64,11 @@ export function AgentStatus({
 
   if (!agent) {
     return (
-      <div className="bg-gray-800 border border-gray-700 rounded-lg p-3">
-        <div className="flex items-center gap-2 text-gray-400">
+      <div className="bg-devai-card border border-devai-border rounded-lg p-3">
+        <div className="flex items-center gap-2 text-devai-text-secondary">
           <span className="text-lg">🤖</span>
           <span className="text-sm">Multi-Agent System</span>
-          <span className="text-xs text-gray-500 ml-auto">Idle</span>
+          <span className="text-xs text-devai-text-muted ml-auto">Idle</span>
         </div>
       </div>
     );
@@ -111,7 +111,7 @@ export function AgentStatus({
                 ? 'bg-red-500/50'
                 : i < ['qualification', 'execution', 'review'].indexOf(phase)
                 ? 'bg-current opacity-50'
-                : 'bg-gray-600'
+                : 'bg-devai-border'
             }`}
           />
         ))}
@@ -154,8 +154,8 @@ export function AgentWorkflow({ activeAgent, completedSteps }: AgentWorkflowProp
   const agents: AgentName[] = ['chapo', 'koda', 'devo', 'scout'];
 
   return (
-    <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-      <div className="text-xs text-gray-500 mb-3">Agent Workflow</div>
+    <div className="bg-devai-card border border-devai-border rounded-lg p-4">
+      <div className="text-xs text-devai-text-muted mb-3">Agent Workflow</div>
 
       <div className="flex items-center justify-between">
         {agents.map((agent, i) => {
@@ -170,8 +170,8 @@ export function AgentWorkflow({ activeAgent, completedSteps }: AgentWorkflowProp
                   isActive
                     ? info.color
                     : isCompleted
-                    ? 'text-gray-400'
-                    : 'text-gray-600'
+                    ? 'text-devai-text-secondary'
+                    : 'text-devai-text-muted'
                 }`}
               >
                 <div
@@ -179,8 +179,8 @@ export function AgentWorkflow({ activeAgent, completedSteps }: AgentWorkflowProp
                     isActive
                       ? 'border-current bg-current/20'
                       : isCompleted
-                      ? 'border-gray-500 bg-gray-700'
-                      : 'border-gray-700'
+                      ? 'border-gray-500 bg-devai-surface'
+                      : 'border-devai-border'
                   }`}
                 >
                   <span className="text-lg">{info.icon}</span>
@@ -190,7 +190,7 @@ export function AgentWorkflow({ activeAgent, completedSteps }: AgentWorkflowProp
               </div>
 
               {i < agents.length - 1 && (
-                <div className="flex-1 h-0.5 mx-2 bg-gray-700 relative">
+                <div className="flex-1 h-0.5 mx-2 bg-devai-surface relative">
                   {(isCompleted || (activeAgent === agents[i + 1])) && (
                     <div className="absolute inset-0 bg-gray-500" />
                   )}

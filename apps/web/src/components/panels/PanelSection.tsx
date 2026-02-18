@@ -26,21 +26,21 @@ export function PanelSection({
   return (
     <div className={className}>
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-400">
+        <h2 className="text-sm font-semibold text-devai-text-secondary">
           {title}{count !== undefined ? ` (${count})` : ''}
         </h2>
         {onAction && (
           <button
             onClick={onAction}
             disabled={loading || actionDisabled}
-            className="text-[10px] text-gray-400 hover:text-gray-200 disabled:opacity-50"
+            className="text-[10px] text-devai-text-secondary hover:text-devai-text disabled:opacity-50"
           >
             {loading ? 'Loading...' : actionLabel}
           </button>
         )}
       </div>
       {loadedAt && (
-        <p className="text-[10px] text-gray-600 mt-1">
+        <p className="text-[10px] text-devai-text-muted mt-1">
           Loaded: {new Date(loadedAt).toLocaleTimeString()}
         </p>
       )}

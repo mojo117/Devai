@@ -36,11 +36,9 @@ import type {
 } from './types.js';
 import * as stateManager from './stateManager.js';
 import { llmRouter } from '../llm/router.js';
-import { executeTool } from '../tools/executor.js';
-import { getToolsForLLM, toolRequiresConfirmation } from '../tools/registry.js';
+import { getToolsForLLM } from '../tools/registry.js';
 import { mcpManager } from '../mcp/index.js';
-import { createAction } from '../actions/manager.js';
-import { buildActionPreview } from '../actions/preview.js';
+import { executeToolWithApprovalBridge } from '../actions/approvalBridge.js';
 import type { LLMMessage, ToolCall } from '../llm/types.js';
 
 // Agent definitions
@@ -48,11 +46,11 @@ import { CHAPO_AGENT } from './chapo.js';
 import { KODA_AGENT } from './koda.js';
 import { DEVO_AGENT } from './devo.js';
 import { SCOUT_AGENT } from './scout.js';
-import { loadClaudeMdContext, formatClaudeMdBlock } from '../scanner/claudeMdLoader.js';
-import { loadDevaiMdContext, formatDevaiMdBlock } from '../scanner/devaiMdLoader.js';
 import { processRequestNew } from './newRouter.js';
 import { config } from '../config.js';
-import { getMessages } from '../db/queries.js';
+import { getMessages, getTrustMode } from '../db/queries.js';
+import { rememberNote } from '../memory/workspaceMemory.js';
+import { getCombinedSystemContextBlock, warmSystemContextForSession } from './systemContext.js';
 import {
   classifyTaskComplexity,
   selectModel,
@@ -116,6 +114,27 @@ function isSmallTalk(text: string): boolean {
     'ey', 'was geht', "what's up", 'whats up', 'wie gehts', "wie geht's",
   ]);
   return greetings.has(t);
+}
+
+function extractExplicitRememberNote(text: string): { note: string; promoteToLongTerm: boolean } | null {
+  const patterns = [
+    /^\s*(?:remember(?:\s+this)?|please\s+remember|note\s+this)\s*[:,-]?\s+(.+)$/i,
+    /^\s*(?:merk\s+dir(?:\s+bitte)?|merke\s+dir)\s*[:,-]?\s+(.+)$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match?.[1]) continue;
+
+    const note = match[1].trim();
+    if (note.length < 3) return null;
+    if (note.endsWith('?')) return null;
+
+    const promoteToLongTerm = /\b(always|dauerhaft|langfristig|important|wichtig)\b/i.test(text);
+    return { note, promoteToLongTerm };
+  }
+
+  return null;
 }
 
 async function loadRecentConversationHistory(sessionId: string): Promise<Array<{ role: string; content: string }>> {
@@ -221,8 +240,25 @@ export async function processRequest(
     return 'Hey. Womit soll ich dir helfen: Code aendern, Bug fixen, oder etwas nachschlagen?';
   }
 
+  const explicitRemember = extractExplicitRememberNote(userMessage);
+  if (explicitRemember) {
+    try {
+      const saved = await rememberNote(explicitRemember.note, {
+        sessionId,
+        source: 'chat.explicit_remember',
+        promoteToLongTerm: explicitRemember.promoteToLongTerm,
+      });
+      const longTermInfo = saved.longTerm ? ` und zusaetzlich in ${saved.longTerm.filePath}` : '';
+      return `Notiert. Gespeichert in ${saved.daily.filePath}${longTermInfo}.`;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return `Ich konnte die Notiz nicht speichern: ${message}`;
+    }
+  }
+
   // Keep the last actual request for approval/resume flows.
   stateManager.setOriginalRequest(sessionId, userMessage);
+  await warmSystemContextForSession(sessionId, projectRoot || getProjectRootFromState(sessionId));
 
   // Load devai.md global instructions for this session (applies to both routers).
   await getDevaiMdBlockForSession(sessionId);
@@ -250,17 +286,9 @@ export async function processRequest(
   stateManager.setOriginalRequest(sessionId, userMessage);
   stateManager.setGatheredInfo(sessionId, 'taskComplexity', taskComplexity);
   stateManager.setGatheredInfo(sessionId, 'modelSelection', modelSelection);
-
-  // Load devai.md global instructions and store in state
-  await getDevaiMdBlockForSession(sessionId);
-
-  // Load CLAUDE.md project instructions and store in state
-  if (projectRoot) {
-    const claudeMdContext = await loadClaudeMdContext(projectRoot);
-    const claudeMdBlock = formatClaudeMdBlock(claudeMdContext);
-    stateManager.setGatheredInfo(sessionId, 'claudeMdBlock', claudeMdBlock);
-    stateManager.setGatheredInfo(sessionId, 'projectRoot', projectRoot);
-  }
+  const trustMode = await getTrustMode();
+  const approvalsBypassed = trustMode === 'trusted';
+  stateManager.setGatheredInfo(sessionId, 'trustMode', trustMode);
 
   try {
     // FAST PATH: Skip qualification for trivial/simple tasks
@@ -303,7 +331,7 @@ export async function processRequest(
     }
 
     // Check if approval needed (risky task)
-    if (qualification.requiresApproval && !stateManager.isApprovalGranted(sessionId)) {
+    if (qualification.requiresApproval && !stateManager.isApprovalGranted(sessionId) && !approvalsBypassed) {
       console.info('[agents] approval required', {
         sessionId,
         riskLevel: qualification.riskLevel,
@@ -341,6 +369,20 @@ export async function processRequest(
         qualification,
         sendEvent
       );
+
+      if (approvalsBypassed) {
+        console.info('[agents] trusted mode: auto-approving generated plan', {
+          sessionId,
+          planId: plan.planId,
+        });
+        return handlePlanApproval(
+          sessionId,
+          plan.planId,
+          true,
+          'Auto-approved in trusted mode',
+          sendEvent
+        );
+      }
 
       // Plan Mode pauses here for user approval
       // The plan will be executed after user approves via handlePlanApproval
@@ -454,15 +496,11 @@ async function executeSimpleTask(
   const agent = getAgent(targetAgent);
   const agentToolNames = getToolsForAgent(targetAgent);
   const tools = getToolsForLLM().filter((t) => agentToolNames.includes(t.name));
-
-  // Get CLAUDE.md project instructions from state
-  const state = stateManager.getState(sessionId);
-  const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
-  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
+  await warmSystemContextForSession(sessionId, projectRoot || getProjectRootFromState(sessionId));
+  const systemContextBlock = getCombinedSystemContextBlock(sessionId);
 
   const systemPrompt = `${agent.systemPrompt}
-${devaiMdBlock}
-${claudeMdBlock}
+${systemContextBlock}
 ${projectRoot ? `Working Directory: ${projectRoot}` : ''}
 
 WICHTIG: Dies ist eine einfache Anfrage. Führe sie DIREKT aus ohne zu fragen.`;
@@ -501,7 +539,18 @@ WICHTIG: Dies ist eine einfache Anfrage. Führe sie DIREKT aus ohne zu fragen.`;
         args: toolCall.arguments,
       });
 
-      const toolResult = await executeTool(toolCall.name, toolCall.arguments);
+      const toolResult = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
+        onActionPending: (action) => {
+          sendEvent({
+            type: 'action_pending',
+            actionId: action.id,
+            toolName: action.toolName,
+            toolArgs: action.toolArgs,
+            description: action.description,
+            preview: action.preview,
+          });
+        },
+      });
 
       sendEvent({
         type: 'tool_result',
@@ -549,15 +598,11 @@ async function runChapoQualification(
   // Use provided model or default to agent's model
   const provider = (modelSelection?.provider || 'anthropic') as 'anthropic' | 'openai' | 'gemini';
   const model = modelSelection?.model || chapo.model;
-
-  // Get CLAUDE.md project instructions from state (loaded in processRequest)
-  const state = stateManager.getState(sessionId);
-  const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
-  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
+  await warmSystemContextForSession(sessionId, projectRoot || getProjectRootFromState(sessionId));
+  const systemContextBlock = getCombinedSystemContextBlock(sessionId);
 
   const systemPrompt = `${chapo.systemPrompt}
-${devaiMdBlock}
-${claudeMdBlock}
+${systemContextBlock}
 ${projectRoot ? `Working Directory: ${projectRoot}` : ''}
 
 WICHTIG: Bei Read-Only Anfragen (Dateien auflisten, lesen, suchen, Git-Status) führe das Tool SOFORT aus.
@@ -728,7 +773,18 @@ Falls Delegation nötig:
       }
 
       // Regular tool execution
-      const result = await executeTool(toolCall.name, toolCall.arguments);
+      const result = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
+        onActionPending: (action) => {
+          sendEvent({
+            type: 'action_pending',
+            actionId: action.id,
+            toolName: action.toolName,
+            toolArgs: action.toolArgs,
+            description: action.description,
+            preview: action.preview,
+          });
+        },
+      });
 
       sendEvent({
         type: 'tool_result',
@@ -824,11 +880,7 @@ async function delegateToAgent(
   const agent = getAgent(targetAgent);
   const agentToolNames = getToolsForAgent(targetAgent);
   const tools = getToolsForLLM().filter((t) => agentToolNames.includes(t.name));
-
-  // Get CLAUDE.md project instructions from state
-  const state = stateManager.getState(sessionId);
-  const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
-  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
+  const systemContextBlock = getCombinedSystemContextBlock(sessionId);
 
   const contextSummary = context.relevantFiles.length > 0
     ? `\n\nRelevante Dateien:\n${context.relevantFiles.join('\n')}`
@@ -839,8 +891,7 @@ async function delegateToAgent(
     : '';
 
   const systemPrompt = `${agent.systemPrompt}
-${devaiMdBlock}
-${claudeMdBlock}
+${systemContextBlock}
 KONTEXT VON CHAPO:
 ${contextSummary}${gitStatusSummary}
 
@@ -950,39 +1001,19 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
         args: toolCall.arguments,
       });
 
-      // Check if tool requires confirmation - create pending action for UI approval
-      if (toolRequiresConfirmation(toolCall.name)) {
-        const preview = await buildActionPreview(toolCall.name, toolCall.arguments);
-        const description = generateToolDescription(toolCall.name, toolCall.arguments);
-
-        const action = await createAction({
-          id: nanoid(),
-          toolName: toolCall.name,
-          toolArgs: toolCall.arguments,
-          description,
-          preview,
-        });
-
-        // Send action_pending event for inline approval in UI
-        sendEvent({
-          type: 'action_pending',
-          actionId: action.id,
-          toolName: action.toolName,
-          toolArgs: action.toolArgs,
-          description: action.description,
-          preview: action.preview,
-        });
-
-        toolResults.push({
-          toolUseId: toolCall.id,
-          result: `Action created for approval: ${description} (Action ID: ${action.id})`,
-          isError: false,
-        });
-        continue;
-      }
-
       const startTime = Date.now();
-      const result = await executeTool(toolCall.name, toolCall.arguments);
+      const result = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
+        onActionPending: (action) => {
+          sendEvent({
+            type: 'action_pending',
+            actionId: action.id,
+            toolName: action.toolName,
+            toolArgs: action.toolArgs,
+            description: action.description,
+            preview: action.preview,
+          });
+        },
+      });
       const duration = Date.now() - startTime;
 
       executedTools.push({
@@ -1016,48 +1047,6 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
       content: '',
       toolResults,
     });
-  }
-
-  // Helper function to generate tool descriptions
-  function generateToolDescription(toolName: string, args: Record<string, unknown>): string {
-    switch (toolName) {
-      case 'fs_writeFile':
-        return `Write to file: ${args.path}`;
-      case 'fs_edit':
-        return `Edit file: ${args.path}`;
-      case 'fs_mkdir':
-        return `Create directory: ${args.path}`;
-      case 'fs_move':
-        return `Move: ${args.source} → ${args.destination}`;
-      case 'fs_delete':
-        return `Delete: ${args.path}`;
-      case 'git_commit':
-        return `Git commit: "${args.message}"`;
-      case 'git_push':
-        return `Git push to ${args.remote || 'origin'}/${args.branch || 'current branch'}`;
-      case 'git_pull':
-        return `Git pull from ${args.remote || 'origin'}/${args.branch || 'current branch'}`;
-      case 'github_triggerWorkflow':
-        return `Trigger workflow: ${args.workflow} on ${args.ref}`;
-      case 'bash_execute':
-        return `Execute: ${args.command}`;
-      case 'ssh_execute':
-        return `SSH to ${args.host}: ${args.command}`;
-      case 'pm2_restart':
-        return `PM2 restart: ${args.processName}`;
-      case 'pm2_stop':
-        return `PM2 stop: ${args.processName}`;
-      case 'pm2_start':
-        return `PM2 start: ${args.processName}`;
-      case 'pm2_reloadAll':
-        return `PM2 reload all processes`;
-      case 'npm_install':
-        return args.packageName ? `npm install ${args.packageName}` : 'npm install';
-      case 'npm_run':
-        return `npm run ${args.script}`;
-      default:
-        return `Execute: ${toolName}`;
-    }
   }
 
   // Log to history
@@ -1209,9 +1198,7 @@ async function handleEscalation(
 
   // CHAPO analyzes the issue
   const chapo = getAgent('chapo');
-  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
-  const state = stateManager.getState(sessionId);
-  const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
+  const systemContextBlock = getCombinedSystemContextBlock(sessionId);
   const response = await llmRouter.generate('anthropic', {
     model: chapo.model,
     messages: [
@@ -1231,7 +1218,7 @@ Analysiere das Problem und entscheide:
 Antworte mit einer klaren Handlungsanweisung für ${fromAgent.toUpperCase()}.`,
       },
     ],
-    systemPrompt: `${chapo.systemPrompt}\n${devaiMdBlock}\n${claudeMdBlock}`,
+    systemPrompt: `${chapo.systemPrompt}\n${systemContextBlock}`,
     toolsEnabled: false,
   });
 
@@ -1265,9 +1252,7 @@ async function runChapoReview(
   sendEvent({ type: 'agent_thinking', agent: 'chapo', status: 'Überprüfe Ergebnis...' });
 
   const chapo = getAgent('chapo');
-  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
-  const state = stateManager.getState(sessionId);
-  const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
+  const systemContextBlock = getCombinedSystemContextBlock(sessionId);
   const history = stateManager.getHistory(sessionId);
 
   const historySummary = history
@@ -1296,7 +1281,7 @@ Erstelle eine Zusammenfassung für den User:
 3. Was sind die nächsten Schritte (falls nötig)?`,
       },
     ],
-    systemPrompt: `${chapo.systemPrompt}\n${devaiMdBlock}\n${claudeMdBlock}`,
+    systemPrompt: `${chapo.systemPrompt}\n${systemContextBlock}`,
     toolsEnabled: false,
   });
 
@@ -1449,13 +1434,10 @@ async function getChapoPerspective(
   sendEvent({ type: 'agent_thinking', agent: 'chapo', status: 'Strategische Analyse...' });
 
   const chapo = getAgent('chapo');
-  const state = stateManager.getState(sessionId);
-  const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
-  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
+  const systemContextBlock = getCombinedSystemContextBlock(sessionId);
 
   const systemPrompt = `${chapo.systemPrompt}
-${devaiMdBlock}
-${claudeMdBlock}
+${systemContextBlock}
 
 STRATEGISCHE ANALYSE FÜR PLAN MODE
 
@@ -1534,9 +1516,7 @@ async function getKodaPerspective(
   sendEvent({ type: 'agent_thinking', agent: 'koda', status: 'Code-Impact-Analyse...' });
 
   const koda = getAgent('koda');
-  const state = stateManager.getState(sessionId);
-  const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
-  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
+  const systemContextBlock = getCombinedSystemContextBlock(sessionId);
 
   // KODA gets read-only tools for exploration
   const readOnlyTools = getToolsForLLM().filter((t) =>
@@ -1548,8 +1528,7 @@ async function getKodaPerspective(
     : '';
 
   const systemPrompt = `${koda.systemPrompt}
-${devaiMdBlock}
-${claudeMdBlock}
+${systemContextBlock}
 
 CODE-IMPACT-ANALYSE FÜR PLAN MODE
 
@@ -1622,7 +1601,18 @@ Antworte am Ende mit einem JSON-Block:
         args: toolCall.arguments,
       });
 
-      const result = await executeTool(toolCall.name, toolCall.arguments);
+      const result = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
+        onActionPending: (action) => {
+          sendEvent({
+            type: 'action_pending',
+            actionId: action.id,
+            toolName: action.toolName,
+            toolArgs: action.toolArgs,
+            description: action.description,
+            preview: action.preview,
+          });
+        },
+      });
 
       sendEvent({
         type: 'tool_result',
@@ -1688,9 +1678,7 @@ async function getDevoPerspective(
   sendEvent({ type: 'agent_thinking', agent: 'devo', status: 'DevOps-Impact-Analyse...' });
 
   const devo = getAgent('devo');
-  const state = stateManager.getState(sessionId);
-  const claudeMdBlock = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
-  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
+  const systemContextBlock = getCombinedSystemContextBlock(sessionId);
 
   // DEVO gets read-only tools for exploration
   const readOnlyTools = getToolsForLLM().filter((t) =>
@@ -1698,8 +1686,7 @@ async function getDevoPerspective(
   );
 
   const systemPrompt = `${devo.systemPrompt}
-${devaiMdBlock}
-${claudeMdBlock}
+${systemContextBlock}
 
 DEVOPS-IMPACT-ANALYSE FÜR PLAN MODE
 
@@ -1770,7 +1757,18 @@ Antworte am Ende mit einem JSON-Block:
         args: toolCall.arguments,
       });
 
-      const result = await executeTool(toolCall.name, toolCall.arguments);
+      const result = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
+        onActionPending: (action) => {
+          sendEvent({
+            type: 'action_pending',
+            actionId: action.id,
+            toolName: action.toolName,
+            toolArgs: action.toolArgs,
+            description: action.description,
+            preview: action.preview,
+          });
+        },
+      });
 
       sendEvent({
         type: 'tool_result',
@@ -1837,7 +1835,7 @@ async function synthesizePlan(
   sendEvent?.({ type: 'agent_thinking', agent: 'chapo', status: 'Synthese des Plans...' });
 
   const chapo = getAgent('chapo');
-  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
+  const systemContextBlock = getCombinedSystemContextBlock(sessionId);
   const plan = stateManager.getCurrentPlan(sessionId);
   const planId = plan?.planId || nanoid();
 
@@ -1867,7 +1865,7 @@ ${devoPerspective ? `DEVO (DevOps):
 - Bedenken: ${devoPerspective.concerns.join(', ')}` : ''}`;
 
   const systemPrompt = `${chapo.systemPrompt}
-${devaiMdBlock}
+${systemContextBlock}
 
 PLAN-SYNTHESE
 
@@ -2249,7 +2247,7 @@ export async function spawnScout(
   sendEvent?.({ type: 'scout_start', query, scope });
 
   const scout = getAgent('scout');
-  const devaiMdBlock = await getDevaiMdBlockForSession(sessionId);
+  const systemContextBlock = getCombinedSystemContextBlock(sessionId);
   const scoutToolNames = getToolsForAgent('scout');
   const tools = getToolsForLLM().filter((t) => scoutToolNames.includes(t.name));
 
@@ -2281,7 +2279,7 @@ export async function spawnScout(
     const response = await llmRouter.generate('anthropic', {
       model: scout.model,
       messages,
-      systemPrompt: `${scout.systemPrompt}\n${devaiMdBlock}`,
+      systemPrompt: `${scout.systemPrompt}\n${systemContextBlock}`,
       tools,
       toolsEnabled: true,
     });
@@ -2315,7 +2313,18 @@ export async function spawnScout(
         return result;
       }
 
-      const result = await executeTool(toolCall.name, toolCall.arguments);
+      const result = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
+        onActionPending: (action) => {
+          sendEvent?.({
+            type: 'action_pending',
+            actionId: action.id,
+            toolName: action.toolName,
+            toolArgs: action.toolArgs,
+            description: action.description,
+            preview: action.preview,
+          });
+        },
+      });
 
       const toolResult = buildToolResultContent(result);
       toolResults.push({

@@ -1,101 +1,58 @@
 import { useEffect, useState } from 'react';
-import { fetchSystemPrompt } from '../api';
+import { fetchLooperPrompts } from '../api';
+import type { LooperPrompt } from '../types';
 
 export function PromptsPanelContent() {
-  const [prompt, setPrompt] = useState<string | null>(null);
+  const [prompts, setPrompts] = useState<LooperPrompt[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
 
-  useEffect(() => {
-    let isMounted = true;
-    const loadPrompt = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const result = await fetchSystemPrompt();
-        if (!isMounted) return;
-        setPrompt(result.prompt);
-        setLoadedAt(new Date().toISOString());
-      } catch (err) {
-        if (!isMounted) return;
-        setError(err instanceof Error ? err.message : 'Failed to load prompt');
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
-      }
-    };
-
-    loadPrompt();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  const formatPrompt = (text: string) => {
-    const sections = text.split(/\n(?=[A-Z][A-Z\s]+:)/);
-    return sections.map((section, index) => {
-      const lines = section.split('\n');
-      const firstLine = lines[0];
-      const isHeader = /^[A-Z][A-Z\s]+:/.test(firstLine);
-
-      if (isHeader) {
-        const headerMatch = firstLine.match(/^([A-Z][A-Z\s]+):(.*)/);
-        if (headerMatch) {
-          const [, header, rest] = headerMatch;
-          return (
-            <div key={index} className="mb-3">
-              <div className="text-blue-400 font-semibold text-xs uppercase tracking-wide mb-1">
-                {header}
-              </div>
-              <div className="text-gray-300 text-xs whitespace-pre-wrap">
-                {rest.trim()}
-                {lines.slice(1).join('\n')}
-              </div>
-            </div>
-          );
-        }
-      }
-
-      return (
-        <div key={index} className="text-gray-300 text-xs whitespace-pre-wrap mb-3">
-          {section}
-        </div>
-      );
-    });
-  };
-
-  const handleRefresh = async () => {
+  const loadPrompts = async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchSystemPrompt();
-      setPrompt(result.prompt);
+      const result = await fetchLooperPrompts();
+      setPrompts(result.prompts);
       setLoadedAt(new Date().toISOString());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load prompt');
+      setError(err instanceof Error ? err.message : 'Failed to load prompts');
     } finally {
       setLoading(false);
     }
   };
 
+  useEffect(() => {
+    let isMounted = true;
+    const run = async () => {
+      if (!isMounted) return;
+      await loadPrompts();
+    };
+    void run();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   return (
     <div className="p-4">
       <div className="flex items-center justify-between mb-3">
         <div>
-          <h2 className="text-sm font-semibold text-gray-400">System Prompt</h2>
+          <h2 className="text-sm font-semibold text-devai-text-secondary">Looper Prompts</h2>
+          <p className="text-[10px] text-devai-text-muted mt-1">
+            {prompts.length} prompt{prompts.length === 1 ? '' : 's'}
+          </p>
           {loadedAt && (
-            <p className="text-[10px] text-gray-600 mt-1">
+            <p className="text-[10px] text-devai-text-muted mt-1">
               Loaded: {new Date(loadedAt).toLocaleTimeString()}
             </p>
           )}
         </div>
         <div className="flex items-center gap-2">
-          {loading && <span className="text-[10px] text-gray-500">Loading...</span>}
+          {loading && <span className="text-[10px] text-devai-text-muted">Loading...</span>}
           <button
-            onClick={handleRefresh}
-            className="text-[10px] text-gray-400 hover:text-gray-200 disabled:opacity-50"
+            onClick={() => void loadPrompts()}
+            className="text-[10px] text-devai-text-secondary hover:text-devai-text disabled:opacity-50"
             disabled={loading}
           >
             Refresh
@@ -109,14 +66,19 @@ export function PromptsPanelContent() {
         </div>
       )}
 
-      {prompt && (
-        <div className="bg-gray-900 rounded-lg p-3">
-          {formatPrompt(prompt)}
+      {prompts.length > 0 && (
+        <div className="space-y-3">
+          {prompts.map((item) => (
+            <div key={item.id} className="bg-devai-bg rounded-lg p-3">
+              <div className="text-[11px] text-devai-accent font-semibold mb-2">{item.title}</div>
+              <pre className="text-xs text-devai-text-secondary whitespace-pre-wrap font-mono">{item.prompt}</pre>
+            </div>
+          ))}
         </div>
       )}
 
-      {!prompt && !loading && !error && (
-        <p className="text-xs text-gray-500">No prompt loaded.</p>
+      {prompts.length === 0 && !loading && !error && (
+        <p className="text-xs text-devai-text-muted">No prompts loaded.</p>
       )}
     </div>
   );

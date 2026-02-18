@@ -4,12 +4,12 @@ import rateLimit from '@fastify/rate-limit';
 import fastifyWebsocket from '@fastify/websocket';
 import { config } from './config.js';
 import { healthRoutes } from './routes/health.js';
-import { chatRoutes } from './routes/chat.js';
 import { actionRoutes } from './routes/actions.js';
 import { projectRoutes } from './routes/project.js';
 import { skillsRoutes } from './routes/skills.js';
 import { sessionsRoutes } from './routes/sessions.js';
 import { settingsRoutes } from './routes/settings.js';
+import { memoryRoutes } from './routes/memory.js';
 import { looperRoutes } from './routes/looper.js';
 import { authMiddleware, registerAuthRoutes } from './routes/auth.js';
 import { initDb } from './db/index.js';
@@ -63,12 +63,12 @@ app.addHook('preHandler', async (request, reply) => {
 
 // Register routes
 await app.register(healthRoutes, { prefix: '/api' });
-await app.register(chatRoutes, { prefix: '/api' });
 await app.register(actionRoutes, { prefix: '/api' });
 await app.register(projectRoutes, { prefix: '/api' });
 await app.register(skillsRoutes, { prefix: '/api' });
 await app.register(sessionsRoutes, { prefix: '/api' });
 await app.register(settingsRoutes, { prefix: '/api' });
+await app.register(memoryRoutes, { prefix: '/api' });
 await app.register(looperRoutes, { prefix: '/api' });
 await app.register(websocketRoutes, { prefix: '/api' });
 

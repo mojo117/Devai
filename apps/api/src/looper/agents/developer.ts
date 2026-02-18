@@ -4,11 +4,12 @@
 // ──────────────────────────────────────────────
 
 import type { LooperAgent, AgentContext, AgentResult } from './base-agent.js';
-import { executeTool, type ToolExecutionResult } from '../../tools/executor.js';
+import { executeToolWithApprovalBridge } from '../../actions/approvalBridge.js';
+import type { ToolExecutionResult } from '../../tools/executor.js';
 import type { LLMProvider } from '../../llm/types.js';
 import { llmRouter } from '../../llm/router.js';
 
-const DEV_SYSTEM_PROMPT = `You are Chapo's developer agent.
+export const DEV_SYSTEM_PROMPT = `You are Chapo's developer agent.
 You receive a development task and tool results, and produce code or technical output.
 Be precise, write clean code, and explain your changes briefly.
 If you need to read or write files, produce the tool calls described in your response.
@@ -33,7 +34,9 @@ export class DeveloperAgent implements LooperAgent {
   private async executeTool(ctx: AgentContext): Promise<AgentResult> {
     const toolResults: ToolExecutionResult[] = [];
 
-    const result = await executeTool(ctx.toolName!, ctx.toolArgs || {});
+    const result = await executeToolWithApprovalBridge(ctx.toolName!, ctx.toolArgs || {}, {
+      onActionPending: ctx.onActionPending,
+    });
     toolResults.push(result);
 
     if (result.success) {

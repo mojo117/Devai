@@ -35,6 +35,10 @@ export const CHAPO_AGENT: AgentDefinition = {
     'github_getWorkflowRunStatus',
     // Logs
     'logs_getStagingLogs',
+    // Workspace memory
+    'memory_remember',
+    'memory_search',
+    'memory_readToday',
     // Meta-tools for coordination
     'delegateToKoda',
     'delegateToDevo',
@@ -54,6 +58,7 @@ Frage den User NUR wenn du nach der Ausführung nicht weiterweißt.
 - Dateien lesen und durchsuchen (fs_listFiles, fs_readFile, fs_glob, fs_grep)
 - Git-Status prüfen (git_status, git_diff)
 - Logs lesen (logs_getStagingLogs)
+- Memory speichern/suchen (memory_remember, memory_search, memory_readToday)
 - An KODA delegieren (Code-Änderungen)
 - An DEVO delegieren (DevOps-Tasks)
 - An SCOUT delegieren (tiefe Exploration, Web-Suche)

@@ -8,8 +8,9 @@ import type { DecisionResult, LooperEvent, AgentType } from '@devai/shared';
 import type { LLMProvider } from '../llm/types.js';
 import { llmRouter } from '../llm/router.js';
 import { ConversationManager } from './conversation-manager.js';
+import { normalizeToolName } from '../tools/registry.js';
 
-const DECISION_SYSTEM_PROMPT = `You are the decision engine of an AI assistant called Chapo.
+export const DECISION_SYSTEM_PROMPT = `You are the decision engine of an AI assistant called Chapo.
 Given the current conversation and the latest event you must decide what to do next.
 
 You MUST respond with valid JSON only (no markdown fences) using exactly this schema:
@@ -32,11 +33,11 @@ Rules:
 - intent "clarify": You don't have enough information. Ask the user ONE focused question.
 - intent "answer": You have enough information to give a complete answer.
 
-Available tools (prefix with agent namespace):
-  fs.listFiles, fs.readFile, fs.writeFile,
-  git.status, git.diff, git.commit,
-  github.triggerWorkflow, github.getWorkflowRunStatus,
-  logs.getStagingLogs
+Available tools (canonical names):
+  fs_listFiles, fs_readFile, fs_writeFile,
+  git_status, git_diff, git_commit,
+  github_triggerWorkflow, github_getWorkflowRunStatus,
+  logs_getStagingLogs
 
 When you receive an error event, try to work around it. Never give up on the first error.
 When you receive a tool_result event, decide whether the information is sufficient or you need more.`;
@@ -124,7 +125,7 @@ export class DecisionEngine {
       return {
         intent,
         agent: agent ?? undefined,
-        toolName: parsed.toolName ?? undefined,
+        toolName: typeof parsed.toolName === 'string' ? normalizeToolName(parsed.toolName) : undefined,
         toolArgs: parsed.toolArgs ?? undefined,
         clarificationQuestion: parsed.clarificationQuestion ?? undefined,
         answerText: parsed.answerText ?? undefined,

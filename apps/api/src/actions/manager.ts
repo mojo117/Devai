@@ -225,7 +225,9 @@ export async function approveAndExecuteAction(id: string): Promise<Action> {
 
   // Execute the tool
   try {
-    const result = await executeTool(action.toolName, action.toolArgs);
+    const result = await executeTool(action.toolName, action.toolArgs, {
+      bypassConfirmation: true,
+    });
 
     if (result.success) {
       action.status = 'done';

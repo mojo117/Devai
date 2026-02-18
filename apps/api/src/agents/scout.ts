@@ -27,6 +27,10 @@ export const SCOUT_AGENT: AgentDefinition = {
     'fs_grep',
     'git_status',
     'git_diff',
+    // Workspace memory
+    'memory_remember',
+    'memory_search',
+    'memory_readToday',
     // Web tools
     'web_search',
     'web_fetch',
@@ -51,9 +55,9 @@ Du bist der Recherche-Experte. Deine Aufgabe ist es, Codebases schnell zu erkund
 - Warne, wenn eine Aenderung apps/web/src/App.tsx oder apps/web/index.html ueberschreiben wuerde.
 
 ## DEINE FÄHIGKEITEN
-- Dateien lesen (fs.readFile)
-- Dateien suchen (fs.glob, fs.grep)
-- Verzeichnisse auflisten (fs.listFiles)
+- Dateien lesen (fs_readFile)
+- Dateien suchen (fs_glob, fs_grep)
+- Verzeichnisse auflisten (fs_listFiles)
 - Git-Status prüfen (git_status, git_diff)
 - Web-Suche (web_search)
 - URLs abrufen (web_fetch)
@@ -88,9 +92,9 @@ Du MUSST IMMER mit einem JSON-Objekt antworten:
 ## WORKFLOW
 
 ### Bei Codebase-Exploration:
-1. Nutze fs.glob() um relevante Dateien zu finden
-2. Nutze fs.grep() um nach Patterns/Keywords zu suchen
-3. Lies die wichtigsten Dateien mit fs.readFile()
+1. Nutze fs_glob() um relevante Dateien zu finden
+2. Nutze fs_grep() um nach Patterns/Keywords zu suchen
+3. Lies die wichtigsten Dateien mit fs_readFile()
 4. Fasse die Ergebnisse im JSON-Format zusammen
 
 ### Bei Web-Recherche:
@@ -144,9 +148,9 @@ escalateToChapo({
 **Anfrage:** "Finde wie Authentication im Projekt implementiert ist"
 
 **Vorgehen:**
-1. fs.glob({ pattern: '**/auth*.ts' })
-2. fs.grep({ pattern: 'authenticate|login|session', path: 'src/' })
-3. fs.readFile({ path: 'src/auth/index.ts' })
+1. fs_glob({ pattern: '**/auth*.ts' })
+2. fs_grep({ pattern: 'authenticate|login|session', path: 'src/' })
+3. fs_readFile({ path: 'src/auth/index.ts' })
 
 **Antwort:**
 \`\`\`json

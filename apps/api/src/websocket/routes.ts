@@ -1,17 +1,61 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { WebSocket } from 'ws';
-import { resolve } from 'node:path';
+import { resolve } from 'path';
+import { nanoid } from 'nanoid';
 import { registerClient as registerActionClient, unregisterClient as unregisterActionClient, getConnectionStats } from './actionBroadcaster.js';
+import {
+  registerChatClient, unregisterChatClient, emitChatEvent,
+  getEventsSince, getCurrentSeq, getChatGatewayStats
+} from './chatGateway.js';
 import { getPendingActions } from '../actions/manager.js';
 import { verifyToken } from '../routes/auth.js';
-import { emitChatEvent, getChatGatewayStats, getCurrentSeq, getEventsSince, registerChatClient, unregisterChatClient } from './chatGateway.js';
-import { createSession, getMessages, saveMessage, updateSessionTitleIfEmpty } from '../db/queries.js';
-import { ensureStateLoaded, getOrCreateState, getState } from '../agents/stateManager.js';
-import { processRequest as processMultiAgentRequest, handleUserApproval, handleUserResponse, handlePlanApproval } from '../agents/router.js';
-import type { AgentStreamEvent } from '../agents/types.js';
 import { config } from '../config.js';
-import { nanoid } from 'nanoid';
+import { createSession, getMessages, saveMessage, updateSessionTitleIfEmpty } from '../db/queries.js';
+import { ensureStateLoaded, getState, getOrCreateState, setGatheredInfo, setPhase } from '../agents/stateManager.js';
+import { processRequest, handleUserApproval, handleUserResponse, handlePlanApproval } from '../agents/router.js';
+import type { AgentStreamEvent } from '../agents/types.js';
 import type { ChatMessage } from '@devai/shared';
+
+type WorkspaceSessionMode = 'main' | 'shared';
+
+function buildSessionTitle(message: string): string | null {
+  const trimmed = message.trim();
+  if (!trimmed) return null;
+  return trimmed.length > 60 ? trimmed.slice(0, 57) + '...' : trimmed;
+}
+
+function normalizeWorkspaceSessionMode(value: unknown): WorkspaceSessionMode | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'main' || normalized === 'shared') return normalized;
+  return null;
+}
+
+function readRequestMode(msg: Record<string, unknown>): {
+  workspaceContextMode: WorkspaceSessionMode | null;
+  chatMode: WorkspaceSessionMode | null;
+  sessionMode: WorkspaceSessionMode | null;
+  visibility: WorkspaceSessionMode | null;
+} {
+  const metadata = (msg.metadata && typeof msg.metadata === 'object' && !Array.isArray(msg.metadata))
+    ? (msg.metadata as Record<string, unknown>)
+    : {};
+
+  const workspaceContextMode = normalizeWorkspaceSessionMode(
+    msg.workspaceContextMode ?? metadata.workspaceContextMode ?? null
+  );
+  const chatMode = normalizeWorkspaceSessionMode(
+    msg.chatMode ?? metadata.chatMode ?? null
+  );
+  const sessionMode = normalizeWorkspaceSessionMode(
+    msg.sessionMode ?? metadata.sessionMode ?? null
+  );
+  const visibility = normalizeWorkspaceSessionMode(
+    msg.visibility ?? metadata.visibility ?? null
+  );
+
+  return { workspaceContextMode, chatMode, sessionMode, visibility };
+}
 
 export const websocketRoutes: FastifyPluginAsync = async (app) => {
   // WebSocket endpoint for real-time action updates
@@ -117,9 +161,9 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
     })();
 
     socket.on('message', async (data) => {
-      let msg: any;
+      let msg: Record<string, unknown>;
       try {
-        msg = JSON.parse(data.toString());
+        msg = JSON.parse(data.toString()) as Record<string, unknown>;
       } catch {
         return;
       }
@@ -177,9 +221,10 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
         // Broadcast to all clients in the session and add replay seq.
         // Also tag requestId so the initiating client can resolve its promise.
         if (!sessionId) return;
-        const type = (event as any)?.type;
+        const eventObj = event as Record<string, unknown>;
+        const type = eventObj?.type;
         if (typeof type !== 'string' || !type) return;
-        emitChatEvent(sessionId, { ...(event as any), type, requestId });
+        emitChatEvent(sessionId, { ...eventObj, type, requestId });
       };
 
       // Execute a multi-agent chat request (equivalent to POST /chat/agents).
@@ -213,12 +258,34 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
         joinSession(activeSessionId);
         await ensureStateLoaded(activeSessionId);
 
+        // An explicit 'request' message is always a new user request, NOT an answer
+        // to a pending clarification question. Clear the waiting_user state so
+        // processRequest doesn't hijack this as a question response.
+        const preState = getState(activeSessionId);
+        if (preState?.currentPhase === 'waiting_user') {
+          preState.pendingQuestions = [];
+          setPhase(activeSessionId, 'idle');
+        }
+
         const historyMessages = await getMessages(activeSessionId);
         const recentHistory = historyMessages.slice(-30).map((m) => ({ role: m.role, content: m.content }));
 
         const state = getOrCreateState(activeSessionId);
         if (validatedProjectRoot) {
           state.taskContext.gatheredInfo['projectRoot'] = validatedProjectRoot;
+        }
+        const mode = readRequestMode(msg);
+        if (mode.workspaceContextMode) {
+          setGatheredInfo(activeSessionId, 'workspaceContextMode', mode.workspaceContextMode);
+        }
+        if (mode.chatMode) {
+          setGatheredInfo(activeSessionId, 'chatMode', mode.chatMode);
+        }
+        if (mode.sessionMode) {
+          setGatheredInfo(activeSessionId, 'sessionMode', mode.sessionMode);
+        }
+        if (mode.visibility) {
+          setGatheredInfo(activeSessionId, 'visibility', mode.visibility);
         }
 
         sendEvent({
@@ -229,7 +296,7 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
         });
 
         try {
-          const result = await processMultiAgentRequest(
+          const result = await processRequest(
             activeSessionId,
             message,
             recentHistory,

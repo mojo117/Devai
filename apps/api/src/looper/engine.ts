@@ -22,8 +22,10 @@ import { LooperErrorHandler } from './error-handler.js';
 import { createAgents, type LooperAgent, type AgentResult } from './agents/index.js';
 import { getProjectContext } from '../scanner/projectScanner.js';
 import { config as appConfig } from '../config.js';
+import { normalizeToolName } from '../tools/registry.js';
 import type { ConversationSnapshot } from './conversation-manager.js';
 import type { LooperErrorHandlerSnapshot } from './error-handler.js';
+import type { Action } from '../actions/types.js';
 
 /** Default configuration values. */
 const DEFAULTS: LooperConfig = {
@@ -33,6 +35,21 @@ const DEFAULTS: LooperConfig = {
   minValidationConfidence: 0.7,
   selfValidationEnabled: true,
 };
+
+export const LOOPER_CORE_SYSTEM_PROMPT = [
+  'You are Chapo, a general-purpose AI agent and assistant.',
+  'You can develop code, search and research, manage documents, and execute commands.',
+  'You run in a persistent loop - you NEVER give up on errors. Instead, you report them and try alternative approaches.',
+  'You think step by step and validate your own work before delivering final answers.',
+  '',
+  'Capabilities:',
+  '- Developer: Write, edit, and reason about code',
+  '- Searcher: Research topics, read documentation, gather information',
+  '- Document Manager: Read, write, list, organise files',
+  '- Commander: Run git commands, GitHub workflows, system operations',
+  '',
+  'Tools available: fs_listFiles, fs_readFile, fs_writeFile, git_status, git_diff, git_commit, github_triggerWorkflow, github_getWorkflowRunStatus, logs_getStagingLogs',
+].join('\n');
 
 export type StreamCallback = (event: LooperStreamEvent) => void;
 
@@ -377,6 +394,7 @@ export class LooperEngine {
 
   private async executeAgent(decision: DecisionResult, userMessage: string): Promise<AgentResult> {
     const agentType = decision.agent || 'developer';
+    const normalizedToolName = decision.toolName ? normalizeToolName(decision.toolName) : undefined;
     const agent = this.agents.get(agentType);
 
     if (!agent) {
@@ -390,7 +408,7 @@ export class LooperEngine {
 
     this.emit({
       type: 'tool_call',
-      data: { agent: agentType, tool: decision.toolName, args: decision.toolArgs },
+      data: { agent: agentType, tool: normalizedToolName, args: decision.toolArgs },
       timestamp: now(),
     });
 
@@ -400,12 +418,25 @@ export class LooperEngine {
       .slice(-5); // Last 5 results for context
 
     const [result, agentError] = await this.errorHandler.safe(
-      `agent-${agentType}-${decision.toolName || 'reason'}`,
+      `agent-${agentType}-${normalizedToolName || 'reason'}`,
       () => agent.execute({
         userMessage,
-        toolName: decision.toolName,
+        toolName: normalizedToolName,
         toolArgs: decision.toolArgs,
         previousResults,
+        onActionPending: (action: Action) => {
+          this.emit({
+            type: 'action_pending',
+            data: {
+              actionId: action.id,
+              toolName: action.toolName,
+              toolArgs: action.toolArgs,
+              description: action.description,
+              preview: action.preview,
+            },
+            timestamp: now(),
+          });
+        },
       })
     );
 
@@ -415,7 +446,7 @@ export class LooperEngine {
       return {
         success: false,
         output: errorOutput,
-        needsFollowUp: this.errorHandler.canRetry(`agent-${agentType}-${decision.toolName || 'reason'}`),
+        needsFollowUp: this.errorHandler.canRetry(`agent-${agentType}-${normalizedToolName || 'reason'}`),
         followUpHint: agentError.message,
       };
     }
@@ -472,20 +503,7 @@ export class LooperEngine {
   }
 
   private async buildSystemPrompt(projectRoot?: string): Promise<string> {
-    const parts: string[] = [
-      `You are Chapo, a general-purpose AI agent and assistant.`,
-      `You can develop code, search and research, manage documents, and execute commands.`,
-      `You run in a persistent loop – you NEVER give up on errors. Instead, you report them and try alternative approaches.`,
-      `You think step by step and validate your own work before delivering final answers.`,
-      '',
-      'Capabilities:',
-      '- Developer: Write, edit, and reason about code',
-      '- Searcher: Research topics, read documentation, gather information',
-      '- Document Manager: Read, write, list, organise files',
-      '- Commander: Run git commands, GitHub workflows, system operations',
-      '',
-      'Tools available: fs.listFiles, fs.readFile, fs.writeFile, git.status, git.diff, git.commit, github.triggerWorkflow, github.getWorkflowRunStatus, logs.getStagingLogs',
-    ];
+    const parts: string[] = [LOOPER_CORE_SYSTEM_PROMPT];
 
     const root = appConfig.projectRoot || projectRoot;
     if (root) {

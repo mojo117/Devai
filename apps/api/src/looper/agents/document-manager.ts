@@ -4,11 +4,12 @@
 // ──────────────────────────────────────────────
 
 import type { LooperAgent, AgentContext, AgentResult } from './base-agent.js';
-import { executeTool, type ToolExecutionResult } from '../../tools/executor.js';
+import { executeToolWithApprovalBridge } from '../../actions/approvalBridge.js';
+import type { ToolExecutionResult } from '../../tools/executor.js';
 import type { LLMProvider } from '../../llm/types.js';
 import { llmRouter } from '../../llm/router.js';
 
-const DOC_SYSTEM_PROMPT = `You are Chapo's document manager agent.
+export const DOC_SYSTEM_PROMPT = `You are Chapo's document manager agent.
 You handle all file and document operations: reading, writing, listing, organising.
 When writing files, always preview the content to the user first.
 Be careful with destructive operations – always confirm before overwriting.`;
@@ -28,7 +29,9 @@ export class DocumentManagerAgent implements LooperAgent {
 
   private async executeTool(ctx: AgentContext): Promise<AgentResult> {
     const toolResults: ToolExecutionResult[] = [];
-    const result = await executeTool(ctx.toolName!, ctx.toolArgs || {});
+    const result = await executeToolWithApprovalBridge(ctx.toolName!, ctx.toolArgs || {}, {
+      onActionPending: ctx.onActionPending,
+    });
     toolResults.push(result);
 
     if (result.success) {

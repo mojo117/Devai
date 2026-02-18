@@ -64,43 +64,43 @@ export function ProjectContextSection({
       actionDisabled={!projectRoot}
     >
       {projectContext ? (
-        <div className="mt-2 text-[11px] bg-gray-900 p-2 rounded text-gray-300 space-y-2">
-          <div className="grid grid-cols-2 gap-2 text-[10px] text-gray-400">
+        <div className="mt-2 text-[11px] bg-devai-bg p-2 rounded text-devai-text-secondary space-y-2">
+          <div className="grid grid-cols-2 gap-2 text-[10px] text-devai-text-secondary">
             <div>
-              <div className="uppercase tracking-wide text-gray-500">Framework</div>
-              <div className="text-gray-300">{projectContext.framework}</div>
+              <div className="uppercase tracking-wide text-devai-text-muted">Framework</div>
+              <div className="text-devai-text-secondary">{projectContext.framework}</div>
             </div>
             <div>
-              <div className="uppercase tracking-wide text-gray-500">Language</div>
-              <div className="text-gray-300">{projectContext.language}</div>
+              <div className="uppercase tracking-wide text-devai-text-muted">Language</div>
+              <div className="text-devai-text-secondary">{projectContext.language}</div>
             </div>
             <div>
-              <div className="uppercase tracking-wide text-gray-500">Package Manager</div>
-              <div className="text-gray-300">{projectContext.packageManager}</div>
+              <div className="uppercase tracking-wide text-devai-text-muted">Package Manager</div>
+              <div className="text-devai-text-secondary">{projectContext.packageManager}</div>
             </div>
             <div>
-              <div className="uppercase tracking-wide text-gray-500">Tests</div>
-              <div className="text-gray-300">{projectContext.hasTests ? 'Yes' : 'No'}</div>
+              <div className="uppercase tracking-wide text-devai-text-muted">Tests</div>
+              <div className="text-devai-text-secondary">{projectContext.hasTests ? 'Yes' : 'No'}</div>
             </div>
             {projectContext.testCommand && (
               <div className="col-span-2">
-                <div className="uppercase tracking-wide text-gray-500">Test Command</div>
-                <div className="text-gray-300">{projectContext.testCommand}</div>
+                <div className="uppercase tracking-wide text-devai-text-muted">Test Command</div>
+                <div className="text-devai-text-secondary">{projectContext.testCommand}</div>
               </div>
             )}
             {projectContext.buildCommand && (
               <div className="col-span-2">
-                <div className="uppercase tracking-wide text-gray-500">Build Command</div>
-                <div className="text-gray-300">{projectContext.buildCommand}</div>
+                <div className="uppercase tracking-wide text-devai-text-muted">Build Command</div>
+                <div className="text-devai-text-secondary">{projectContext.buildCommand}</div>
               </div>
             )}
           </div>
           <div>
-            <div className="flex items-center justify-between text-[10px] text-gray-500 uppercase tracking-wide">
+            <div className="flex items-center justify-between text-[10px] text-devai-text-muted uppercase tracking-wide">
               <span>Summary</span>
               <button
                 onClick={() => setEditingSummary((prev) => !prev)}
-                className="text-[10px] text-gray-400 hover:text-gray-200"
+                className="text-[10px] text-devai-text-secondary hover:text-devai-text"
               >
                 {editingSummary ? 'Close' : 'Edit'}
               </button>
@@ -111,9 +111,9 @@ export function ProjectContextSection({
                   value={summaryDraft}
                   onChange={(e) => setSummaryDraft(e.target.value)}
                   rows={5}
-                  className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200"
+                  className="w-full bg-devai-bg border border-devai-border rounded px-2 py-1 text-[11px] text-devai-text"
                 />
-                <label className="flex items-center gap-2 text-[10px] text-gray-400">
+                <label className="flex items-center gap-2 text-[10px] text-devai-text-secondary">
                   <input
                     type="checkbox"
                     checked={overrideEnabledDraft}
@@ -124,7 +124,7 @@ export function ProjectContextSection({
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleSaveSummary}
-                    className="text-[10px] text-gray-200 bg-blue-600 px-2 py-1 rounded"
+                    className="text-[10px] text-devai-text bg-devai-accent px-2 py-1 rounded"
                   >
                     Save
                   </button>
@@ -134,48 +134,48 @@ export function ProjectContextSection({
                       setSummaryDraft(projectContextOverride.summary || projectContext?.summary || '');
                       setOverrideEnabledDraft(projectContextOverride.enabled);
                     }}
-                    className="text-[10px] text-gray-400 hover:text-gray-200"
+                    className="text-[10px] text-devai-text-secondary hover:text-devai-text"
                   >
                     Cancel
                   </button>
                 </div>
               </div>
             ) : (
-              <pre className="mt-2 whitespace-pre-wrap text-gray-300">
+              <pre className="mt-2 whitespace-pre-wrap text-devai-text-secondary">
                 {(projectContextOverride.enabled && projectContextOverride.summary)
                   ? projectContextOverride.summary
                   : projectContext.summary}
               </pre>
             )}
             {projectContextOverride.enabled && !editingSummary && (
-              <p className="text-[10px] text-blue-300 mt-1">
+              <p className="text-[10px] text-devai-accent mt-1">
                 Using user-provided summary override.
               </p>
             )}
           </div>
         </div>
       ) : (
-        <p className="text-xs text-gray-500 mt-2">
+        <p className="text-xs text-devai-text-muted mt-2">
           Project context not available.
         </p>
       )}
 
       {contextStats && (
         <div className="mt-3">
-          <div className="flex items-center justify-between text-[10px] text-gray-500">
+          <div className="flex items-center justify-between text-[10px] text-devai-text-muted">
             <span>Context usage</span>
             <span>~{contextStats.tokensUsed}/{contextStats.tokenBudget}</span>
           </div>
-          <div className="mt-1 h-2 bg-gray-900 rounded">
+          <div className="mt-1 h-2 bg-devai-bg rounded">
             <div
-              className="h-2 rounded bg-blue-600"
+              className="h-2 rounded bg-devai-accent"
               style={{
                 width: `${Math.min(100, Math.round((contextStats.tokensUsed / contextStats.tokenBudget) * 100))}%`,
               }}
             />
           </div>
           {contextStats.note && (
-            <p className="text-[10px] text-gray-500 mt-1">{contextStats.note}</p>
+            <p className="text-[10px] text-devai-text-muted mt-1">{contextStats.note}</p>
           )}
         </div>
       )}
