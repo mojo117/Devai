@@ -18,6 +18,23 @@
 
 You are editing files in `/opt/Klyde/projects/Devai/` on the Klyde server.
 
+## Boundary: Devai vs OpenClaw
+
+**Devai and OpenClaw are independent services that share the Clawd server.**
+
+| | Devai (this project) | OpenClaw |
+|---|---|---|
+| **Purpose** | AI developer assistant (web UI, code editing) | Personal AI assistant (messaging channels) |
+| **Runtime** | PM2 processes | systemd service |
+| **Workspace** | `/opt/Devai/workspace/` | `/root/.openclaw/workspace/` |
+| **Config** | `/opt/Devai/.env` | `/root/.openclaw/openclaw.json` |
+
+**Rules:**
+- Devai MUST NOT access `/root/.openclaw/` — this is enforced via `HARDCODED_DENIED_PATHS` in `config.ts`
+- Devai has its own workspace at `/opt/Devai/workspace/` (and `workspace/` in this repo)
+- Each system has its own SOUL.md, AGENTS.md, MEMORY.md — they are NOT shared
+- Do not read, copy, or reference OpenClaw's personality/workspace files
+
 ## Filesystem Access Policy (DevAI)
 
 

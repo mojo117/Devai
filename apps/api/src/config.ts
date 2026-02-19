@@ -7,8 +7,14 @@ loadEnv({ path: resolve(process.cwd(), "../../.env") });
 // Hardcoded allowed roots for file access security
 // These paths are enforced regardless of environment variables
 const HARDCODED_ALLOWED_ROOTS: readonly string[] = [
-  "/root",   // Clawd home — projects, OpenClaw workspace
+  "/root",   // Clawd home — projects, scripts
   "/opt",    // Clawd /opt — includes /opt/Devai itself
+] as const;
+
+// Paths that are explicitly denied even within allowed roots
+// OpenClaw is a separate system — Devai must not read its config, credentials, or workspace
+const HARDCODED_DENIED_PATHS: readonly string[] = [
+  "/root/.openclaw",  // OpenClaw config, credentials, workspace — separate system
 ] as const;
 
 export interface Config {
@@ -28,6 +34,7 @@ export interface Config {
   // Project
   projectRoot?: string;
   allowedRoots: readonly string[];
+  deniedPaths: readonly string[];
 
   // Skills
   skillsDir: string;
@@ -75,6 +82,7 @@ export function loadConfig(): Config {
 
     projectRoot: undefined, // Disabled - use allowedRoots only
     allowedRoots,
+    deniedPaths: HARDCODED_DENIED_PATHS,
 
     skillsDir: process.env.SKILLS_DIR || resolve(process.cwd(), "../../skills"),
 
