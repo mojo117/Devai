@@ -630,34 +630,52 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
         });
 
         const startTime = Date.now();
-        const result = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
-          onActionPending: (action) => {
-            this.sendEvent({
-              type: 'action_pending',
-              actionId: action.id,
-              toolName: action.toolName,
-              toolArgs: action.toolArgs,
-              description: action.description,
-              preview: action.preview,
-            });
-          },
-        });
+        const [result, toolErr] = await this.errorHandler.safe(
+          `devo-tool:${toolCall.name}:${turn}`,
+          () => executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
+            onActionPending: (action) => {
+              this.sendEvent({
+                type: 'action_pending',
+                actionId: action.id,
+                toolName: action.toolName,
+                toolArgs: action.toolArgs,
+                description: action.description,
+                preview: action.preview,
+              });
+            },
+          }),
+        );
         const duration = Date.now() - startTime;
 
-        this.sendEvent({
-          type: 'tool_result',
-          agent: 'devo',
-          toolName: toolCall.name,
-          result: result.result,
-          success: result.success,
-        });
+        if (toolErr) {
+          this.sendEvent({
+            type: 'tool_result',
+            agent: 'devo',
+            toolName: toolCall.name,
+            result: { error: toolErr.message },
+            success: false,
+          });
+          toolResults.push({
+            toolUseId: toolCall.id,
+            result: `Error: ${toolErr.message}`,
+            isError: true,
+          });
+        } else {
+          this.sendEvent({
+            type: 'tool_result',
+            agent: 'devo',
+            toolName: toolCall.name,
+            result: result.result,
+            success: result.success,
+          });
 
-        const content = this.buildToolResultContent(result);
-        toolResults.push({
-          toolUseId: toolCall.id,
-          result: content.content,
-          isError: content.isError,
-        });
+          const content = this.buildToolResultContent(result);
+          toolResults.push({
+            toolUseId: toolCall.id,
+            result: content.content,
+            isError: content.isError,
+          });
+        }
       }
 
       messages.push({
