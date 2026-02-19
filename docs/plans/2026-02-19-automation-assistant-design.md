@@ -1,7 +1,7 @@
 # Devai Automation Assistant — Design
 
 **Date:** 2026-02-19
-**Status:** Draft
+**Status:** In Progress — Phases 1-4 complete + resilience fixes
 **Branch:** dev
 
 ## Overview
@@ -115,7 +115,7 @@ Registered alongside existing projections in `workflow/projections/index.ts`.
 
 In-process scheduler inside Devai's API. No edge functions, no external services.
 
-- On startup: load enabled jobs from Supabase, register with `node-cron`
+- On startup: load enabled jobs from Supabase, register with croner
 - On fire: create `scheduled_job` command, dispatch through CommandDispatcher
 - CHAPO gets the job instruction, delegates to DEVO/SCOUT as needed
 - After execution: update `last_run_at` + `last_result`, send to notification channel
@@ -153,6 +153,24 @@ Recent scheduler errors (last 20) stored in a ring buffer. Injected into CHAPO's
 ### Lightweight Execution
 
 Scheduled jobs run in a "system" session — no conversation history accumulation. Fire, execute, report, done.
+
+### Resilience & Known Limitations
+
+**Fixed:**
+
+| Issue | Fix |
+|-------|-----|
+| **Reminder fires yearly** (critical) | Changed `reminderCreate` from cron expression (`min hour day month *`) to ISO 8601 datetime string — croner treats this as a one-time execution |
+| **Overlapping executions** | Added `protect: true` to croner options — if a job is still running when the next tick fires, the tick is skipped |
+
+**Accepted limitations (single-user, single-process):**
+
+| Limitation | Impact | Mitigation |
+|------------|--------|------------|
+| **No catch-up for missed runs** | If API is down during a cron tick, that run is silently skipped | Acceptable for monitoring/digest jobs. One-shot reminders are the only risk — user can recreate |
+| **PM2 reload gap** | Brief window during PM2 restart where no scheduler is running | PM2 `fork` mode stops old → starts new, gap is <1s. `protect: true` prevents double-fire in edge cases |
+| **No timezone support** | All cron expressions use server time (Europe/Berlin on Klyde) | Future: add `timezone` column to `scheduled_jobs`, pass to croner `{ timezone }` option. DEVO tool already accepts ISO 8601 for reminders (timezone-aware) |
+| **In-memory state lost on restart** | Ring buffer (recent errors) resets | Error history is also in DB (`last_error_at`, `consecutive_failures`). Ring buffer is convenience for CHAPO context, not critical |
 
 ### New DEVO Tools
 
@@ -192,7 +210,34 @@ taskforge_search(query)
 
 API key already in `.env` on Clawd (`DEVAI_TASKBOARD_API_KEY`).
 
-### 3c. Daily/Weekly Digests
+### 3c. Send Email (Resend API)
+
+New DEVO tool for sending emails. Uses [Resend](https://resend.com/) — simple API, generous free tier (100 emails/day).
+
+```
+send_email(to, subject, body, replyTo?)
+```
+
+**Implementation:**
+- Single function in `apps/api/src/tools/email.ts`
+- Uses Resend REST API directly (`POST https://api.resend.com/emails`) — no SDK needed
+- `RESEND_API_KEY` in `.env`
+- `RESEND_FROM_ADDRESS` in `.env` (e.g. `devai@klyde.tech` — requires DNS verification)
+- Register in `registry.ts` as a standard DEVO tool
+- Permission level: requires confirmation (sending email is an external side effect)
+
+**Use cases:**
+- DEVO sends email reports (daily digest results, scheduler notifications)
+- User asks: "email me a summary of today's work"
+- Scheduled job instruction: "Check PM2 and email me if anything is down"
+
+**Why Resend:**
+- REST API, no SDK dependency
+- Free tier sufficient for single-user automation
+- Simple domain verification via DNS TXT record
+- Markdown → HTML rendering built-in
+
+### 3d. Daily/Weekly Digests
 
 A digest is a scheduled job with a rich instruction. No special engine.
 
@@ -219,7 +264,7 @@ Example: user says "every morning at 8 give me a briefing"
 |-----------|---------------|
 | `routes/external.ts` | Parses platform webhooks into commands |
 | `ExternalOutputProjection` | Routes events back to external platforms |
-| `SchedulerService` | Loads jobs, manages `node-cron`, fires commands |
+| `SchedulerService` | Loads jobs, manages croner, fires commands |
 | DEVO tools | CRUD for scheduler + TaskForge + notify |
 
 No tool does dispatch. No route does business logic. No projection does database writes.
@@ -251,27 +296,46 @@ After implementation, update:
 | `CLAUDE.md` | Add scheduler tools to Quick Commands, add Telegram webhook info |
 | `docs/agents.md` | Add new DEVO tools (scheduler, TaskForge, notify) to tool reference |
 | `README.md` | Add Telegram setup instructions, scheduler overview |
-| `.env.example` | Add `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_ID` |
+| `.env.example` | Add `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_ID`, `RESEND_API_KEY`, `RESEND_FROM_ADDRESS` |
 
 ---
 
 ## 6. Implementation Order
 
-| Phase | What | Depends on |
-|-------|------|------------|
-| **1** | Supabase migrations (`scheduled_jobs`, `external_sessions`) | — |
-| **2** | SchedulerService (`node-cron` + DB loader + error handling) | Phase 1 |
-| **3** | DEVO scheduler tools (`scheduler_create/list/update/delete`, `reminder_create`) | Phase 2 |
-| **4** | `notify_user` tool + global notification channel setting | Phase 1 |
-| **5** | Telegram webhook route (`routes/external.ts`) | Phase 1 |
-| **6** | ExternalOutputProjection | Phase 5 |
-| **7** | Wire Telegram as notification channel for scheduler | Phase 4 + 6 |
-| **8** | DEVO TaskForge tools | — (independent) |
-| **9** | CHAPO context injection for scheduler errors | Phase 2 |
-| **10** | Documentation updates | All phases |
+| Phase | What | Depends on | Status |
+|-------|------|------------|--------|
+| **1** | Supabase migrations (`scheduled_jobs`, `external_sessions`) | — | **DONE** |
+| **2** | SchedulerService (croner + DB loader + error handling + resilience) | Phase 1 | **DONE** |
+| **3** | DEVO scheduler tools (`scheduler_create/list/update/delete`, `reminder_create`) | Phase 2 | **DONE** |
+| **4** | `notify_user` tool + global notification channel setting | Phase 1 | **DONE** (placeholder notifier, wired to Telegram in Phase 7) |
+| **5** | Telegram webhook route (`routes/external.ts`) | Phase 1 | TODO |
+| **6** | ExternalOutputProjection | Phase 5 | TODO |
+| **7** | Wire Telegram as notification channel for scheduler | Phase 4 + 6 | TODO |
+| **8** | DEVO TaskForge tools | — (independent) | TODO |
+| **9** | CHAPO context injection for scheduler errors | Phase 2 | TODO |
+| **10** | `send_email` tool (Resend API) | — (independent) | TODO |
+| **11** | Documentation updates | All phases | TODO |
 
-Phases 1-4 (scheduler) and 5-7 (Telegram) can be developed in parallel.
-Phase 8 (TaskForge tools) is independent and can happen anytime.
+### Files Created (Phases 1-4)
+
+| File | Purpose |
+|------|---------|
+| `apps/api/src/db/schedulerQueries.ts` | DB queries for scheduled_jobs + external_sessions |
+| `apps/api/src/scheduler/schedulerService.ts` | Singleton scheduler service (croner + error handling) |
+| `apps/api/src/tools/scheduler.ts` | DEVO tool implementations |
+| `supabase/migrations/20260219_scheduler_and_external_sessions.sql` | DB migration |
+
+### Files Modified (Phases 1-4)
+
+| File | Change |
+|------|--------|
+| `apps/api/supabase-schema.sql` | Added scheduled_jobs + external_sessions tables |
+| `apps/api/src/tools/registry.ts` | Added 6 scheduler tool definitions + ToolName union |
+| `apps/api/src/tools/executor.ts` | Added scheduler tool execution cases |
+| `apps/api/src/agents/devo.ts` | Granted DEVO access to scheduler tools |
+| `apps/api/src/server.ts` | Scheduler startup + shutdown hooks |
+
+Phases 5-7 (Telegram) are next. Phase 8 (TaskForge), Phase 10 (Resend email) are independent.
 
 ---
 

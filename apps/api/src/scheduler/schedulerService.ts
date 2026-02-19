@@ -79,9 +79,13 @@ class SchedulerService {
     this.unregisterJob(job.id);
 
     try {
-      const cron = new Cron(job.cron_expression, async () => {
-        await this.executeJob(job.id);
-      });
+      const cron = new Cron(
+        job.cron_expression,
+        { protect: true },
+        async () => {
+          await this.executeJob(job.id);
+        },
+      );
 
       this.cronJobs.set(job.id, cron);
       console.log(`[Scheduler] Registered job "${job.name}" (${job.cron_expression})`);

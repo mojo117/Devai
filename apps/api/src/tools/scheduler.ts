@@ -164,8 +164,8 @@ export async function reminderCreate(
       return { success: false, error: 'Reminder datetime must be in the future' };
     }
 
-    // Cron: minute hour day month *
-    const cronExpression = `${date.getMinutes()} ${date.getHours()} ${date.getDate()} ${date.getMonth() + 1} *`;
+    // Use ISO 8601 format — croner treats this as a one-time execution at the exact datetime
+    const cronExpression = date.toISOString();
 
     const job = await createScheduledJob({
       name: `Reminder: ${message.substring(0, 50)}`,
