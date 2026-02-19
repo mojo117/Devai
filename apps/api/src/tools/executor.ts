@@ -9,6 +9,7 @@ import * as pm2Tools from './pm2.js';
 import * as webTools from './web.js';
 import * as contextTools from './context.js';
 import * as memoryTools from './memory.js';
+import * as schedulerTools from './scheduler.js';
 import { config } from '../config.js';
 import { mcpManager } from '../mcp/index.js';
 import { join } from 'path';
@@ -270,6 +271,45 @@ export async function executeTool(
         case 'memory_readToday':
           return memoryTools.memoryReadToday();
 
+        // Scheduler Tools (DEVO agent)
+        case 'scheduler_create':
+          return schedulerTools.schedulerCreate(
+            args.name as string,
+            args.cronExpression as string,
+            args.instruction as string,
+            args.notificationChannel as string | undefined,
+          );
+
+        case 'scheduler_list':
+          return schedulerTools.schedulerList();
+
+        case 'scheduler_update':
+          return schedulerTools.schedulerUpdate(
+            args.id as string,
+            {
+              name: args.name as string | undefined,
+              cronExpression: args.cronExpression as string | undefined,
+              instruction: args.instruction as string | undefined,
+              notificationChannel: args.notificationChannel as string | null | undefined,
+              enabled: args.enabled as boolean | undefined,
+            },
+          );
+
+        case 'scheduler_delete':
+          return schedulerTools.schedulerDelete(args.id as string);
+
+        case 'reminder_create':
+          return schedulerTools.reminderCreate(
+            args.message as string,
+            args.datetime as string,
+          );
+
+        case 'notify_user':
+          return schedulerTools.notifyUser(
+            args.message as string,
+            args.channel as string | undefined,
+          );
+
         default:
           // Route MCP tools to the MCP manager
           if (mcpManager.isMcpTool(normalizedToolName)) {
@@ -343,6 +383,7 @@ const READ_ONLY_TOOLS = new Set([
   'context_searchDocuments',
   'memory_search',
   'memory_readToday',
+  'scheduler_list',
 ]);
 
 /**

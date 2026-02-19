@@ -23,6 +23,7 @@ import { mcpManager } from './mcp/index.js';
 import { registerMcpTools } from './tools/registry.js';
 import { registerProjections } from './workflow/projections/index.js';
 import { getExpiredUserfiles, deleteExpiredUserfiles } from './db/userfileQueries.js';
+import { schedulerService } from './scheduler/schedulerService.js';
 
 await initDb();
 
@@ -140,6 +141,20 @@ const start = async () => {
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
     (app as any).mcpInitPromise = mcpInitPromise;
 
+    // Initialize scheduler (loads jobs from DB, registers cron schedules)
+    schedulerService.configure(
+      // Job executor: placeholder — will be wired to CommandDispatcher in Phase 5-7
+      async (instruction: string, _jobId: string) => {
+        console.log(`[Scheduler] Executing instruction: ${instruction.substring(0, 80)}...`);
+        return `Executed: ${instruction.substring(0, 80)}`;
+      },
+      // Notification sender: placeholder — will be wired to Telegram in Phase 5-7
+      async (message: string, _channel?: string | null) => {
+        console.log(`[Scheduler] Notification: ${message.substring(0, 100)}`);
+      },
+    );
+    await schedulerService.start();
+
     // 30-day userfile cleanup: run on startup + every 24h
     const cleanupExpiredUserfiles = async () => {
       try {
@@ -176,6 +191,7 @@ const start = async () => {
 // Graceful shutdown
 const shutdown = async () => {
   console.log('Shutting down...');
+  schedulerService.stop();
   const mcpInitPromise = (app as any).mcpInitPromise as Promise<void> | undefined;
   if (mcpInitPromise) {
     try { await mcpInitPromise; } catch { /* ignore */ }

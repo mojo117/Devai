@@ -45,7 +45,14 @@ export type ToolName =
   // Workspace Memory Tools
   | 'memory_remember'
   | 'memory_search'
-  | 'memory_readToday';
+  | 'memory_readToday'
+  // Scheduler Tools (DEVO)
+  | 'scheduler_create'
+  | 'scheduler_list'
+  | 'scheduler_update'
+  | 'scheduler_delete'
+  | 'reminder_create'
+  | 'notify_user';
 
 export interface ToolPropertyDefinition {
   type: string;
@@ -863,6 +870,128 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {},
+    },
+    requiresConfirmation: false,
+  },
+
+  // Scheduler Tools (DEVO agent)
+  {
+    name: 'scheduler_create',
+    description: 'Create a scheduled job (cron). Runs an instruction on a recurring schedule. Use standard cron syntax (e.g. "0 8 * * *" = every day at 8am).',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Human-readable job name (e.g. "Morning PM2 health check")',
+        },
+        cronExpression: {
+          type: 'string',
+          description: 'Cron schedule expression (e.g. "0 8 * * *" for daily at 8am, "*/30 * * * *" for every 30 min)',
+        },
+        instruction: {
+          type: 'string',
+          description: 'Natural language instruction for what to do when the job fires (executed by CHAPO)',
+        },
+        notificationChannel: {
+          type: 'string',
+          description: 'Optional notification channel override (default: use global setting)',
+        },
+      },
+      required: ['name', 'cronExpression', 'instruction'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'scheduler_list',
+    description: 'List all scheduled jobs with their status, schedule, and last run info.',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'scheduler_update',
+    description: 'Update a scheduled job (change name, schedule, instruction, or enable/disable).',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: {
+          type: 'string',
+          description: 'The job ID to update',
+        },
+        name: {
+          type: 'string',
+          description: 'New job name',
+        },
+        cronExpression: {
+          type: 'string',
+          description: 'New cron schedule expression',
+        },
+        instruction: {
+          type: 'string',
+          description: 'New instruction',
+        },
+        enabled: {
+          type: 'boolean',
+          description: 'Enable or disable the job',
+        },
+      },
+      required: ['id'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'scheduler_delete',
+    description: 'Delete a scheduled job permanently.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: {
+          type: 'string',
+          description: 'The job ID to delete',
+        },
+      },
+      required: ['id'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'reminder_create',
+    description: 'Create a one-time reminder. Fires at the specified datetime and auto-deletes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          description: 'The reminder message to send',
+        },
+        datetime: {
+          type: 'string',
+          description: 'ISO 8601 datetime for when to fire (e.g. "2026-02-20T09:00:00")',
+        },
+      },
+      required: ['message', 'datetime'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'notify_user',
+    description: 'Send a notification to the user on their default notification channel (Telegram, etc.).',
+    parameters: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          description: 'The notification message to send',
+        },
+        channel: {
+          type: 'string',
+          description: 'Optional: specific channel to use instead of default',
+        },
+      },
+      required: ['message'],
     },
     requiresConfirmation: false,
   },
