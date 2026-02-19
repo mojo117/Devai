@@ -13,6 +13,7 @@ import { settingsRoutes } from './routes/settings.js';
 import { memoryRoutes } from './routes/memory.js';
 import { SessionLogger } from './audit/sessionLogger.js';
 import { userfilesRoutes } from './routes/userfiles.js';
+import { transcribeRoutes } from './routes/transcribe.js';
 import { authMiddleware, registerAuthRoutes } from './routes/auth.js';
 import { initDb } from './db/index.js';
 import { websocketRoutes } from './websocket/routes.js';
@@ -76,6 +77,7 @@ await app.register(settingsRoutes, { prefix: '/api' });
 await app.register(memoryRoutes, { prefix: '/api' });
 await app.register(websocketRoutes, { prefix: '/api' });
 await app.register(userfilesRoutes, { prefix: '/api' });
+await app.register(transcribeRoutes, { prefix: '/api' });
 
 // Start server
 const start = async () => {

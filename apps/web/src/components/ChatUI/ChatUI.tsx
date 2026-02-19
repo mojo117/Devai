@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { sendMultiAgentMessage, saveSetting, uploadUserfile } from '../../api';
+import { sendMultiAgentMessage, saveSetting, uploadUserfile, transcribeAudio } from '../../api';
 import type { ChatStreamEvent } from '../../api';
 import type { ChatMessage } from '../../types';
 import type { AgentName, AgentPhase } from '../AgentStatus';
@@ -56,6 +56,7 @@ export function ChatUI({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isFileUploading, setIsFileUploading] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const debug = import.meta.env.DEV && Boolean((window as any).__DEVAI_DEBUG);
@@ -359,6 +360,24 @@ export function ChatUI({
     }
   };
 
+  const handleTranscription = async (audioBlob: Blob) => {
+    setIsTranscribing(true);
+    try {
+      const result = await transcribeAudio(audioBlob);
+      if (result.text) {
+        setInput((prev) => prev ? `${prev} ${result.text}` : result.text);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Transcription failed';
+      setMessages((prev) => [
+        ...prev,
+        { id: `err-${Date.now()}`, role: 'system' as const, content: `Dictation failed: ${msg}`, timestamp: new Date().toISOString() },
+      ]);
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
   // --- Render ---
 
   return (
@@ -405,6 +424,8 @@ export function ChatUI({
         isFileUploading={isFileUploading}
         fileInputRef={fileInputRef}
         onFileUpload={handleFileUpload}
+        isTranscribing={isTranscribing}
+        onTranscribe={handleTranscription}
       />
     </div>
   );

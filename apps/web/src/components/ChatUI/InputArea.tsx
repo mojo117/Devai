@@ -1,4 +1,4 @@
-import type { RefObject } from 'react';
+import { useRef, useState, useCallback, type RefObject } from 'react';
 import { Spinner, Button } from '../ui';
 
 interface RetryState {
@@ -22,6 +22,8 @@ interface InputAreaProps {
   isFileUploading: boolean;
   fileInputRef: RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  isTranscribing: boolean;
+  onTranscribe: (audioBlob: Blob) => void;
 }
 
 export function InputArea({
@@ -40,7 +42,58 @@ export function InputArea({
   isFileUploading,
   fileInputRef,
   onFileUpload,
+  isTranscribing,
+  onTranscribe,
 }: InputAreaProps) {
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+  }, []);
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      chunksRef.current = [];
+      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        if (chunksRef.current.length > 0) {
+          const blob = new Blob(chunksRef.current, { type: 'audio/webm;codecs=opus' });
+          onTranscribe(blob);
+        }
+      };
+
+      recorder.start();
+      setIsRecording(true);
+    } catch {
+      // Permission denied or no microphone
+    }
+  }, [onTranscribe]);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    if (!isRecording && !isTranscribing) {
+      startRecording();
+    }
+  }, [isRecording, isTranscribing, startRecording]);
+
+  const handlePointerUp = useCallback(() => {
+    stopRecording();
+  }, [stopRecording]);
+
   return (
     <form onSubmit={onSubmit} className="border-t border-devai-border p-4">
       {retryState && !isLoading && (
@@ -100,6 +153,28 @@ export function InputArea({
         >
           Send
         </Button>
+        <button
+          type="button"
+          onPointerDown={handlePointerDown}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onContextMenu={(e) => e.preventDefault()}
+          disabled={isTranscribing}
+          className={`transition-colors text-sm px-3 py-2 rounded-xl border disabled:opacity-50 disabled:cursor-not-allowed ${
+            isRecording
+              ? 'bg-red-600 border-red-500 text-white animate-pulse'
+              : 'bg-devai-card hover:bg-devai-card/80 border-devai-border text-devai-text-secondary hover:text-devai-text'
+          }`}
+          title={isRecording ? 'Recording... release to stop' : 'Hold to dictate'}
+        >
+          {isTranscribing ? (
+            <Spinner />
+          ) : (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4M12 15a3 3 0 003-3V5a3 3 0 00-6 0v7a3 3 0 003 3z" />
+            </svg>
+          )}
+        </button>
         <input
           ref={fileInputRef}
           type="file"

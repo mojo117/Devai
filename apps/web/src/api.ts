@@ -1076,3 +1076,15 @@ export async function deleteUserfile(filename: string): Promise<void> {
   });
   if (!res.ok) throw new Error(await readApiError(res));
 }
+
+export async function transcribeAudio(audioBlob: Blob): Promise<{ text: string }> {
+  const formData = new FormData();
+  formData.append('file', audioBlob, 'recording.webm');
+  const res = await fetch(`${API_BASE}/transcribe`, {
+    method: 'POST',
+    headers: withAuthHeaders(),
+    body: formData,
+  });
+  if (!res.ok) throw new Error(await readApiError(res));
+  return res.json();
+}
