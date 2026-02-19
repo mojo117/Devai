@@ -73,6 +73,22 @@ CREATE TABLE IF NOT EXISTS looper_states (
 CREATE INDEX IF NOT EXISTS idx_looper_states_updated_at ON looper_states(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_looper_states_status ON looper_states(status);
 
+-- User files (uploaded documents with parsed content for AI context injection)
+CREATE TABLE IF NOT EXISTS user_files (
+  id TEXT PRIMARY KEY,
+  filename TEXT NOT NULL,
+  original_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  storage_path TEXT NOT NULL,
+  uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '30 days'),
+  parsed_content TEXT,
+  parse_status TEXT NOT NULL DEFAULT 'pending'
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_files_expires ON user_files(expires_at);
+
 -- Insert default user
 INSERT INTO users (id, name, created_at)
 VALUES ('local', 'Local User', NOW())

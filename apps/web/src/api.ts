@@ -771,7 +771,8 @@ async function sendMultiAgentMessageWs(
   projectRoot?: string,
   sessionId?: string,
   onEvent?: (event: ChatStreamEvent) => void,
-  options?: MultiAgentSessionOptions
+  options?: MultiAgentSessionOptions,
+  pinnedUserfileIds?: string[],
 ): Promise<MultiAgentResponse> {
   let remove: (() => void) | null = null;
   if (sessionId && onEvent) {
@@ -785,6 +786,7 @@ async function sendMultiAgentMessageWs(
       projectRoot,
       sessionId,
       ...buildSessionModePayload(options),
+      ...(pinnedUserfileIds && pinnedUserfileIds.length > 0 ? { pinnedUserfileIds } : {}),
     }, onEvent);
   } finally {
     remove?.();
@@ -900,12 +902,13 @@ export async function sendMultiAgentMessage(
   projectRoot?: string,
   sessionId?: string,
   onEvent?: (event: ChatStreamEvent) => void,
-  options?: MultiAgentSessionOptions
+  options?: MultiAgentSessionOptions,
+  pinnedUserfileIds?: string[],
 ): Promise<MultiAgentResponse> {
   // Prefer WebSocket control plane; fall back to HTTP NDJSON.
   try {
     if (typeof window !== 'undefined' && typeof WebSocket !== 'undefined' && getAuthToken()) {
-      return await sendMultiAgentMessageWs(message, projectRoot, sessionId, onEvent, options);
+      return await sendMultiAgentMessageWs(message, projectRoot, sessionId, onEvent, options, pinnedUserfileIds);
     }
   } catch {
     // fall back
@@ -920,6 +923,7 @@ export async function sendMultiAgentMessage(
       projectRoot,
       sessionId,
       ...sessionModePayload,
+      ...(pinnedUserfileIds && pinnedUserfileIds.length > 0 ? { pinnedUserfileIds } : {}),
     }),
   });
 
@@ -1059,9 +1063,14 @@ export async function fetchDailyWorkspaceMemory(date: string): Promise<{
 // ============ Userfiles API ============
 
 export interface UserfileInfo {
+  id: string;
   name: string;
+  original_name: string;
+  mime_type: string;
   size: number;
-  modifiedAt: string;
+  parse_status: 'parsed' | 'metadata_only' | 'failed' | 'pending';
+  uploaded_at: string;
+  expires_at: string;
 }
 
 export async function listUserfiles(): Promise<{ files: UserfileInfo[] }> {
@@ -1084,8 +1093,8 @@ export async function uploadUserfile(file: File): Promise<{ success: boolean; fi
   return res.json();
 }
 
-export async function deleteUserfile(filename: string): Promise<void> {
-  const res = await apiFetch(`${API_BASE}/userfiles/${encodeURIComponent(filename)}`, {
+export async function deleteUserfile(id: string): Promise<void> {
+  const res = await apiFetch(`${API_BASE}/userfiles/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     headers: withAuthHeaders(),
   });

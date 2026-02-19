@@ -19,6 +19,7 @@ export interface UserRequestCommand {
   message: string;
   projectRoot?: string;
   metadata?: Record<string, unknown>;
+  pinnedUserfileIds?: string[];
 }
 
 export interface UserQuestionAnsweredCommand {

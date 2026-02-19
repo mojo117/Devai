@@ -53,4 +53,6 @@ export interface ChatUIProps {
   showSessionControls?: boolean;
   sessionCommand?: ChatSessionCommandEnvelope | null;
   onSessionStateChange?: (state: ChatSessionState) => void;
+  pinnedUserfileIds?: string[];
+  onPinUserfile?: (id: string) => void;
 }

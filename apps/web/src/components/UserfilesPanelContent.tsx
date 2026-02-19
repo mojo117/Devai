@@ -28,7 +28,37 @@ function getFileIcon(name: string): string {
   return '\u{1F4CE}';
 }
 
-export function UserfilesPanelContent() {
+function daysUntil(dateStr: string): number {
+  const diff = new Date(dateStr).getTime() - Date.now();
+  return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+}
+
+function parseStatusBadge(status: string): { label: string; className: string } {
+  switch (status) {
+    case 'parsed':
+      return { label: 'Parsed', className: 'bg-green-600/20 text-green-400' };
+    case 'metadata_only':
+      return { label: 'Meta', className: 'bg-yellow-600/20 text-yellow-400' };
+    case 'failed':
+      return { label: 'Failed', className: 'bg-red-600/20 text-red-400' };
+    default:
+      return { label: 'Pending', className: 'bg-devai-card text-devai-text-muted' };
+  }
+}
+
+interface UserfilesPanelContentProps {
+  pinnedUserfileIds?: string[];
+  onTogglePin?: (id: string) => void;
+  onClearPins?: () => void;
+  onFileUploaded?: (fileId: string) => void;
+}
+
+export function UserfilesPanelContent({
+  pinnedUserfileIds = [],
+  onTogglePin,
+  onClearPins,
+  onFileUploaded,
+}: UserfilesPanelContentProps) {
   const [files, setFiles] = useState<UserfileInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -76,7 +106,10 @@ export function UserfilesPanelContent() {
         continue;
       }
       try {
-        await uploadUserfile(file);
+        const result = await uploadUserfile(file);
+        if (result.file?.id && onFileUploaded) {
+          onFileUploaded(result.file.id);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Upload failed');
       }
@@ -86,10 +119,10 @@ export function UserfilesPanelContent() {
     await fetchFiles();
   };
 
-  const handleDelete = async (filename: string) => {
+  const handleDelete = async (id: string) => {
     try {
-      await deleteUserfile(filename);
-      setFiles((prev) => prev.filter((f) => f.name !== filename));
+      await deleteUserfile(id);
+      setFiles((prev) => prev.filter((f) => f.id !== id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Delete failed');
     }
@@ -119,6 +152,8 @@ export function UserfilesPanelContent() {
       handleUpload(e.dataTransfer.files);
     }
   };
+
+  const pinnedCount = pinnedUserfileIds.length;
 
   return (
     <div className="p-4 space-y-4">
@@ -151,6 +186,19 @@ export function UserfilesPanelContent() {
         </p>
       </div>
 
+      {/* Pinned count + clear */}
+      {pinnedCount > 0 && onClearPins && (
+        <div className="flex items-center justify-between text-xs text-devai-text-muted">
+          <span>{pinnedCount} file{pinnedCount !== 1 ? 's' : ''} pinned for AI context</span>
+          <button
+            onClick={onClearPins}
+            className="text-devai-accent hover:text-devai-accent-hover"
+          >
+            Clear all pins
+          </button>
+        </div>
+      )}
+
       {/* Error */}
       {error && (
         <div className="text-xs text-red-400 bg-red-400/10 rounded px-3 py-2">
@@ -166,32 +214,68 @@ export function UserfilesPanelContent() {
       ) : (
         <div className="space-y-1">
           <div className="text-xs text-devai-text-muted mb-2">{files.length} file{files.length !== 1 ? 's' : ''}</div>
-          {files.map((file) => (
-            <div
-              key={file.name}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-devai-card hover:bg-devai-card/80 group"
-            >
-              <span className="text-base flex-shrink-0">{getFileIcon(file.name)}</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-devai-text truncate" title={file.name}>{file.name}</p>
-                <p className="text-xs text-devai-text-muted">
-                  {formatFileSize(file.size)} &middot; {new Date(file.modifiedAt).toLocaleDateString('de-DE')}
-                </p>
-              </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDelete(file.name);
-                }}
-                className="text-devai-text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0"
-                title="Delete"
+          {files.map((file) => {
+            const isPinned = pinnedUserfileIds.includes(file.id);
+            const badge = parseStatusBadge(file.parse_status);
+            const expiryDays = daysUntil(file.expires_at);
+
+            return (
+              <div
+                key={file.id}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg group transition-all ${
+                  isPinned
+                    ? 'bg-devai-accent/10 border border-devai-accent/30'
+                    : 'bg-devai-card hover:bg-devai-card/80'
+                }`}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          ))}
+                {/* Pin toggle */}
+                {onTogglePin && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTogglePin(file.id);
+                    }}
+                    className={`flex-shrink-0 w-5 h-5 rounded border transition-colors ${
+                      isPinned
+                        ? 'bg-devai-accent border-devai-accent text-white'
+                        : 'border-devai-border hover:border-devai-text-muted'
+                    }`}
+                    title={isPinned ? 'Unpin from AI context' : 'Pin to AI context'}
+                  >
+                    {isPinned && (
+                      <svg className="w-3 h-3 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                  </button>
+                )}
+
+                <span className="text-base flex-shrink-0">{getFileIcon(file.name)}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-devai-text truncate" title={file.original_name}>{file.name}</p>
+                  <div className="flex items-center gap-2 text-xs text-devai-text-muted">
+                    <span>{formatFileSize(file.size)}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${badge.className}`}>
+                      {badge.label}
+                    </span>
+                    <span>{expiryDays}d left</span>
+                  </div>
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDelete(file.id);
+                  }}
+                  className="text-devai-text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0"
+                  title="Delete"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

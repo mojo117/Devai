@@ -260,6 +260,8 @@ function App() {
             showSessionControls={false}
             sessionCommand={sessionCommand}
             onSessionStateChange={setChatSessionState}
+            pinnedUserfileIds={settings.pinnedUserfileIds}
+            onPinUserfile={settings.togglePinnedUserfile}
           />
         </div>
       </div>
@@ -289,6 +291,9 @@ function App() {
         onUpdateProjectContextOverride={settings.setProjectContextOverride}
         contextStats={contextStats}
         mcpServers={health?.mcp}
+        pinnedUserfileIds={settings.pinnedUserfileIds}
+        onTogglePinUserfile={settings.togglePinnedUserfile}
+        onClearPinnedUserfiles={settings.clearPinnedUserfiles}
       />
     </div>
     </ErrorBoundary>

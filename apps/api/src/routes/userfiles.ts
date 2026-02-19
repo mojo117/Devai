@@ -1,9 +1,17 @@
 import { FastifyPluginAsync } from 'fastify';
-import { resolve, extname, basename } from 'path';
-import { writeFile, readdir, stat, unlink, realpath } from 'fs/promises';
+import { extname, basename } from 'path';
+import { getSupabase } from '../db/index.js';
+import {
+  generateUserfileId,
+  insertUserfile,
+  listUserfiles as listUserfilesDb,
+  getUserfileById,
+  deleteUserfile as deleteUserfileDb,
+} from '../db/userfileQueries.js';
+import { parseFileContent } from '../services/fileParser.js';
 
-const USERFILES_DIR = '/opt/Userfiles';
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const STORAGE_BUCKET = 'userfiles';
 
 const ALLOWED_EXTENSIONS = new Set([
   '.pdf',
@@ -17,37 +25,26 @@ const ALLOWED_EXTENSIONS = new Set([
 ]);
 
 function sanitizeFilename(name: string): string {
-  // Strip directory components and null bytes
   const base = basename(name).replace(/\0/g, '');
-  // Replace anything that isn't alphanumeric, dot, dash, underscore, or space
   return base.replace(/[^a-zA-Z0-9.\-_ ]/g, '_');
 }
 
 export const userfilesRoutes: FastifyPluginAsync = async (app) => {
-  // List files
+  // List files (from DB)
   app.get('/userfiles', async (_request, reply) => {
     try {
-      const entries = await readdir(USERFILES_DIR);
-      const files = await Promise.all(
-        entries.map(async (name) => {
-          const filePath = resolve(USERFILES_DIR, name);
-          try {
-            const info = await stat(filePath);
-            if (!info.isFile()) return null;
-            return {
-              name,
-              size: info.size,
-              modifiedAt: info.mtime.toISOString(),
-            };
-          } catch {
-            return null;
-          }
-        })
-      );
+      const files = await listUserfilesDb();
       return reply.send({
-        files: files.filter(Boolean).sort(
-          (a, b) => new Date(b!.modifiedAt).getTime() - new Date(a!.modifiedAt).getTime()
-        ),
+        files: files.map((f) => ({
+          id: f.id,
+          name: f.filename,
+          original_name: f.original_name,
+          mime_type: f.mime_type,
+          size: f.size_bytes,
+          parse_status: f.parse_status,
+          uploaded_at: f.uploaded_at,
+          expires_at: f.expires_at,
+        })),
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Unknown error';
@@ -55,7 +52,7 @@ export const userfilesRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
-  // Upload file
+  // Upload file → Supabase Storage + DB + parse
   app.post('/userfiles', async (request, reply) => {
     const data = await request.file();
 
@@ -80,70 +77,110 @@ export const userfilesRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const safeName = sanitizeFilename(originalName);
-
     if (!safeName || safeName === '.' || safeName === '..') {
       return reply.status(400).send({ error: 'Invalid filename' });
     }
 
-    // If file with same name exists, add timestamp suffix
-    let finalName = safeName;
-    const filePath = resolve(USERFILES_DIR, safeName);
-    try {
-      await stat(filePath);
-      // File exists — add timestamp
-      const nameWithoutExt = safeName.slice(0, safeName.length - ext.length);
-      finalName = `${nameWithoutExt}_${Date.now()}${ext}`;
-    } catch {
-      // File doesn't exist, use original name
+    const fileId = generateUserfileId();
+    const storagePath = `${fileId}/${safeName}`;
+    const mimeType = data.mimetype || 'application/octet-stream';
+
+    // Upload to Supabase Storage
+    const { error: storageError } = await getSupabase()
+      .storage
+      .from(STORAGE_BUCKET)
+      .upload(storagePath, buffer, {
+        contentType: mimeType,
+        upsert: false,
+      });
+
+    if (storageError) {
+      console.error('Supabase Storage upload failed:', storageError);
+      return reply.status(500).send({ error: `Storage upload failed: ${storageError.message}` });
     }
 
-    const finalPath = resolve(USERFILES_DIR, finalName);
+    // Parse file content
+    const parseResult = await parseFileContent(buffer, safeName, mimeType);
 
-    // Double-check path stays within USERFILES_DIR using realpath of parent
-    const resolvedDir = await realpath(USERFILES_DIR);
-    if (!finalPath.startsWith(resolvedDir + '/')) {
-      return reply.status(400).send({ error: 'Invalid filename' });
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    const row = await insertUserfile({
+      id: fileId,
+      filename: safeName,
+      original_name: originalName,
+      mime_type: mimeType,
+      size_bytes: buffer.length,
+      storage_path: storagePath,
+      uploaded_at: now.toISOString(),
+      expires_at: expiresAt.toISOString(),
+      parsed_content: parseResult.content,
+      parse_status: parseResult.status,
+    });
+
+    if (!row) {
+      // Cleanup storage on DB failure
+      await getSupabase().storage.from(STORAGE_BUCKET).remove([storagePath]);
+      return reply.status(500).send({ error: 'Failed to save file record' });
     }
 
-    await writeFile(finalPath, buffer);
-
-    const info = await stat(finalPath);
     return reply.send({
       success: true,
       file: {
-        name: finalName,
-        size: info.size,
-        modifiedAt: info.mtime.toISOString(),
+        id: row.id,
+        name: row.filename,
+        original_name: row.original_name,
+        mime_type: row.mime_type,
+        size: row.size_bytes,
+        parse_status: row.parse_status,
+        uploaded_at: row.uploaded_at,
+        expires_at: row.expires_at,
       },
     });
   });
 
-  // Delete file
-  app.delete<{ Params: { filename: string } }>('/userfiles/:filename', async (request, reply) => {
-    const { filename } = request.params;
-    const safeName = sanitizeFilename(filename);
+  // Get parsed content for a file
+  app.get<{ Params: { id: string } }>('/userfiles/:id/content', async (request, reply) => {
+    const { id } = request.params;
+    const file = await getUserfileById(id);
 
-    if (!safeName || safeName === '.' || safeName === '..') {
-      return reply.status(400).send({ error: 'Invalid filename' });
+    if (!file) {
+      return reply.status(404).send({ error: 'File not found' });
     }
 
-    const filePath = resolve(USERFILES_DIR, safeName);
+    return reply.send({
+      id: file.id,
+      filename: file.filename,
+      parse_status: file.parse_status,
+      parsed_content: file.parsed_content,
+    });
+  });
 
-    const resolvedDir = await realpath(USERFILES_DIR);
-    if (!filePath.startsWith(resolvedDir + '/')) {
-      return reply.status(400).send({ error: 'Invalid filename' });
+  // Delete file (by ID) — removes from Storage + DB
+  app.delete<{ Params: { id: string } }>('/userfiles/:id', async (request, reply) => {
+    const { id } = request.params;
+    const file = await getUserfileById(id);
+
+    if (!file) {
+      return reply.status(404).send({ error: 'File not found' });
     }
 
-    try {
-      await unlink(filePath);
-      return reply.send({ success: true });
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') {
-        return reply.status(404).send({ error: 'File not found' });
-      }
-      const msg = error instanceof Error ? error.message : 'Unknown error';
-      return reply.status(500).send({ error: msg });
+    // Remove from Supabase Storage
+    const { error: storageError } = await getSupabase()
+      .storage
+      .from(STORAGE_BUCKET)
+      .remove([file.storage_path]);
+
+    if (storageError) {
+      console.error('Supabase Storage delete failed:', storageError);
+      // Continue with DB delete even if storage cleanup fails
     }
+
+    const deleted = await deleteUserfileDb(id);
+    if (!deleted) {
+      return reply.status(500).send({ error: 'Failed to delete file record' });
+    }
+
+    return reply.send({ success: true });
   });
 };

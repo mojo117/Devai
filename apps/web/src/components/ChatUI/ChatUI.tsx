@@ -27,6 +27,8 @@ export function ChatUI({
   showSessionControls = true,
   sessionCommand,
   onSessionStateChange,
+  pinnedUserfileIds,
+  onPinUserfile,
 }: ChatUIProps) {
   // Core state shared across sub-components
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -255,7 +257,9 @@ export function ChatUI({
         content,
         projectRoot || undefined,
         session.sessionId || undefined,
-        handleStreamEvent
+        handleStreamEvent,
+        undefined,
+        pinnedUserfileIds,
       );
 
       if (response.sessionId) {
@@ -306,9 +310,17 @@ export function ChatUI({
     const files = e.target.files;
     if (!files || files.length === 0) return;
     setIsFileUploading(true);
+    const uploadedIds: string[] = [];
     for (const file of Array.from(files)) {
       try {
-        await uploadUserfile(file);
+        const result = await uploadUserfile(file);
+        if (result.file?.id) {
+          uploadedIds.push(result.file.id);
+          // Auto-pin newly uploaded file
+          if (onPinUserfile) {
+            onPinUserfile(result.file.id);
+          }
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Upload failed';
         setMessages((prev) => [
@@ -319,10 +331,13 @@ export function ChatUI({
     }
     setIsFileUploading(false);
     e.target.value = '';
-    setMessages((prev) => [
-      ...prev,
-      { id: `upload-${Date.now()}`, role: 'system' as const, content: `${files.length} file${files.length > 1 ? 's' : ''} uploaded to /opt/Userfiles`, timestamp: new Date().toISOString() },
-    ]);
+    const count = uploadedIds.length;
+    if (count > 0) {
+      setMessages((prev) => [
+        ...prev,
+        { id: `upload-${Date.now()}`, role: 'system' as const, content: `${count} file${count > 1 ? 's' : ''} uploaded and pinned for AI context`, timestamp: new Date().toISOString() },
+      ]);
+    }
   };
 
   const handleRetry = async () => {

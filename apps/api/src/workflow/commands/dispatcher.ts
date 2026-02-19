@@ -58,6 +58,7 @@ import { getPendingActions } from '../../actions/manager.js';
 import { emitChatEvent } from '../../websocket/chatGateway.js';
 import { config } from '../../config.js';
 import type { ChatMessage } from '@devai/shared';
+import { buildUserfileContext } from '../../services/userfileContext.js';
 
 /** Result returned after dispatching a command. */
 export interface DispatchResult {
@@ -264,10 +265,23 @@ export class CommandDispatcher {
       reason: 'Initiating multi-agent workflow',
     });
 
+    // Inject pinned userfile content into the message
+    let augmentedMessage = message;
+    if (command.pinnedUserfileIds && command.pinnedUserfileIds.length > 0) {
+      try {
+        const fileContext = await buildUserfileContext(command.pinnedUserfileIds);
+        if (fileContext) {
+          augmentedMessage = fileContext + '\n\n' + message;
+        }
+      } catch (err) {
+        console.error('[CommandDispatcher] Failed to build userfile context:', err);
+      }
+    }
+
     try {
       const result = await processRequest(
         activeSessionId,
-        message,
+        augmentedMessage,
         recentHistory,
         validatedProjectRoot || config.allowedRoots[0],
         sendEvent as (event: AgentStreamEvent) => void,
@@ -491,6 +505,9 @@ export function mapWsMessageToCommand(
       projectRoot: typeof msg.projectRoot === 'string' ? msg.projectRoot : undefined,
       metadata: (msg.metadata && typeof msg.metadata === 'object' && !Array.isArray(msg.metadata))
         ? msg.metadata as Record<string, unknown>
+        : undefined,
+      pinnedUserfileIds: Array.isArray(msg.pinnedUserfileIds)
+        ? (msg.pinnedUserfileIds as unknown[]).filter((id): id is string => typeof id === 'string')
         : undefined,
     };
   }

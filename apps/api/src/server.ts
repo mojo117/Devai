@@ -17,11 +17,12 @@ import { SessionLogger } from './audit/sessionLogger.js';
 import { userfilesRoutes } from './routes/userfiles.js';
 import { transcribeRoutes } from './routes/transcribe.js';
 import { authMiddleware, registerAuthRoutes } from './routes/auth.js';
-import { initDb } from './db/index.js';
+import { initDb, getSupabase } from './db/index.js';
 import { websocketRoutes } from './websocket/routes.js';
 import { mcpManager } from './mcp/index.js';
 import { registerMcpTools } from './tools/registry.js';
 import { registerProjections } from './workflow/projections/index.js';
+import { getExpiredUserfiles, deleteExpiredUserfiles } from './db/userfileQueries.js';
 
 await initDb();
 
@@ -138,6 +139,34 @@ const start = async () => {
     // Ensure shutdown waits for init to settle before trying to tear down MCP.
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
     (app as any).mcpInitPromise = mcpInitPromise;
+
+    // 30-day userfile cleanup: run on startup + every 24h
+    const cleanupExpiredUserfiles = async () => {
+      try {
+        const expired = await getExpiredUserfiles();
+        if (expired.length === 0) return;
+
+        // Remove from Supabase Storage
+        const paths = expired.map((f) => f.storage_path);
+        const { error: storageError } = await getSupabase()
+          .storage
+          .from('userfiles')
+          .remove(paths);
+        if (storageError) {
+          console.error('[Cleanup] Storage delete error:', storageError);
+        }
+
+        // Remove DB rows
+        await deleteExpiredUserfiles(expired.map((f) => f.id));
+        console.log(`[Cleanup] Removed ${expired.length} expired userfile(s)`);
+      } catch (err) {
+        console.error('[Cleanup] Userfile cleanup failed:', err);
+      }
+    };
+
+    // Run immediately then every 24h
+    cleanupExpiredUserfiles();
+    setInterval(cleanupExpiredUserfiles, 24 * 60 * 60 * 1000);
   } catch (err) {
     app.log.error(err);
     process.exit(1);

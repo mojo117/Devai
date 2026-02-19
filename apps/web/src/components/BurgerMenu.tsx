@@ -44,6 +44,9 @@ interface BurgerMenuProps {
     note?: string;
   } | null;
   mcpServers?: McpServerStatus[];
+  pinnedUserfileIds?: string[];
+  onTogglePinUserfile?: (id: string) => void;
+  onClearPinnedUserfiles?: () => void;
 }
 
 export function BurgerMenu({ isOpen, onClose, ...props }: BurgerMenuProps) {
@@ -179,7 +182,13 @@ export function BurgerMenu({ isOpen, onClose, ...props }: BurgerMenuProps) {
               mcpServers={props.mcpServers}
             />
           )}
-          {activeTab === 'files' && <UserfilesPanelContent />}
+          {activeTab === 'files' && (
+            <UserfilesPanelContent
+              pinnedUserfileIds={props.pinnedUserfileIds}
+              onTogglePin={props.onTogglePinUserfile}
+              onClearPins={props.onClearPinnedUserfiles}
+            />
+          )}
           {activeTab === 'memory' && <MemoryPanelContent />}
         </div>
       </div>
