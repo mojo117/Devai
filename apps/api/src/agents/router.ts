@@ -634,6 +634,7 @@ Antworte am Ende mit einem JSON-Block:
       });
 
       const result = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
+        agentName: 'devo',
         onActionPending: (action) => {
           sendEvent({
             type: 'action_pending',
@@ -1199,6 +1200,7 @@ export async function spawnScout(
       }
 
       const result = await executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
+        agentName: 'scout',
         onActionPending: (action) => {
           sendEvent?.({
             type: 'action_pending',

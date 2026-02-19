@@ -19,7 +19,7 @@ import { llmRouter } from '../llm/router.js';
 import { executeToolWithApprovalBridge } from '../actions/approvalBridge.js';
 import { getCombinedSystemContextBlock, warmSystemContextForSession } from './systemContext.js';
 import { SessionLogger } from '../audit/sessionLogger.js';
-import { getAgent, getToolsForAgent, canAgentUseTool, spawnScout } from './router.js';
+import { getAgent, getToolsForAgent, spawnScout } from './router.js';
 import { getToolsForLLM } from '../tools/registry.js';
 import * as stateManager from './stateManager.js';
 import type {
@@ -281,6 +281,7 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
         const [toolResult, toolErr] = await this.errorHandler.safe(
           `tool:${toolCall.name}:${this.iteration}`,
           () => executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
+            agentName: 'chapo',
             onActionPending: (action) => {
               this.sendEvent({
                 type: 'action_pending',
@@ -584,16 +585,6 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
           return `DEVO eskaliert: ${desc}\n\nBisheriges Ergebnis:\n${finalContent}`;
         }
 
-        // Verify tool is in agent's allowed list
-        if (!canAgentUseTool('devo', toolCall.name)) {
-          toolResults.push({
-            toolUseId: toolCall.id,
-            result: `Error: Tool "${toolCall.name}" is not available to devo`,
-            isError: true,
-          });
-          continue;
-        }
-
         // Handle scout delegation from DEVO
         if (toolCall.name === 'delegateToScout') {
           const query = toolCall.arguments.query as string;
@@ -633,6 +624,7 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
         const [result, toolErr] = await this.errorHandler.safe(
           `devo-tool:${toolCall.name}:${turn}`,
           () => executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
+            agentName: 'devo',
             onActionPending: (action) => {
               this.sendEvent({
                 type: 'action_pending',
