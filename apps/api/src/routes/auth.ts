@@ -175,6 +175,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
 
     return reply.send({
       valid: true,
+      token,
       user: { username: payload.username },
       expiresAt: new Date(payload.exp * 1000).toISOString(),
     });

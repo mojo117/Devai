@@ -21,12 +21,17 @@ export function useAuth(): UseAuthReturn {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
 
-  // Verify auth on mount
+  // Verify auth on mount — restore in-memory token from cookie session
   useEffect(() => {
     verifyAuth()
-      .then((valid) => {
-        setIsAuthed(valid);
-        if (!valid) clearAuthToken();
+      .then((result) => {
+        if (result.valid && result.token) {
+          setAuthToken(result.token);
+          setIsAuthed(true);
+        } else {
+          setIsAuthed(false);
+          clearAuthToken();
+        }
       })
       .catch(() => setIsAuthed(false))
       .finally(() => setAuthChecked(true));

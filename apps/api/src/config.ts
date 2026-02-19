@@ -8,13 +8,16 @@ loadEnv({ path: resolve(process.cwd(), "../../.env") });
 // These paths are enforced regardless of environment variables
 const HARDCODED_ALLOWED_ROOTS: readonly string[] = [
   "/root",   // Clawd home — projects, scripts
-  "/opt",    // Clawd /opt — includes /opt/Devai itself
+  "/opt",    // Clawd /opt — project files, tools
+  "/home",   // Service home directories
 ] as const;
 
 // Paths that are explicitly denied even within allowed roots
 // OpenClaw is a separate system — Devai must not read its config, credentials, or workspace
+// Devai must not be able to modify its own deployment
 const HARDCODED_DENIED_PATHS: readonly string[] = [
   "/root/.openclaw",  // OpenClaw config, credentials, workspace — separate system
+  "/opt/Devai",       // Devai's own deployment — prevent self-modification
 ] as const;
 
 export interface Config {
