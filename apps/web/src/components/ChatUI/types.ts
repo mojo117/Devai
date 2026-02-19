@@ -40,11 +40,8 @@ export interface ToolEventUpdate {
 
 export interface ChatUIProps {
   projectRoot?: string | null;
-  skillIds?: string[];
   allowedRoots?: string[];
-  pinnedFiles?: string[];
   ignorePatterns?: string[];
-  projectContextOverride?: { enabled: boolean; summary: string };
   onPinFile?: (file: string) => void;
   onContextUpdate?: (stats: ContextStats) => void;
   onLoadingChange?: (loading: boolean) => void;

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { sendMultiAgentMessage, saveSetting, uploadUserfile, transcribeAudio } from '../../api';
+import { sendMultiAgentMessage, saveSetting, saveSessionMessage, uploadUserfile, transcribeAudio } from '../../api';
 import type { ChatStreamEvent } from '../../api';
 import type { ChatMessage } from '../../types';
 import type { AgentName, AgentPhase } from '../AgentStatus';
@@ -15,11 +15,8 @@ import { PendingActionsBar } from './PendingActionsBar';
 
 export function ChatUI({
   projectRoot,
-  skillIds: _skillIds,
   allowedRoots,
-  pinnedFiles: _pinnedFiles,
   ignorePatterns,
-  projectContextOverride: _projectContextOverride,
   onPinFile,
   onContextUpdate,
   onLoadingChange,
@@ -306,6 +303,13 @@ export function ChatUI({
     await sendChatMessage(content);
   };
 
+  const persistSystemMessage = useCallback((message: ChatMessage) => {
+    setMessages((prev) => [...prev, message]);
+    if (session.sessionId) {
+      saveSessionMessage(session.sessionId, message);
+    }
+  }, [session.sessionId]);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -323,20 +327,14 @@ export function ChatUI({
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Upload failed';
-        setMessages((prev) => [
-          ...prev,
-          { id: `err-${Date.now()}`, role: 'system' as const, content: `Upload failed: ${msg}`, timestamp: new Date().toISOString() },
-        ]);
+        persistSystemMessage({ id: `err-${Date.now()}`, role: 'system', content: `Upload failed: ${msg}`, timestamp: new Date().toISOString() });
       }
     }
     setIsFileUploading(false);
     e.target.value = '';
     const count = uploadedIds.length;
     if (count > 0) {
-      setMessages((prev) => [
-        ...prev,
-        { id: `upload-${Date.now()}`, role: 'system' as const, content: `${count} file${count > 1 ? 's' : ''} uploaded and pinned for AI context`, timestamp: new Date().toISOString() },
-      ]);
+      persistSystemMessage({ id: `upload-${Date.now()}`, role: 'system', content: `${count} file${count > 1 ? 's' : ''} uploaded and pinned for AI context`, timestamp: new Date().toISOString() });
     }
   };
 
@@ -388,10 +386,7 @@ export function ChatUI({
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Transcription failed';
-      setMessages((prev) => [
-        ...prev,
-        { id: `err-${Date.now()}`, role: 'system' as const, content: `Dictation failed: ${msg}`, timestamp: new Date().toISOString() },
-      ]);
+      persistSystemMessage({ id: `err-${Date.now()}`, role: 'system', content: `Dictation failed: ${msg}`, timestamp: new Date().toISOString() });
     } finally {
       setIsTranscribing(false);
     }

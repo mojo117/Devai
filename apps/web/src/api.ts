@@ -3,8 +3,6 @@ import type {
   LLMProvider,
   Action,
   HealthResponse,
-  SkillsResponse,
-  ProjectResponse,
   ProjectFilesResponse,
   ProjectFileResponse,
   ProjectSearchResponse,
@@ -12,7 +10,6 @@ import type {
   SessionsResponse,
   SessionMessagesResponse,
   SettingResponse,
-  LooperPromptsResponse,
 } from './types';
 
 const API_BASE = '/api';
@@ -151,12 +148,15 @@ export async function login(username: string, password: string): Promise<{ token
   return { token: data.token };
 }
 
-export async function verifyAuth(): Promise<boolean> {
+export async function verifyAuth(): Promise<{ valid: boolean; token?: string }> {
   const res = await apiFetch(`${API_BASE}/auth/verify`, {
     headers: withAuthHeaders(),
   });
 
-  return res.ok;
+  if (!res.ok) return { valid: false };
+
+  const data = await res.json();
+  return { valid: true, token: data.token };
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {
@@ -204,47 +204,6 @@ export async function sendMessage(
   return parseNDJSONStream<{ message: ChatMessage; pendingActions: Action[]; sessionId?: string; contextStats?: { tokensUsed: number; tokenBudget: number; note?: string } }>(res.body, onEvent);
 }
 
-export async function fetchSkills(): Promise<SkillsResponse> {
-  const res = await apiFetch(`${API_BASE}/skills`, {
-    headers: withAuthHeaders(),
-  });
-  if (!res.ok) throw new Error('Failed to fetch skills');
-  return res.json();
-}
-
-export async function reloadSkills(): Promise<SkillsResponse> {
-  const res = await apiFetch(`${API_BASE}/skills/reload`, {
-    method: 'POST',
-    headers: withAuthHeaders(),
-  });
-  if (!res.ok) throw new Error('Failed to reload skills');
-  return res.json();
-}
-
-export async function fetchProject(projectPath: string): Promise<ProjectResponse> {
-  const params = new URLSearchParams({ path: projectPath });
-  const res = await apiFetch(`${API_BASE}/project?${params.toString()}`, {
-    headers: withAuthHeaders(),
-  });
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: 'Failed to fetch project' }));
-    throw new Error(error.error || 'Failed to fetch project');
-  }
-  return res.json();
-}
-
-export async function refreshProject(projectPath: string): Promise<ProjectResponse> {
-  const params = new URLSearchParams({ path: projectPath });
-  const res = await apiFetch(`${API_BASE}/project/refresh?${params.toString()}`, {
-    method: 'POST',
-    headers: withAuthHeaders(),
-  });
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: 'Failed to refresh project' }));
-    throw new Error(error.error || 'Failed to refresh project');
-  }
-  return res.json();
-}
 
 export async function listProjectFiles(path: string, ignore?: string[]): Promise<ProjectFilesResponse> {
   const params = new URLSearchParams({ path });
@@ -354,6 +313,19 @@ export async function updateSessionTitle(sessionId: string, title: string): Prom
   return res.json();
 }
 
+export async function saveSessionMessage(
+  sessionId: string,
+  message: { id: string; role: string; content: string; timestamp: string },
+): Promise<void> {
+  await apiFetch(`${API_BASE}/sessions/${sessionId}/messages`, {
+    method: 'POST',
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(message),
+  }).catch(() => {
+    // Non-critical — don't break the UI if persistence fails
+  });
+}
+
 export async function fetchSetting(key: string): Promise<SettingResponse> {
   const res = await apiFetch(`${API_BASE}/settings/${encodeURIComponent(key)}`, {
     headers: withAuthHeaders(),
@@ -433,14 +405,6 @@ export async function rejectAction(actionId: string): Promise<{ action: Action }
     throw new Error(await readApiError(res));
   }
 
-  return res.json();
-}
-
-export async function fetchLooperPrompts(): Promise<LooperPromptsResponse> {
-  const res = await apiFetch(`${API_BASE}/looper/prompts`, {
-    headers: withAuthHeaders(),
-  });
-  if (!res.ok) throw new Error('Failed to fetch looper prompts');
   return res.json();
 }
 
@@ -955,31 +919,6 @@ export async function fetchAgentState(sessionId: string): Promise<{
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch agent state');
-  return res.json();
-}
-
-// Global Context API
-
-export interface GlobalContext {
-  content: string;
-  enabled: boolean;
-}
-
-export async function fetchGlobalContext(): Promise<GlobalContext> {
-  const res = await apiFetch(`${API_BASE}/settings/global-context`, {
-    headers: withAuthHeaders(),
-  });
-  if (!res.ok) throw new Error('Failed to fetch global context');
-  return res.json();
-}
-
-export async function saveGlobalContext(context: GlobalContext): Promise<GlobalContext> {
-  const res = await apiFetch(`${API_BASE}/settings/global-context`, {
-    method: 'POST',
-    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify(context),
-  });
-  if (!res.ok) throw new Error('Failed to save global context');
   return res.json();
 }
 

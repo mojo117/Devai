@@ -45,50 +45,65 @@ export function MessageList({
   const mainMessages = shouldInterleave ? messages.slice(0, -1) : messages;
   const trailingMessage = shouldInterleave ? lastMsg : null;
 
-  const renderMessage = (message: ChatMessage) => (
-    <div
-      key={message.id}
-      className={`flex ${
-        message.role === 'user' ? 'justify-end' : 'justify-start'
-      }`}
-    >
+  const renderMessage = (message: ChatMessage) => {
+    if (message.role === 'system') {
+      return (
+        <div key={message.id} className="flex justify-center">
+          <div className="inline-flex items-center gap-2 text-xs text-devai-text-muted bg-devai-surface/50 border border-devai-border/50 rounded-lg px-3 py-1.5 max-w-[90%]">
+            <svg className="w-3.5 h-3.5 shrink-0 text-devai-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>{message.content}</span>
+          </div>
+        </div>
+      );
+    }
+
+    return (
       <div
-        className={`group relative max-w-[80%] px-4 py-2.5 ${
-          message.role === 'user'
-            ? 'bg-devai-accent text-white rounded-2xl rounded-br-sm'
-            : 'bg-devai-card text-devai-text rounded-2xl rounded-bl-sm border border-devai-border'
+        key={message.id}
+        className={`flex ${
+          message.role === 'user' ? 'justify-end' : 'justify-start'
         }`}
       >
-        <button
-          onClick={() => onCopyMessage(message.id, message.content)}
-          className={`absolute top-2 right-2 p-1 rounded transition-all ${
-            copiedMessageId === message.id
-              ? 'opacity-100 text-green-400'
-              : 'opacity-0 group-hover:opacity-100 text-devai-text-muted hover:text-devai-text'
+        <div
+          className={`group relative max-w-[80%] px-4 py-2.5 ${
+            message.role === 'user'
+              ? 'bg-devai-accent text-white rounded-2xl rounded-br-sm'
+              : 'bg-devai-card text-devai-text rounded-2xl rounded-bl-sm border border-devai-border'
           }`}
-          title={copiedMessageId === message.id ? 'Copied!' : 'Copy message'}
         >
-          {copiedMessageId === message.id ? (
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          ) : (
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-            </svg>
-          )}
-        </button>
-        <div className="pr-6">
-          {renderMessageContent(message.content)}
+          <button
+            onClick={() => onCopyMessage(message.id, message.content)}
+            className={`absolute top-2 right-2 p-1 rounded transition-all ${
+              copiedMessageId === message.id
+                ? 'opacity-100 text-green-400'
+                : 'opacity-0 group-hover:opacity-100 text-devai-text-muted hover:text-devai-text'
+            }`}
+            title={copiedMessageId === message.id ? 'Copied!' : 'Copy message'}
+          >
+            {copiedMessageId === message.id ? (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+            )}
+          </button>
+          <div className="pr-6">
+            {renderMessageContent(message.content)}
+          </div>
+          <p className={`text-xs mt-1 ${
+            message.role === 'user' ? 'opacity-60' : 'text-devai-text-muted'
+          }`}>
+            {new Date(message.timestamp).toLocaleTimeString()}
+          </p>
         </div>
-        <p className={`text-xs mt-1 ${
-          message.role === 'user' ? 'opacity-60' : 'text-devai-text-muted'
-        }`}>
-          {new Date(message.timestamp).toLocaleTimeString()}
-        </p>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">

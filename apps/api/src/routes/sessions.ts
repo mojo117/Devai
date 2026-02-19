@@ -1,6 +1,6 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { createSession, getMessages, listSessions, updateSessionTitle } from '../db/queries.js';
+import { createSession, getMessages, listSessions, updateSessionTitle, saveMessage } from '../db/queries.js';
 
 const CreateSessionSchema = z.object({
   title: z.string().optional(),
@@ -8,6 +8,13 @@ const CreateSessionSchema = z.object({
 
 const UpdateSessionSchema = z.object({
   title: z.string(),
+});
+
+const SaveMessageSchema = z.object({
+  id: z.string(),
+  role: z.enum(['user', 'assistant', 'system']),
+  content: z.string(),
+  timestamp: z.string(),
 });
 
 export const sessionsRoutes: FastifyPluginAsync = async (app) => {
@@ -35,6 +42,27 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
     } catch (error) {
       return reply.status(400).send({
         error: 'Failed to fetch messages',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
+
+  app.post('/sessions/:id/messages', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parseResult = SaveMessageSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: 'Invalid message',
+        details: parseResult.error.issues,
+      });
+    }
+
+    try {
+      await saveMessage(id, parseResult.data);
+      return { success: true };
+    } catch (error) {
+      return reply.status(400).send({
+        error: 'Failed to save message',
         details: error instanceof Error ? error.message : 'Unknown error',
       });
     }

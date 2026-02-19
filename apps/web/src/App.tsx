@@ -8,29 +8,18 @@ import {
 } from './api';
 import type { HealthResponse } from './types';
 import { useAuth } from './hooks/useAuth';
-import { useSkills } from './hooks/useSkills';
-import { useProject } from './hooks/useProject';
 import { usePersistedSettings } from './hooks/usePersistedSettings';
 
 function App() {
   // Custom hooks for grouped state
   const auth = useAuth();
   const [error, setError] = useState<string | null>(null);
-  const handleError = useCallback((msg: string) => setError(msg), []);
 
-  const skills = useSkills(auth.isAuthed, handleError);
   const [health, setHealth] = useState<HealthResponse | null>(null);
-  const project = useProject(auth.isAuthed, health?.projectRoot, handleError);
   const settings = usePersistedSettings(auth.isAuthed);
 
   // UI state
-  const [contextStats, setContextStats] = useState<{
-    tokensUsed: number;
-    tokenBudget: number;
-    note?: string;
-  } | null>(null);
   const [chatLoading, setChatLoading] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
   const [activeAgent, setActiveAgent] = useState<AgentName | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>('idle');
   const [chatSessionState, setChatSessionState] = useState<ChatSessionState | null>(null);
@@ -47,14 +36,6 @@ function App() {
   const handleAgentChange = useCallback((agent: AgentName | null, phase: AgentPhase) => {
     setActiveAgent(agent);
     setAgentPhase(phase);
-  }, []);
-
-  // Mobile detection
-  useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768);
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
   // Fetch health when authenticated (retry silently on failure — the ●/○ indicator shows status)
@@ -248,13 +229,9 @@ function App() {
         <div className="flex flex-col min-w-0 min-h-0 overflow-hidden flex-1 max-w-4xl mx-auto w-full">
           <ChatUI
             projectRoot={health?.projectRoot}
-            skillIds={skills.selectedSkillIds}
             allowedRoots={health?.allowedRoots}
-            pinnedFiles={settings.pinnedFiles}
             ignorePatterns={settings.ignorePatterns}
-            projectContextOverride={settings.projectContextOverride}
             onPinFile={settings.addPinnedFile}
-            onContextUpdate={(stats) => setContextStats(stats)}
             onLoadingChange={setChatLoading}
             onAgentChange={handleAgentChange}
             showSessionControls={false}
@@ -270,27 +247,6 @@ function App() {
       <BurgerMenu
         isOpen={menuOpen}
         onClose={() => setMenuOpen(false)}
-        allowedRoots={health?.allowedRoots}
-        skills={skills.skills}
-        selectedSkillIds={skills.selectedSkillIds}
-        skillsLoadedAt={skills.skillsLoadedAt}
-        skillsErrors={skills.skillsErrors}
-        onToggleSkill={skills.handleToggleSkill}
-        onReloadSkills={skills.handleReloadSkills}
-        skillsLoading={skills.skillsLoading}
-        projectRoot={health?.projectRoot || null}
-        projectContext={project.projectContext}
-        projectContextLoadedAt={project.projectContextLoadedAt}
-        onRefreshProject={project.handleRefreshProject}
-        projectLoading={project.projectLoading}
-        pinnedFiles={settings.pinnedFiles}
-        onUnpinFile={settings.removePinnedFile}
-        ignorePatterns={settings.ignorePatterns}
-        onUpdateIgnorePatterns={settings.setIgnorePatterns}
-        projectContextOverride={settings.projectContextOverride}
-        onUpdateProjectContextOverride={settings.setProjectContextOverride}
-        contextStats={contextStats}
-        mcpServers={health?.mcp}
         pinnedUserfileIds={settings.pinnedUserfileIds}
         onTogglePinUserfile={settings.togglePinnedUserfile}
         onClearPinnedUserfiles={settings.clearPinnedUserfiles}
