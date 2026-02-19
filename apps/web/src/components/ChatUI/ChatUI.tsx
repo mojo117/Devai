@@ -289,6 +289,8 @@ export function ChatUI({
       }
     } finally {
       setIsLoading(false);
+      setActiveAgent(null);
+      setAgentPhase('idle');
     }
   };
 
@@ -340,6 +342,8 @@ export function ChatUI({
       }]);
     } finally {
       setIsLoading(false);
+      setActiveAgent(null);
+      setAgentPhase('idle');
     }
   };
 

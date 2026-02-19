@@ -1,7 +1,7 @@
 import type { RefObject } from 'react';
 import type { ChatMessage, SessionSummary } from '../../types';
 import type { ToolEvent } from './types';
-import { renderMessageContent, formatPayloadCompact } from './utils';
+import { renderMessageContent } from './utils';
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -38,6 +38,58 @@ export function MessageList({
   onRestartChat,
   onNewChat,
 }: MessageListProps) {
+  // Chronological interleaving: user msg → tool events → assistant response
+  const hasToolEvents = toolEvents.length > 0;
+  const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+  const shouldInterleave = hasToolEvents && !isLoading && lastMsg?.role === 'assistant';
+  const mainMessages = shouldInterleave ? messages.slice(0, -1) : messages;
+  const trailingMessage = shouldInterleave ? lastMsg : null;
+
+  const renderMessage = (message: ChatMessage) => (
+    <div
+      key={message.id}
+      className={`flex ${
+        message.role === 'user' ? 'justify-end' : 'justify-start'
+      }`}
+    >
+      <div
+        className={`group relative max-w-[80%] px-4 py-2.5 ${
+          message.role === 'user'
+            ? 'bg-devai-accent text-white rounded-2xl rounded-br-sm'
+            : 'bg-devai-card text-devai-text rounded-2xl rounded-bl-sm border border-devai-border'
+        }`}
+      >
+        <button
+          onClick={() => onCopyMessage(message.id, message.content)}
+          className={`absolute top-2 right-2 p-1 rounded transition-all ${
+            copiedMessageId === message.id
+              ? 'opacity-100 text-green-400'
+              : 'opacity-0 group-hover:opacity-100 text-devai-text-muted hover:text-devai-text'
+          }`}
+          title={copiedMessageId === message.id ? 'Copied!' : 'Copy message'}
+        >
+          {copiedMessageId === message.id ? (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+          )}
+        </button>
+        <div className="pr-6">
+          {renderMessageContent(message.content)}
+        </div>
+        <p className={`text-xs mt-1 ${
+          message.role === 'user' ? 'opacity-60' : 'text-devai-text-muted'
+        }`}>
+          {new Date(message.timestamp).toLocaleTimeString()}
+        </p>
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
       {showSessionControls && (
@@ -89,53 +141,11 @@ export function MessageList({
         </div>
       )}
 
-      {messages.map((message) => (
-        <div
-          key={message.id}
-          className={`flex ${
-            message.role === 'user' ? 'justify-end' : 'justify-start'
-          }`}
-        >
-          <div
-            className={`group relative max-w-[80%] px-4 py-2.5 ${
-              message.role === 'user'
-                ? 'bg-devai-accent text-white rounded-2xl rounded-br-sm'
-                : 'bg-devai-card text-devai-text rounded-2xl rounded-bl-sm border border-devai-border'
-            }`}
-          >
-            <button
-              onClick={() => onCopyMessage(message.id, message.content)}
-              className={`absolute top-2 right-2 p-1 rounded transition-all ${
-                copiedMessageId === message.id
-                  ? 'opacity-100 text-green-400'
-                  : 'opacity-0 group-hover:opacity-100 text-devai-text-muted hover:text-devai-text'
-              }`}
-              title={copiedMessageId === message.id ? 'Copied!' : 'Copy message'}
-            >
-              {copiedMessageId === message.id ? (
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-              ) : (
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-              )}
-            </button>
-            <div className="pr-6">
-              {renderMessageContent(message.content)}
-            </div>
-            <p className={`text-xs mt-1 ${
-              message.role === 'user' ? 'opacity-60' : 'text-devai-text-muted'
-            }`}>
-              {new Date(message.timestamp).toLocaleTimeString()}
-            </p>
-          </div>
-        </div>
-      ))}
+      {/* Main messages (all, or all-except-last-assistant when interleaving) */}
+      {mainMessages.map(renderMessage)}
 
-      {/* Inline System Events */}
-      {toolEvents.length > 0 && (
+      {/* Inline System Events — chronologically between user msg and response */}
+      {hasToolEvents && (
         <div className="space-y-1.5">
           {toolEvents.slice(-10).map((event) => (
             <InlineSystemEvent
@@ -143,10 +153,14 @@ export function MessageList({
               event={event}
               isExpanded={expandedEvents.has(event.id)}
               onToggle={() => toggleEventExpanded(event.id)}
+              isLoading={isLoading}
             />
           ))}
         </div>
       )}
+
+      {/* Trailing assistant message (after tool events) */}
+      {trailingMessage && renderMessage(trailingMessage)}
 
       {isLoading && (
         <div className="flex justify-start">
@@ -165,18 +179,20 @@ export function MessageList({
   );
 }
 
-/** Inline System Event - compact badge shown in the chat stream */
+/** Inline System Event — compact left-aligned badge with inline detail */
 function InlineSystemEvent({
   event,
   isExpanded,
   onToggle,
+  isLoading,
 }: {
   event: ToolEvent;
   isExpanded: boolean;
   onToggle: () => void;
+  isLoading: boolean;
 }) {
   const getEventLabel = () => {
-    if (event.type === 'thinking') return 'Thinking...';
+    if (event.type === 'thinking') return 'Thinking';
     if (event.type === 'status') return String(event.result || 'Status');
     if (event.type === 'tool_call') return `Using: ${event.name || 'tool'}`;
     if (event.type === 'tool_result') return `Result: ${event.name || 'tool'}`;
@@ -190,35 +206,37 @@ function InlineSystemEvent({
     return 'border-devai-border bg-devai-surface/50 text-devai-text-secondary';
   };
 
+  const getInlineDetail = (): string => {
+    const payload = event.type === 'tool_call' ? event.arguments : event.result;
+    if (!payload) return '';
+    const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
+    return text.length > 150 ? text.slice(0, 150) + '\u2026' : text;
+  };
+
   const hasContent = Boolean(event.arguments || event.result);
+  const detail = isExpanded ? getInlineDetail() : '';
 
   return (
-    <div className="flex justify-center">
-      <div
-        className={`inline-flex flex-col rounded-lg border text-xs ${getEventColor()} max-w-[90%]`}
+    <div className="flex justify-start">
+      <button
+        onClick={hasContent ? onToggle : undefined}
+        className={`inline-flex items-center gap-2 rounded-lg border text-xs px-3 py-1.5 max-w-[80%] ${getEventColor()} ${hasContent ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
       >
-        <button
-          onClick={hasContent ? onToggle : undefined}
-          className={`flex items-center gap-2 px-3 py-1.5 ${hasContent ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
-        >
-          {event.type === 'thinking' && (
-            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-          )}
-          {event.type === 'tool_call' && <span className="text-[10px]">&#9654;</span>}
-          {event.type === 'tool_result' && <span className="text-[10px]">&#9664;</span>}
-          <span className="font-mono text-[11px]">{getEventLabel()}</span>
-          {hasContent && (
-            <span className="text-[10px] opacity-60">{isExpanded ? '\u25B2' : '\u25BC'}</span>
-          )}
-        </button>
-        {isExpanded && hasContent && (
-          <div className="border-t border-current/10 px-3 py-2">
-            <pre className="text-[10px] text-devai-text-secondary whitespace-pre-wrap break-all font-mono max-h-32 overflow-y-auto">
-              {formatPayloadCompact(event.arguments || event.result)}
-            </pre>
-          </div>
+        {event.type === 'thinking' && (
+          <span className={`w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 ${isLoading ? 'animate-pulse' : ''}`} />
         )}
-      </div>
+        {event.type === 'tool_call' && <span className="text-[10px] shrink-0">&#9654;</span>}
+        {event.type === 'tool_result' && <span className="text-[10px] shrink-0">&#9664;</span>}
+        <span className="font-mono text-[11px] whitespace-nowrap">{getEventLabel()}</span>
+        {detail && (
+          <span className="text-[10px] text-devai-text-secondary font-mono truncate min-w-0">
+            _ {detail}
+          </span>
+        )}
+        {hasContent && (
+          <span className="text-[10px] opacity-60 shrink-0">{isExpanded ? '\u25B2' : '\u25BC'}</span>
+        )}
+      </button>
     </div>
   );
 }
