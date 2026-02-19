@@ -8,6 +8,7 @@
 import type { Projection } from '../events/bus.js';
 import type { WorkflowEventEnvelope } from '../events/envelope.js';
 import * as stateManager from '../../agents/stateManager.js';
+import type { AgentPhase, AgentName, UserQuestion, ApprovalRequest, TaskStatus } from '../../agents/types.js';
 import {
   AGENT_STARTED,
   AGENT_SWITCHED,
@@ -29,22 +30,22 @@ export class StateProjection implements Projection {
 
     switch (eventType) {
       case AGENT_STARTED:
-        stateManager.setPhase(sessionId, p.phase as string);
-        stateManager.setActiveAgent(sessionId, p.agent as string);
+        stateManager.setPhase(sessionId, p.phase as AgentPhase);
+        stateManager.setActiveAgent(sessionId, p.agent as AgentName);
         break;
 
       case AGENT_SWITCHED:
-        stateManager.setActiveAgent(sessionId, p.to as string);
+        stateManager.setActiveAgent(sessionId, p.to as AgentName);
         break;
 
       case GATE_QUESTION_QUEUED:
-        stateManager.addPendingQuestion(sessionId, p as Parameters<typeof stateManager.addPendingQuestion>[1]);
+        stateManager.addPendingQuestion(sessionId, p as unknown as UserQuestion);
         stateManager.setPhase(sessionId, 'waiting_user');
         await stateManager.flushState(sessionId);
         break;
 
       case GATE_APPROVAL_QUEUED:
-        stateManager.addPendingApproval(sessionId, p as Parameters<typeof stateManager.addPendingApproval>[1]);
+        stateManager.addPendingApproval(sessionId, p as unknown as ApprovalRequest);
         stateManager.setPhase(sessionId, 'waiting_user');
         await stateManager.flushState(sessionId);
         break;
@@ -66,7 +67,7 @@ export class StateProjection implements Projection {
         stateManager.updateTaskStatus(
           sessionId,
           p.taskId as string,
-          p.status as Parameters<typeof stateManager.updateTaskStatus>[2],
+          p.status as TaskStatus,
           { progress: p.progress as number | undefined },
         );
         break;
@@ -76,7 +77,7 @@ export class StateProjection implements Projection {
           sessionId,
           p.taskId as string,
           'completed',
-          { result: p.result },
+          { result: p.result as string | undefined },
         );
         break;
 

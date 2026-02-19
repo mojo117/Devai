@@ -20,7 +20,7 @@ import {
 } from '../events/catalog.js';
 
 /** Events that warrant an audit trail entry. */
-const AUDITED_EVENTS = new Set([
+const AUDITED_EVENTS = new Set<string>([
   WF_TURN_STARTED,
   WF_COMPLETED,
   WF_FAILED,
