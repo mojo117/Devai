@@ -21,6 +21,7 @@
     "concurrently": "^9.1.0"
   },
   "dependencies": {
-    "@fastify/multipart": "^9.4.0"
+    "@fastify/multipart": "^9.4.0",
+    "minimatch": "^10.2.1"
   }
 }

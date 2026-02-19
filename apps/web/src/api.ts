@@ -16,7 +16,6 @@ import type {
 } from './types';
 
 const API_BASE = '/api';
-const TOKEN_KEY = 'devai_auth_token';
 
 /**
  * Parse an NDJSON stream and return the final response.
@@ -102,16 +101,20 @@ async function readApiError(res: Response): Promise<string> {
   }
 }
 
+// Auth token is now managed via httpOnly cookie set by the server.
+// These functions are kept for backward compatibility but no longer store/read the JWT.
+let _authTokenMemory: string | null = null;
+
 export function getAuthToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+  return _authTokenMemory;
 }
 
 export function setAuthToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
+  _authTokenMemory = token;
 }
 
 export function clearAuthToken(): void {
-  localStorage.removeItem(TOKEN_KEY);
+  _authTokenMemory = null;
 }
 
 function withAuthHeaders(headers: Record<string, string> = {}): Record<string, string> {
@@ -120,8 +123,21 @@ function withAuthHeaders(headers: Record<string, string> = {}): Record<string, s
   return { ...headers, Authorization: `Bearer ${token}` };
 }
 
+function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+  return fetch(url, { ...init, credentials: 'include' });
+}
+
+export async function logout(): Promise<void> {
+  try {
+    await apiFetch(`${API_BASE}/auth/logout`, { method: 'POST' });
+  } catch {
+    // ignore
+  }
+  clearAuthToken();
+}
+
 export async function login(username: string, password: string): Promise<{ token: string }> {
-  const res = await fetch(`${API_BASE}/auth/login`, {
+  const res = await apiFetch(`${API_BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
@@ -136,10 +152,7 @@ export async function login(username: string, password: string): Promise<{ token
 }
 
 export async function verifyAuth(): Promise<boolean> {
-  const token = getAuthToken();
-  if (!token) return false;
-
-  const res = await fetch(`${API_BASE}/auth/verify`, {
+  const res = await apiFetch(`${API_BASE}/auth/verify`, {
     headers: withAuthHeaders(),
   });
 
@@ -147,7 +160,7 @@ export async function verifyAuth(): Promise<boolean> {
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {
-  const res = await fetch(`${API_BASE}/health`);
+  const res = await apiFetch(`${API_BASE}/health`);
   if (!res.ok) throw new Error('Failed to fetch health');
   return res.json();
 }
@@ -168,7 +181,7 @@ export async function sendMessage(
   onEvent?: (event: ChatStreamEvent) => void,
   abortSignal?: AbortSignal
 ): Promise<{ message: ChatMessage; pendingActions: Action[]; sessionId?: string; contextStats?: { tokensUsed: number; tokenBudget: number; note?: string } }> {
-  const res = await fetch(`${API_BASE}/chat`, {
+  const res = await apiFetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ messages, provider, projectRoot, skillIds, pinnedFiles, projectContextOverride, sessionId }),
@@ -192,7 +205,7 @@ export async function sendMessage(
 }
 
 export async function fetchSkills(): Promise<SkillsResponse> {
-  const res = await fetch(`${API_BASE}/skills`, {
+  const res = await apiFetch(`${API_BASE}/skills`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch skills');
@@ -200,7 +213,7 @@ export async function fetchSkills(): Promise<SkillsResponse> {
 }
 
 export async function reloadSkills(): Promise<SkillsResponse> {
-  const res = await fetch(`${API_BASE}/skills/reload`, {
+  const res = await apiFetch(`${API_BASE}/skills/reload`, {
     method: 'POST',
     headers: withAuthHeaders(),
   });
@@ -210,7 +223,7 @@ export async function reloadSkills(): Promise<SkillsResponse> {
 
 export async function fetchProject(projectPath: string): Promise<ProjectResponse> {
   const params = new URLSearchParams({ path: projectPath });
-  const res = await fetch(`${API_BASE}/project?${params.toString()}`, {
+  const res = await apiFetch(`${API_BASE}/project?${params.toString()}`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) {
@@ -222,7 +235,7 @@ export async function fetchProject(projectPath: string): Promise<ProjectResponse
 
 export async function refreshProject(projectPath: string): Promise<ProjectResponse> {
   const params = new URLSearchParams({ path: projectPath });
-  const res = await fetch(`${API_BASE}/project/refresh?${params.toString()}`, {
+  const res = await apiFetch(`${API_BASE}/project/refresh?${params.toString()}`, {
     method: 'POST',
     headers: withAuthHeaders(),
   });
@@ -238,7 +251,7 @@ export async function listProjectFiles(path: string, ignore?: string[]): Promise
   if (ignore && ignore.length > 0) {
     params.set('ignore', ignore.join(','));
   }
-  const res = await fetch(`${API_BASE}/project/files?${params.toString()}`, {
+  const res = await apiFetch(`${API_BASE}/project/files?${params.toString()}`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) {
@@ -250,7 +263,7 @@ export async function listProjectFiles(path: string, ignore?: string[]): Promise
 
 export async function readProjectFile(path: string): Promise<ProjectFileResponse> {
   const params = new URLSearchParams({ path });
-  const res = await fetch(`${API_BASE}/project/file?${params.toString()}`, {
+  const res = await apiFetch(`${API_BASE}/project/file?${params.toString()}`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) {
@@ -273,7 +286,7 @@ export async function searchProjectFiles(
   if (ignore && ignore.length > 0) {
     params.set('ignore', ignore.join(','));
   }
-  const res = await fetch(`${API_BASE}/project/search?${params.toString()}`, {
+  const res = await apiFetch(`${API_BASE}/project/search?${params.toString()}`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) {
@@ -295,7 +308,7 @@ export async function globProjectFiles(
   if (ignore && ignore.length > 0) {
     params.set('ignore', ignore.join(','));
   }
-  const res = await fetch(`${API_BASE}/project/glob?${params.toString()}`, {
+  const res = await apiFetch(`${API_BASE}/project/glob?${params.toString()}`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) {
@@ -306,7 +319,7 @@ export async function globProjectFiles(
 }
 
 export async function fetchSessions(): Promise<SessionsResponse> {
-  const res = await fetch(`${API_BASE}/sessions`, {
+  const res = await apiFetch(`${API_BASE}/sessions`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch sessions');
@@ -314,7 +327,7 @@ export async function fetchSessions(): Promise<SessionsResponse> {
 }
 
 export async function createSession(title?: string): Promise<{ session: { id: string } }> {
-  const res = await fetch(`${API_BASE}/sessions`, {
+  const res = await apiFetch(`${API_BASE}/sessions`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ title }),
@@ -324,7 +337,7 @@ export async function createSession(title?: string): Promise<{ session: { id: st
 }
 
 export async function fetchSessionMessages(sessionId: string): Promise<SessionMessagesResponse> {
-  const res = await fetch(`${API_BASE}/sessions/${sessionId}/messages`, {
+  const res = await apiFetch(`${API_BASE}/sessions/${sessionId}/messages`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch session messages');
@@ -332,7 +345,7 @@ export async function fetchSessionMessages(sessionId: string): Promise<SessionMe
 }
 
 export async function updateSessionTitle(sessionId: string, title: string): Promise<{ success: boolean }> {
-  const res = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+  const res = await apiFetch(`${API_BASE}/sessions/${sessionId}`, {
     method: 'PATCH',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ title }),
@@ -342,7 +355,7 @@ export async function updateSessionTitle(sessionId: string, title: string): Prom
 }
 
 export async function fetchSetting(key: string): Promise<SettingResponse> {
-  const res = await fetch(`${API_BASE}/settings/${encodeURIComponent(key)}`, {
+  const res = await apiFetch(`${API_BASE}/settings/${encodeURIComponent(key)}`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch setting');
@@ -350,7 +363,7 @@ export async function fetchSetting(key: string): Promise<SettingResponse> {
 }
 
 export async function saveSetting(key: string, value: unknown): Promise<SettingResponse> {
-  const res = await fetch(`${API_BASE}/settings`, {
+  const res = await apiFetch(`${API_BASE}/settings`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ key, value }),
@@ -360,7 +373,7 @@ export async function saveSetting(key: string, value: unknown): Promise<SettingR
 }
 
 export async function fetchPendingActions(): Promise<{ actions: Action[] }> {
-  const res = await fetch(`${API_BASE}/actions/pending`, {
+  const res = await apiFetch(`${API_BASE}/actions/pending`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch pending actions');
@@ -368,7 +381,7 @@ export async function fetchPendingActions(): Promise<{ actions: Action[] }> {
 }
 
 export async function batchApproveActions(actionIds: string[]): Promise<{ results: Array<{ actionId: string; success: boolean; error?: string; result?: unknown }> }> {
-  const res = await fetch(`${API_BASE}/actions/approve-batch`, {
+  const res = await apiFetch(`${API_BASE}/actions/approve-batch`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ actionIds }),
@@ -382,7 +395,7 @@ export async function batchApproveActions(actionIds: string[]): Promise<{ result
 }
 
 export async function batchRejectActions(actionIds: string[]): Promise<{ results: Array<{ actionId: string; success: boolean; error?: string }> }> {
-  const res = await fetch(`${API_BASE}/actions/reject-batch`, {
+  const res = await apiFetch(`${API_BASE}/actions/reject-batch`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ actionIds }),
@@ -396,7 +409,7 @@ export async function batchRejectActions(actionIds: string[]): Promise<{ results
 }
 
 export async function approveAction(actionId: string): Promise<{ action: Action; result?: unknown }> {
-  const res = await fetch(`${API_BASE}/actions/approve`, {
+  const res = await apiFetch(`${API_BASE}/actions/approve`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ actionId }),
@@ -410,7 +423,7 @@ export async function approveAction(actionId: string): Promise<{ action: Action;
 }
 
 export async function rejectAction(actionId: string): Promise<{ action: Action }> {
-  const res = await fetch(`${API_BASE}/actions/reject`, {
+  const res = await apiFetch(`${API_BASE}/actions/reject`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ actionId }),
@@ -424,7 +437,7 @@ export async function rejectAction(actionId: string): Promise<{ action: Action }
 }
 
 export async function fetchLooperPrompts(): Promise<LooperPromptsResponse> {
-  const res = await fetch(`${API_BASE}/looper/prompts`, {
+  const res = await apiFetch(`${API_BASE}/looper/prompts`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch looper prompts');
@@ -554,11 +567,13 @@ function addSessionListener(sessionId: string, fn: (event: ChatStreamEvent) => v
 }
 
 function getChatWsUrl(): string {
-  const token = getAuthToken();
-  if (!token) throw new Error('Not authenticated');
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = window.location.host;
-  return `${protocol}//${host}/api/ws/chat?token=${encodeURIComponent(token)}`;
+  // Token is sent via httpOnly cookie automatically.
+  // Keep token param as fallback for in-memory token.
+  const token = getAuthToken();
+  const params = token ? `?token=${encodeURIComponent(token)}` : '';
+  return `${protocol}//${host}/api/ws/chat${params}`;
 }
 
 function cleanupChatWs(): void {
@@ -821,7 +836,7 @@ export async function sendAgentApproval(
     // fall back
   }
 
-  const res = await fetch(`${API_BASE}/chat/agents/approval`, {
+  const res = await apiFetch(`${API_BASE}/chat/agents/approval`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ sessionId, approvalId, approved }),
@@ -858,7 +873,7 @@ export async function sendAgentQuestionResponse(
     // fall back
   }
 
-  const res = await fetch(`${API_BASE}/chat/agents/question`, {
+  const res = await apiFetch(`${API_BASE}/chat/agents/question`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ sessionId, questionId, answer }),
@@ -897,7 +912,7 @@ export async function sendMultiAgentMessage(
   }
 
   const sessionModePayload = buildSessionModePayload(options);
-  const res = await fetch(`${API_BASE}/chat/agents`, {
+  const res = await apiFetch(`${API_BASE}/chat/agents`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
@@ -932,7 +947,7 @@ export async function fetchAgentState(sessionId: string): Promise<{
   pendingApprovals: unknown[];
   pendingQuestions: unknown[];
 }> {
-  const res = await fetch(`${API_BASE}/chat/agents/${sessionId}/state`, {
+  const res = await apiFetch(`${API_BASE}/chat/agents/${sessionId}/state`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch agent state');
@@ -947,7 +962,7 @@ export interface GlobalContext {
 }
 
 export async function fetchGlobalContext(): Promise<GlobalContext> {
-  const res = await fetch(`${API_BASE}/settings/global-context`, {
+  const res = await apiFetch(`${API_BASE}/settings/global-context`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch global context');
@@ -955,7 +970,7 @@ export async function fetchGlobalContext(): Promise<GlobalContext> {
 }
 
 export async function saveGlobalContext(context: GlobalContext): Promise<GlobalContext> {
-  const res = await fetch(`${API_BASE}/settings/global-context`, {
+  const res = await apiFetch(`${API_BASE}/settings/global-context`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(context),
@@ -965,7 +980,7 @@ export async function saveGlobalContext(context: GlobalContext): Promise<GlobalC
 }
 
 export async function getTrustMode(): Promise<{ mode: 'default' | 'trusted' }> {
-  const response = await fetch(`${API_BASE}/settings/trust-mode`, {
+  const response = await apiFetch(`${API_BASE}/settings/trust-mode`, {
     headers: withAuthHeaders(),
   });
   if (!response.ok) {
@@ -975,7 +990,7 @@ export async function getTrustMode(): Promise<{ mode: 'default' | 'trusted' }> {
 }
 
 export async function setTrustMode(mode: 'default' | 'trusted'): Promise<void> {
-  const response = await fetch(`${API_BASE}/settings/trust-mode`, {
+  const response = await apiFetch(`${API_BASE}/settings/trust-mode`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ mode }),
@@ -995,7 +1010,7 @@ export async function rememberWorkspaceNote(
   daily: { date: string; filePath: string };
   longTerm: { filePath: string } | null;
 }> {
-  const res = await fetch(`${API_BASE}/memory/remember`, {
+  const res = await apiFetch(`${API_BASE}/memory/remember`, {
     method: 'POST',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
@@ -1022,7 +1037,7 @@ export async function searchWorkspaceMemory(
     limit: String(options?.limit ?? 10),
     includeLongTerm: String(options?.includeLongTerm ?? true),
   });
-  const res = await fetch(`${API_BASE}/memory/search?${params.toString()}`, {
+  const res = await apiFetch(`${API_BASE}/memory/search?${params.toString()}`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error(await readApiError(res));
@@ -1034,7 +1049,7 @@ export async function fetchDailyWorkspaceMemory(date: string): Promise<{
   filePath: string;
   content: string;
 }> {
-  const res = await fetch(`${API_BASE}/memory/daily/${encodeURIComponent(date)}`, {
+  const res = await apiFetch(`${API_BASE}/memory/daily/${encodeURIComponent(date)}`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error(await readApiError(res));
@@ -1050,7 +1065,7 @@ export interface UserfileInfo {
 }
 
 export async function listUserfiles(): Promise<{ files: UserfileInfo[] }> {
-  const res = await fetch(`${API_BASE}/userfiles`, {
+  const res = await apiFetch(`${API_BASE}/userfiles`, {
     headers: withAuthHeaders(),
   });
   if (!res.ok) throw new Error(await readApiError(res));
@@ -1060,7 +1075,7 @@ export async function listUserfiles(): Promise<{ files: UserfileInfo[] }> {
 export async function uploadUserfile(file: File): Promise<{ success: boolean; file: UserfileInfo }> {
   const formData = new FormData();
   formData.append('file', file);
-  const res = await fetch(`${API_BASE}/userfiles`, {
+  const res = await apiFetch(`${API_BASE}/userfiles`, {
     method: 'POST',
     headers: withAuthHeaders(),
     body: formData,
@@ -1070,7 +1085,7 @@ export async function uploadUserfile(file: File): Promise<{ success: boolean; fi
 }
 
 export async function deleteUserfile(filename: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/userfiles/${encodeURIComponent(filename)}`, {
+  const res = await apiFetch(`${API_BASE}/userfiles/${encodeURIComponent(filename)}`, {
     method: 'DELETE',
     headers: withAuthHeaders(),
   });
@@ -1080,7 +1095,7 @@ export async function deleteUserfile(filename: string): Promise<void> {
 export async function transcribeAudio(audioBlob: Blob): Promise<{ text: string }> {
   const formData = new FormData();
   formData.append('file', audioBlob, 'recording.webm');
-  const res = await fetch(`${API_BASE}/transcribe`, {
+  const res = await apiFetch(`${API_BASE}/transcribe`, {
     method: 'POST',
     headers: withAuthHeaders(),
     body: formData,

@@ -1,9 +1,12 @@
 import type { Dispatch, SetStateAction } from 'react';
+import DOMPurify from 'dompurify';
 import type { ToolEvent, ToolEventUpdate } from './types';
 
 export function renderMessageContent(content: string) {
+  // Sanitize content: strip all HTML tags before markdown-like rendering
+  const clean = DOMPurify.sanitize(content, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
   // Simple markdown-like rendering for bold, code blocks, and inline code
-  const parts = content.split(/(```[\s\S]*?```|\*\*.*?\*\*|`[^`]+`)/g);
+  const parts = clean.split(/(```[\s\S]*?```|\*\*.*?\*\*|`[^`]+`)/g);
 
   return (
     <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">

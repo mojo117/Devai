@@ -1,6 +1,6 @@
 import { FastifyPluginAsync } from 'fastify';
 import { resolve, extname, basename } from 'path';
-import { writeFile, readdir, stat, unlink } from 'fs/promises';
+import { writeFile, readdir, stat, unlink, realpath } from 'fs/promises';
 
 const USERFILES_DIR = '/opt/Userfiles';
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -99,8 +99,9 @@ export const userfilesRoutes: FastifyPluginAsync = async (app) => {
 
     const finalPath = resolve(USERFILES_DIR, finalName);
 
-    // Double-check path stays within USERFILES_DIR
-    if (!finalPath.startsWith(USERFILES_DIR)) {
+    // Double-check path stays within USERFILES_DIR using realpath of parent
+    const resolvedDir = await realpath(USERFILES_DIR);
+    if (!finalPath.startsWith(resolvedDir + '/')) {
       return reply.status(400).send({ error: 'Invalid filename' });
     }
 
@@ -128,7 +129,8 @@ export const userfilesRoutes: FastifyPluginAsync = async (app) => {
 
     const filePath = resolve(USERFILES_DIR, safeName);
 
-    if (!filePath.startsWith(USERFILES_DIR)) {
+    const resolvedDir = await realpath(USERFILES_DIR);
+    if (!filePath.startsWith(resolvedDir + '/')) {
       return reply.status(400).send({ error: 'Invalid filename' });
     }
 

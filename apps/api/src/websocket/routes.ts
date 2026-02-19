@@ -14,8 +14,18 @@ import { commandDispatcher, mapWsMessageToCommand } from '../workflow/commands/d
 export const websocketRoutes: FastifyPluginAsync = async (app) => {
   // WebSocket endpoint for real-time action updates
   app.get('/ws/actions', { websocket: true }, (socket: WebSocket, request) => {
-    // Parse session ID from query params
     const url = new URL(request.url || '', `http://${request.headers.host}`);
+
+    // Auth: require valid JWT token (query param or httpOnly cookie)
+    const token = url.searchParams.get('token') || request.cookies?.devai_token || '';
+    if (!verifyToken(token)) {
+      try {
+        socket.send(JSON.stringify({ type: 'error', error: 'Invalid or expired token' }));
+      } catch { /* ignore */ }
+      socket.close();
+      return;
+    }
+
     const sessionId = url.searchParams.get('sessionId') || undefined;
 
     // Register client
@@ -72,7 +82,7 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
   // Auth: requires ?token=<JWT> because browsers can't set Authorization headers for WS upgrades.
   app.get('/ws/chat', { websocket: true }, (socket: WebSocket, request) => {
     const url = new URL(request.url || '', `http://${request.headers.host}`);
-    const token = url.searchParams.get('token') || '';
+    const token = url.searchParams.get('token') || request.cookies?.devai_token || '';
     if (!verifyToken(token)) {
       try {
         socket.send(JSON.stringify({ type: 'error', error: 'Invalid or expired token' }));

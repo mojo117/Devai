@@ -1,5 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import cookie from '@fastify/cookie';
+import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import fastifyWebsocket from '@fastify/websocket';
 import multipart from '@fastify/multipart';
@@ -44,7 +46,13 @@ const corsOrigins = [
 // Register CORS for frontend
 await app.register(cors, {
   origin: corsOrigins,
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
+});
+
+// Security headers (CSP handled by Caddy + frontend meta tag)
+await app.register(helmet, {
+  contentSecurityPolicy: false,
 });
 
 // Global rate limiting (per IP)
@@ -59,6 +67,20 @@ await app.register(fastifyWebsocket);
 
 // Register multipart support for file uploads (10MB limit)
 await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
+
+// Register cookie parsing (needed for httpOnly auth cookies)
+await app.register(cookie);
+
+// Global error handler — sanitize unexpected errors
+app.setErrorHandler((error: { statusCode?: number; message: string }, _request, reply) => {
+  const statusCode = error.statusCode ?? 500;
+  if (statusCode >= 500) {
+    app.log.error(error);
+    reply.status(statusCode).send({ error: 'Internal server error' });
+  } else {
+    reply.status(statusCode).send({ error: error.message });
+  }
+});
 
 // Register auth routes
 await registerAuthRoutes(app);
