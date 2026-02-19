@@ -19,8 +19,12 @@ import { initDb } from './db/index.js';
 import { websocketRoutes } from './websocket/routes.js';
 import { mcpManager } from './mcp/index.js';
 import { registerMcpTools } from './tools/registry.js';
+import { registerProjections } from './workflow/projections/index.js';
 
 await initDb();
+
+// Register workflow event projections (state → stream → markdown → audit)
+registerProjections();
 
 const app = Fastify({
   logger: {

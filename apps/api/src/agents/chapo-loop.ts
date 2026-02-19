@@ -93,9 +93,7 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
     // 4. Add user message
     this.conversation.addMessage({ role: 'user', content: userMessage });
 
-    // 5. Emit start event
-    stateManager.setPhase(this.sessionId, 'execution');
-    stateManager.setActiveAgent(this.sessionId, 'chapo');
+    // 5. Emit start event — StateProjection handles setPhase + setActiveAgent
     this.sendEvent({ type: 'agent_start', agent: 'chapo', phase: 'execution' });
 
     // 6. Enter runLoop
@@ -363,9 +361,8 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
       fromAgent: 'chapo',
       timestamp: new Date().toISOString(),
     };
-    stateManager.addPendingQuestion(this.sessionId, questionPayload);
-    stateManager.setPhase(this.sessionId, 'waiting_user');
-    await stateManager.flushState(this.sessionId);
+    // State mutation + WS emission handled by projections via the event bus bridge:
+    //   sendEvent → bridge → gate.question.queued → StateProjection + StreamProjection
     this.sendEvent({ type: 'user_question', question: questionPayload });
 
     return {
@@ -389,9 +386,8 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
       fromAgent: 'chapo',
       timestamp: new Date().toISOString(),
     };
-    stateManager.addPendingApproval(this.sessionId, approval);
-    stateManager.setPhase(this.sessionId, 'waiting_user');
-    await stateManager.flushState(this.sessionId);
+    // State mutation + WS emission handled by projections via the event bus bridge:
+    //   sendEvent → bridge → gate.approval.queued → StateProjection + StreamProjection
     this.sendEvent({
       type: 'approval_request',
       request: approval,
@@ -520,7 +516,7 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
     const tools = getToolsForLLM().filter((t) => devoToolNames.includes(t.name));
     const systemContextBlock = getCombinedSystemContextBlock(this.sessionId);
 
-    stateManager.setActiveAgent(this.sessionId, 'devo');
+    // StateProjection handles setActiveAgent via agent.switched event
     this.sendEvent({
       type: 'agent_switch',
       from: 'chapo',
@@ -584,7 +580,7 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
             isError: false,
           });
           // Return the escalation info so CHAPO can handle it in the main loop
-          stateManager.setActiveAgent(this.sessionId, 'chapo');
+          // StateProjection handles setActiveAgent when CHAPO resumes (via agent.switched)
           return `DEVO eskaliert: ${desc}\n\nBisheriges Ergebnis:\n${finalContent}`;
         }
 
@@ -671,8 +667,7 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
       });
     }
 
-    // Switch back to CHAPO
-    stateManager.setActiveAgent(this.sessionId, 'chapo');
+    // Switch back to CHAPO — StateProjection handles setActiveAgent
     this.sendEvent({
       type: 'agent_switch',
       from: 'devo',

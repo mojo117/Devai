@@ -198,7 +198,7 @@ export class SessionLogger {
 
       case 'user_question': {
         const q = event.question as Record<string, unknown> | undefined;
-        this.append(`### [${ts()}] User Question\n\n${q?.text || JSON.stringify(q)}\n\n`);
+        this.append(`### [${ts()}] User Question\n\n${q?.question || JSON.stringify(q)}\n\n`);
         break;
       }
 
