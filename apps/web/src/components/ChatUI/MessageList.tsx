@@ -1,4 +1,4 @@
-import type { RefObject } from 'react';
+import { Fragment, type RefObject } from 'react';
 import type { ChatMessage, SessionSummary } from '../../types';
 import type { ToolEvent } from './types';
 import { renderMessageContent } from './utils';
@@ -6,6 +6,7 @@ import { renderMessageContent } from './utils';
 interface MessageListProps {
   messages: ChatMessage[];
   toolEvents: ToolEvent[];
+  messageToolEvents: Record<string, ToolEvent[]>;
   expandedEvents: Set<string>;
   toggleEventExpanded: (eventId: string) => void;
   copiedMessageId: string | null;
@@ -24,6 +25,7 @@ interface MessageListProps {
 export function MessageList({
   messages,
   toolEvents,
+  messageToolEvents,
   expandedEvents,
   toggleEventExpanded,
   copiedMessageId,
@@ -38,12 +40,19 @@ export function MessageList({
   onRestartChat,
   onNewChat,
 }: MessageListProps) {
-  // Chronological interleaving: user msg → tool events → assistant response
-  const hasToolEvents = toolEvents.length > 0;
-  const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
-  const shouldInterleave = hasToolEvents && !isLoading && lastMsg?.role === 'assistant';
-  const mainMessages = shouldInterleave ? messages.slice(0, -1) : messages;
-  const trailingMessage = shouldInterleave ? lastMsg : null;
+  const renderToolEventsBlock = (events: ToolEvent[], live: boolean) => (
+    <div className="space-y-1.5">
+      {events.map((event) => (
+        <InlineSystemEvent
+          key={event.id}
+          event={event}
+          isExpanded={expandedEvents.has(event.id)}
+          onToggle={() => toggleEventExpanded(event.id)}
+          isLoading={live}
+        />
+      ))}
+    </div>
+  );
 
   const renderMessage = (message: ChatMessage) => {
     if (message.role === 'system') {
@@ -156,26 +165,19 @@ export function MessageList({
         </div>
       )}
 
-      {/* Main messages (all, or all-except-last-assistant when interleaving) */}
-      {mainMessages.map(renderMessage)}
+      {/* Messages with associated tool events rendered inline */}
+      {messages.map((message) => {
+        const frozen = message.role === 'assistant' ? messageToolEvents[message.id] : undefined;
+        return (
+          <Fragment key={message.id}>
+            {frozen && frozen.length > 0 && renderToolEventsBlock(frozen, false)}
+            {renderMessage(message)}
+          </Fragment>
+        );
+      })}
 
-      {/* Inline System Events — chronologically between user msg and response */}
-      {hasToolEvents && (
-        <div className="space-y-1.5">
-          {toolEvents.slice(-10).map((event) => (
-            <InlineSystemEvent
-              key={event.id}
-              event={event}
-              isExpanded={expandedEvents.has(event.id)}
-              onToggle={() => toggleEventExpanded(event.id)}
-              isLoading={isLoading}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Trailing assistant message (after tool events) */}
-      {trailingMessage && renderMessage(trailingMessage)}
+      {/* Live tool events for current in-progress exchange */}
+      {toolEvents.length > 0 && renderToolEventsBlock(toolEvents, isLoading)}
 
       {isLoading && (
         <div className="flex justify-start">

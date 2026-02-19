@@ -37,6 +37,7 @@ export function ChatUI({
   };
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
+  const [messageToolEvents, setMessageToolEvents] = useState<Record<string, ToolEvent[]>>({});
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set());
   const [retryState, setRetryState] = useState<null | {
     input: string;
@@ -84,34 +85,50 @@ export function ChatUI({
     onPinFile,
   });
 
-  // --- Tool event persistence ---
+  // --- Freeze tool events to a completed message ---
 
-  useEffect(() => {
-    if (!session.sessionId || toolEvents.length === 0) return;
-    try {
-      const key = `devai_feed_${session.sessionId}`;
-      const toStore = toolEvents.slice(-100);
-      localStorage.setItem(key, JSON.stringify(toStore));
-    } catch {
-      // Ignore storage errors
-    }
-  }, [session.sessionId, toolEvents]);
+  const freezeToolEvents = useCallback((messageId: string) => {
+    setToolEvents(currentEvents => {
+      if (currentEvents.length > 0) {
+        setMessageToolEvents(prev => ({
+          ...prev,
+          [messageId]: [...currentEvents],
+        }));
+      }
+      return [];
+    });
+  }, []);
+
+  // --- Tool event persistence (per-message map) ---
 
   useEffect(() => {
     if (!session.sessionId) return;
     try {
-      const key = `devai_feed_${session.sessionId}`;
+      const key = `devai_events_${session.sessionId}`;
+      localStorage.setItem(key, JSON.stringify(messageToolEvents));
+    } catch {
+      // Ignore storage errors
+    }
+  }, [session.sessionId, messageToolEvents]);
+
+  useEffect(() => {
+    if (!session.sessionId) return;
+    setToolEvents([]);
+    try {
+      const key = `devai_events_${session.sessionId}`;
       const stored = localStorage.getItem(key);
       if (stored) {
-        const parsed = JSON.parse(stored) as ToolEvent[];
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setToolEvents(parsed);
+        const parsed = JSON.parse(stored) as Record<string, ToolEvent[]>;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          setMessageToolEvents(parsed);
+        } else {
+          setMessageToolEvents({});
         }
       } else {
-        setToolEvents([]);
+        setMessageToolEvents({});
       }
     } catch {
-      // Ignore parse errors
+      setMessageToolEvents({});
     }
   }, [session.sessionId]);
 
@@ -119,7 +136,7 @@ export function ChatUI({
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, toolEvents]);
 
   // --- Event expand toggle ---
 
@@ -269,7 +286,10 @@ export function ChatUI({
     };
 
     try {
-      await runRequest();
+      const result = await runRequest();
+      if (result) {
+        freezeToolEvents(result.message.id);
+      }
       setRetryState(null);
     } catch (error) {
       const err = error instanceof Error ? error.message : 'Unknown error';
@@ -282,6 +302,7 @@ export function ChatUI({
         timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, errorMessage]);
+      freezeToolEvents(errorMessage.id);
 
       if (shouldRetry) {
         setRetryState({ input: content, userMessage, runRequest });
@@ -343,16 +364,21 @@ export function ChatUI({
     setIsLoading(true);
     setToolEvents([]);
     try {
-      await retryState.runRequest();
+      const result = await retryState.runRequest();
+      if (result) {
+        freezeToolEvents(result.message.id);
+      }
       setRetryState(null);
     } catch (error) {
       const err = error instanceof Error ? error.message : 'Unknown error';
-      setMessages((prev) => [...prev, {
+      const errorMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
         content: `Error: ${err}`,
         timestamp: new Date().toISOString(),
-      }]);
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+      freezeToolEvents(errorMsg.id);
     } finally {
       setIsLoading(false);
       setActiveAgent(null);
@@ -399,6 +425,7 @@ export function ChatUI({
       <MessageList
         messages={messages}
         toolEvents={toolEvents}
+        messageToolEvents={messageToolEvents}
         expandedEvents={expandedEvents}
         toggleEventExpanded={toggleEventExpanded}
         copiedMessageId={copiedMessageId}
