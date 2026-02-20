@@ -127,6 +127,7 @@ const start = async () => {
 
     // Log configured providers
     const providers = [];
+    if (config.zaiApiKey) providers.push('ZAI');
     if (config.anthropicApiKey) providers.push('Anthropic');
     if (config.openaiApiKey) providers.push('OpenAI');
     if (config.geminiApiKey) providers.push('Gemini');
