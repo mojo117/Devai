@@ -15,6 +15,7 @@ const SaveMessageSchema = z.object({
   role: z.enum(['user', 'assistant', 'system']),
   content: z.string(),
   timestamp: z.string(),
+  toolEvents: z.array(z.unknown()).optional(),
 });
 
 export const sessionsRoutes: FastifyPluginAsync = async (app) => {
@@ -58,7 +59,8 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
     }
 
     try {
-      await saveMessage(id, parseResult.data);
+      const { toolEvents, ...message } = parseResult.data;
+      await saveMessage(id, message, toolEvents);
       return { success: true };
     } catch (error) {
       return reply.status(400).send({

@@ -18,6 +18,7 @@ export interface SessionSummary {
 
 export interface StoredMessage extends ChatMessage {
   sessionId: string;
+  toolEvents?: unknown[];
 }
 
 export function getDefaultUserId(): string {
@@ -97,7 +98,7 @@ export async function updateSessionTitleIfEmpty(sessionId: string, title: string
 export async function getMessages(sessionId: string): Promise<StoredMessage[]> {
   const { data, error } = await getSupabase()
     .from('messages')
-    .select('id, session_id, role, content, timestamp')
+    .select('id, session_id, role, content, timestamp, tool_events')
     .eq('session_id', sessionId)
     .order('timestamp', { ascending: true });
 
@@ -118,6 +119,7 @@ export async function getMessages(sessionId: string): Promise<StoredMessage[]> {
     role: row.role as ChatMessage['role'],
     content: row.content,
     timestamp: row.timestamp,
+    toolEvents: row.tool_events || undefined,
   })).sort((a, b) => {
     const ta = Date.parse(a.timestamp);
     const tb = Date.parse(b.timestamp);
@@ -129,7 +131,11 @@ export async function getMessages(sessionId: string): Promise<StoredMessage[]> {
   });
 }
 
-export async function saveMessage(sessionId: string, message: ChatMessage): Promise<void> {
+export async function saveMessage(
+  sessionId: string,
+  message: ChatMessage,
+  toolEvents?: unknown[]
+): Promise<void> {
   const { error } = await getSupabase()
     .from('messages')
     .insert({
@@ -138,6 +144,7 @@ export async function saveMessage(sessionId: string, message: ChatMessage): Prom
       role: message.role,
       content: message.content,
       timestamp: message.timestamp,
+      ...(toolEvents ? { tool_events: toolEvents } : {}),
     });
 
   if (error) {
