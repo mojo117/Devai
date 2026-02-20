@@ -6,9 +6,9 @@
 
 import type { ActionPreview } from '../actions/types.js';
 
-export type AgentName = 'chapo' | 'devo' | 'scout';
+export type AgentName = 'chapo' | 'devo' | 'scout' | 'caio';
 
-export type AgentRole = 'Task Coordinator' | 'Developer & DevOps Engineer' | 'Exploration Specialist';
+export type AgentRole = 'Task Coordinator' | 'Developer & DevOps Engineer' | 'Exploration Specialist' | 'Communications & Administration Officer';
 
 export type TaskType = 'code_change' | 'devops' | 'exploration' | 'mixed' | 'unclear';
 
@@ -74,6 +74,11 @@ export interface AgentCapabilities {
   canAskUser?: boolean;
   canRequestApproval?: boolean;
   canEscalate?: boolean;
+  canManageScheduler?: boolean;
+  canSendNotifications?: boolean;
+  canSendEmail?: boolean;
+  canManageTaskForge?: boolean;
+  canDelegateToCaio?: boolean;
 }
 
 // Task Qualification
