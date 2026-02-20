@@ -147,7 +147,7 @@ function App() {
                 issueSessionCommand({ type: 'select', sessionId: v });
               }}
               disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState || chatSessionState.sessions.length === 0}
-              className="bg-devai-card border border-devai-border rounded px-2 py-1 text-xs text-devai-text max-w-[220px]"
+              className="bg-devai-card border border-devai-border rounded px-2 py-1 text-xs text-devai-text max-w-[120px] md:max-w-[220px]"
               title={chatSessionState?.sessionId || ''}
             >
               {!chatSessionState || chatSessionState.sessionsLoading ? (
@@ -165,7 +165,7 @@ function App() {
             <button
               onClick={() => issueSessionCommand({ type: 'restart' })}
               disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState?.hasMessages}
-              className="hidden md:inline text-[11px] text-devai-accent hover:text-devai-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-[11px] text-devai-accent hover:text-devai-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
               title="Save current conversation to history and start fresh"
             >
               Restart
@@ -173,7 +173,7 @@ function App() {
             <button
               onClick={() => issueSessionCommand({ type: 'new' })}
               disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState}
-              className="hidden md:inline text-[11px] text-devai-text-secondary hover:text-devai-text disabled:opacity-50"
+              className="text-[11px] text-devai-text-secondary hover:text-devai-text disabled:opacity-50"
             >
               New
             </button>
