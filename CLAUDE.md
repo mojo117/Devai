@@ -207,6 +207,26 @@ DevAI uses a three-agent system orchestrated by the CHAPO Decision Loop:
 - Router: `apps/api/src/agents/router.ts`
 - Types: `apps/api/src/agents/types.ts`
 
+## Memory System
+
+### Architecture
+- Three-layer memory: Working Memory (180k sliding window) -> Session Summary (compaction at 160k) -> Long-Term Memory (Supabase pgvector)
+- All memory code lives in `apps/api/src/memory/`
+- Uses OpenAI text-embedding-3-small at 512 dimensions for embeddings
+- Supabase project "Infrit" (zzmvofskibpffcxbukuk) hosts the devai_memories table
+
+### Key Integration Points
+- `agents/chapo-loop.ts` -- `checkAndCompact()` fires at 160k tokens
+- `agents/systemContext.ts` -- `warmMemoryBlockForSession()` retrieves memories before CHAPO loop
+- `websocket/chatGateway.ts` -- triggers extraction on session disconnect
+- `server.ts` -- daily decay job (Ebbinghaus: strength *= 0.95^days)
+
+### Debugging
+- If memory retrieval returns nothing: check Supabase `devai_memories` table has rows with `is_valid = true` and `strength > 0.05`
+- If compaction doesn't fire: check `conversation.getTokenUsage()` -- threshold is 160k tokens
+- If embeddings fail: check `OPENAI_API_KEY` in `.env` -- embeddings use OpenAI even when LLM uses ZAI/Anthropic
+- Memory extraction uses ZAI/glm-4.7-flash by default for cost efficiency
+
 ## Quick Commands
 
 ### Health & Status

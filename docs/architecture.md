@@ -81,7 +81,7 @@ apps/
 |       |   +-- caio.ts           # CAIO agent definition (comms & admin)
 |       |   +-- error-handler.ts  # AgentErrorHandler (resilient error wrapping)
 |       |   +-- self-validation.ts# SelfValidator (LLM reviews its own answers)
-|       |   +-- conversation-manager.ts # 120k token sliding window
+|       |   +-- conversation-manager.ts # 180k token sliding window + compaction
 |       |   +-- stateManager.ts   # Session state (phases, approvals, questions)
 |       |   +-- systemContext.ts  # System context assembly
 |       |   +-- events.ts         # Typed event factory functions
@@ -132,7 +132,7 @@ apps/
 |       |   +-- modelSelector.ts  # Smart model selection by task complexity
 |       |   +-- types.ts          # LLM type definitions
 |       |   +-- providers/        # Anthropic, OpenAI, Gemini
-|       +-- memory/               # Workspace memory
+|       +-- memory/               # Session Intelligence & Long-Term Memory (pgvector)
 |       +-- config/               # Configuration (trust.ts etc.)
 |       +-- actions/              # Action approval system + approval bridge
 |       +-- db/                   # Database persistence
@@ -195,7 +195,7 @@ Iteration limits are set by task complexity:
 | **ChapoLoop** | `agents/chapo-loop.ts` | Core decision loop -- calls LLM, dispatches actions |
 | **AgentErrorHandler** | `agents/error-handler.ts` | Wraps every `await` with `safe()`, classifies errors, manages retries (max 3) |
 | **SelfValidator** | `agents/self-validation.ts` | LLM reviews its own draft answer before delivery (advisory only) |
-| **ConversationManager** | `agents/conversation-manager.ts` | 120k token sliding window, auto-trims old messages |
+| **ConversationManager** | `agents/conversation-manager.ts` | 180k token sliding window, auto-trims old messages, compaction at 160k |
 
 ### Error Handling: Errors Feed Back
 
@@ -341,9 +341,74 @@ interface AgentDefinition {
 
 ---
 
-## Memory Architecture
+## Memory Architecture — Session Intelligence & Memory System
 
-Memory is managed by CHAPO within the decision loop (not delegated to sub-agents).
+DevAI uses a three-layer memory architecture that provides persistent, intelligent recall across sessions.
+
+### Three-Layer Architecture
+
+```
+Layer 1: Working Memory          Layer 2: Session Summary         Layer 3: Long-Term Memory
++------------------------+       +------------------------+       +------------------------+
+| Conversation context   |       | Context compaction at  |       | Supabase pgvector      |
+| 180k token sliding     | ----> | 160k tokens via LLM    | ----> | devai_memories table    |
+| window                 |       | compressed summary +   |       | HNSW index, cosine     |
+|                        |       | memory candidates      |       | similarity search      |
++------------------------+       +------------------------+       +------------------------+
+```
+
+- **Layer 1 — Working Memory**: Conversation context with 180k token sliding window (up from 120k). Managed by `ConversationManager`.
+- **Layer 2 — Session Summary**: Context compaction fires at 160k tokens via LLM call, producing a compressed summary + memory candidates for long-term storage.
+- **Layer 3 — Long-Term Memory**: Supabase pgvector table (`devai_memories`) with hierarchical namespaces, HNSW index, and cosine similarity search.
+
+### Key Components
+
+All memory code lives in `apps/api/src/memory/`:
+
+| File | Purpose |
+|------|---------|
+| `types.ts` | Shared types: `MemoryType` (semantic/episodic/procedural), `MemoryPriority`, `MemorySource`, `MemoryCandidate`, `StoredMemory` |
+| `embeddings.ts` | OpenAI `text-embedding-3-small` wrapper (512 dimensions) |
+| `memoryStore.ts` | CRUD operations: search, insert, reinforce, supersede, invalidate, decay |
+| `compaction.ts` | Context compaction: summarizes old messages + extracts memory candidates |
+| `extraction.ts` | Two-phase pipeline: LLM extraction -> vector deduplication (ADD/UPDATE/DELETE/NOOP) |
+| `service.ts` | Public API: `retrieveRelevantMemories()`, `triggerSessionEndExtraction()` |
+| `index.ts` | Barrel exports |
+
+### Integration Points
+
+| Location | Integration |
+|----------|-------------|
+| `agents/chapo-loop.ts` | Compaction check before each LLM call (`checkAndCompact()` at 160k token threshold) |
+| `agents/systemContext.ts` | Memory retrieval injected into system prompt (`warmMemoryBlockForSession()`) |
+| `websocket/chatGateway.ts` | Session-end extraction trigger on WebSocket disconnect |
+| `server.ts` | Daily decay job (Ebbinghaus formula: `strength *= 0.95^days`) |
+| `config.ts` | Token limit updated to 180k |
+
+### Namespace Hierarchy
+
+Memories are organized into hierarchical namespaces for scoped retrieval:
+
+```
+devai/global/patterns       -> Universal patterns
+devai/global/tools          -> Tool usage patterns
+devai/project/<name>/arch   -> Project architecture facts
+devai/project/<name>/fixes  -> Project-specific fixes
+devai/user/preferences      -> User preferences
+```
+
+### Memory Lifecycle
+
+1. **Extraction triggers**: Mid-conversation compaction (160k tokens) + post-session extraction (WebSocket disconnect)
+2. **Priority levels**: `highest` (user-stated, never decay) -> `high` (error->fix) -> `medium` (patterns) -> `low` (facts)
+3. **Retrieval**: Vector similarity search with namespace scoping, 2k token budget, access reinforcement
+4. **Decay**: Daily Ebbinghaus decay (`0.95^days_since_access`), pruning at `strength < 0.05`
+
+### Database
+
+- **Supabase project**: "Infrit" (`zzmvofskibpffcxbukuk.supabase.co`)
+- **Table**: `devai_memories` with pgvector HNSW index
+- **RPC**: `match_memories()` for scoped similarity search
 
 ### Loading (System Prompt)
 
@@ -352,9 +417,8 @@ When the loop starts, `warmSystemContextForSession()` loads:
 1. **CHAPO System Prompt** -- Chapo's identity and capabilities
 2. **devai.md Context** -- scanned from project root
 3. **Workspace Context** -- workspace-level configuration
-4. **Today's Daily Memory** -- via workspace memory (max 3000 chars)
-5. **Long-Term Memory** -- from `MEMORY.md` in workspace root (max 3000 chars)
-6. **MEMORY_BEHAVIOR_BLOCK** -- rules for memory tool usage
+4. **Long-Term Memory** -- retrieved via `warmMemoryBlockForSession()` (vector similarity, 2k token budget)
+5. **MEMORY_BEHAVIOR_BLOCK** -- rules for memory tool usage
 
 ### Execution
 
