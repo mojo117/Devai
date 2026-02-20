@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle } from '../../../api';
 import type { ChatMessage, SessionSummary } from '../../../types';
-import type { ChatSessionState, ChatSessionCommandEnvelope } from '../types';
+import type { ChatSessionState, ChatSessionCommandEnvelope, ToolEvent } from '../types';
 
 interface UseChatSessionOptions {
   sessionCommand?: ChatSessionCommandEnvelope | null;
@@ -10,6 +10,7 @@ interface UseChatSessionOptions {
   messages: ChatMessage[];
   setMessages: Dispatch<SetStateAction<ChatMessage[]>>;
   setToolEvents: Dispatch<SetStateAction<unknown[]>>;
+  onEventsLoaded?: (events: Record<string, ToolEvent[]>) => void;
 }
 
 export function useChatSession({
@@ -18,6 +19,7 @@ export function useChatSession({
   messages,
   setMessages,
   setToolEvents,
+  onEventsLoaded,
 }: UseChatSessionOptions) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -31,11 +33,24 @@ export function useChatSession({
       setSessionId(targetId);
       const history = await fetchSessionMessages(targetId);
       setMessages(history.messages);
+
+      // Extract tool events from server-persisted messages
+      if (onEventsLoaded) {
+        const eventsMap: Record<string, ToolEvent[]> = {};
+        for (const msg of history.messages) {
+          if (msg.toolEvents && Array.isArray(msg.toolEvents) && msg.toolEvents.length > 0) {
+            eventsMap[msg.id] = msg.toolEvents as ToolEvent[];
+          }
+        }
+        if (Object.keys(eventsMap).length > 0) {
+          onEventsLoaded(eventsMap);
+        }
+      }
     } else {
       setSessionId(null);
       setMessages([]);
     }
-  }, [setMessages]);
+  }, [setMessages, onEventsLoaded]);
 
   // Initial session load
   useEffect(() => {

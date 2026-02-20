@@ -2,11 +2,22 @@
 
 export type LLMProvider = 'anthropic' | 'openai' | 'gemini';
 
+export interface ToolEventData {
+  id: string;
+  type: 'status' | 'tool_call' | 'tool_result' | 'thinking';
+  name?: string;
+  arguments?: unknown;
+  result?: unknown;
+  completed?: boolean;
+  agent?: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
+  toolEvents?: ToolEventData[];
 }
 
 export interface PinnedFilesSetting {

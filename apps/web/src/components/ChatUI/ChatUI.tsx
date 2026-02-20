@@ -63,12 +63,21 @@ export function ChatUI({
 
   // --- Hooks ---
 
+  // Callback for when server-side events are loaded with session messages
+  const handleEventsLoaded = useCallback((serverEvents: Record<string, ToolEvent[]>) => {
+    setMessageToolEvents(prev => {
+      // Merge server events (they take priority)
+      return { ...prev, ...serverEvents };
+    });
+  }, []);
+
   const session = useChatSession({
     sessionCommand,
     onSessionStateChange,
     messages,
     setMessages,
     setToolEvents: setToolEvents as React.Dispatch<React.SetStateAction<unknown[]>>,
+    onEventsLoaded: handleEventsLoaded,
   });
 
   const actions = usePendingActions({
@@ -99,21 +108,15 @@ export function ChatUI({
     });
   }, []);
 
-  // --- Tool event persistence (per-message map) ---
-
-  useEffect(() => {
-    if (!session.sessionId) return;
-    try {
-      const key = `devai_events_${session.sessionId}`;
-      localStorage.setItem(key, JSON.stringify(messageToolEvents));
-    } catch {
-      // Ignore storage errors
-    }
-  }, [session.sessionId, messageToolEvents]);
+  // --- Tool event persistence ---
+  // Server-side events are loaded via onEventsLoaded callback from useChatSession.
+  // localStorage serves as fallback for sessions that don't have server-side events yet.
 
   useEffect(() => {
     if (!session.sessionId) return;
     setToolEvents([]);
+
+    // Load localStorage fallback (server events will overwrite via onEventsLoaded)
     try {
       const key = `devai_events_${session.sessionId}`;
       const stored = localStorage.getItem(key);
