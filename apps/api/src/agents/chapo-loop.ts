@@ -20,6 +20,7 @@ import { ConversationManager } from './conversation-manager.js';
 import { llmRouter } from '../llm/router.js';
 import { executeToolWithApprovalBridge } from '../actions/approvalBridge.js';
 import { getCombinedSystemContextBlock, warmSystemContextForSession } from './systemContext.js';
+import { compactMessages } from '../memory/compaction.js';
 import { SessionLogger } from '../audit/sessionLogger.js';
 import { getAgent, getToolsForAgent, spawnScout } from './router.js';
 import { getToolsForLLM } from '../tools/registry.js';
@@ -110,13 +111,46 @@ export class ChapoLoop {
   ) {
     this.errorHandler = new AgentErrorHandler(3);
     this.validator = new SelfValidator(modelSelection.provider as LLMProvider);
-    this.conversation = new ConversationManager(120_000);
+    this.conversation = new ConversationManager(180_000);
     this.sessionLogger = SessionLogger.getActive(sessionId);
+  }
+
+  private async checkAndCompact(): Promise<void> {
+    const COMPACTION_THRESHOLD = 160_000;
+    const usage = this.conversation.getTokenUsage();
+
+    if (usage < COMPACTION_THRESHOLD) return;
+
+    const messages = this.conversation.getMessages();
+    // Compact the oldest ~60% of messages
+    const compactCount = Math.floor(messages.length * 0.6);
+    if (compactCount < 2) return;
+
+    const toCompact = messages.slice(0, compactCount);
+    const toKeep = messages.slice(compactCount);
+
+    const result = await compactMessages(toCompact, this.sessionId);
+
+    // Replace conversation: summary + kept messages
+    this.conversation.clear();
+    this.conversation.addMessage({
+      role: 'system',
+      content: `[Context compacted — ${result.droppedTokens} tokens summarized]\n\n${result.summary}`,
+    });
+    for (const msg of toKeep) {
+      this.conversation.addMessage(msg);
+    }
+
+    this.sendEvent({
+      type: 'agent_thinking',
+      agent: 'chapo',
+      status: `Context kompaktiert: ${result.droppedTokens} → ${result.summaryTokens} Tokens`,
+    });
   }
 
   async run(userMessage: string, conversationHistory: Array<{ role: string; content: string }>): Promise<ChapoLoopResult> {
     // 1. Warm system context
-    await warmSystemContextForSession(this.sessionId, this.projectRoot);
+    await warmSystemContextForSession(this.sessionId, this.projectRoot, userMessage);
     const systemContextBlock = getCombinedSystemContextBlock(this.sessionId);
 
     // 2. Set system prompt on conversation manager
@@ -181,6 +215,9 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
         agent: 'chapo',
         status: this.iteration === 0 ? 'Analysiere Anfrage...' : `Iteration ${this.iteration + 1}...`,
       });
+
+      // Check if compaction needed before LLM call
+      await this.checkAndCompact();
 
       // Call LLM with conversation + tools
       const [response, err] = await this.errorHandler.safe('llm_call', () =>
