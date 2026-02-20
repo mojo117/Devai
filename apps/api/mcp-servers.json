@@ -1,12 +1,20 @@
 {
   "mcpServers": [
     {
+      "name": "serena",
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server", "--project", "/opt/Klyde/projects/Devai", "--enable-web-dashboard", "false", "--open-web-dashboard", "false"],
+      "requiresConfirmation": false,
+      "toolPrefix": "serena",
+      "enabledForAgents": ["chapo", "devo"]
+    },
+    {
       "name": "filesystem",
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/opt", "/root"],
       "requiresConfirmation": true,
       "toolPrefix": "fs_mcp",
-      "enabledForAgents": ["chapo", "koda", "devo"]
+      "enabledForAgents": ["chapo", "devo"]
     },
     {
       "name": "github",
@@ -17,7 +25,7 @@
       },
       "requiresConfirmation": true,
       "toolPrefix": "github_mcp",
-      "enabledForAgents": ["chapo", "koda"]
+      "enabledForAgents": ["chapo", "devo"]
     }
   ]
 }

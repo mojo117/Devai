@@ -70,26 +70,6 @@ export function broadcastActionEvent(event: ActionEvent): void {
 }
 
 /**
- * Broadcast to clients in a specific session
- */
-export function broadcastToSession(sessionId: string, event: ActionEvent): void {
-  const sessionClients = clients.get(sessionId);
-  if (!sessionClients) return;
-
-  const message = JSON.stringify(event);
-
-  for (const ws of sessionClients) {
-    if (ws.readyState === 1) { // WebSocket.OPEN
-      try {
-        ws.send(message);
-      } catch (err) {
-        console.error('[WS] Failed to send message:', err);
-      }
-    }
-  }
-}
-
-/**
  * Notify clients of a new pending action
  */
 export function notifyActionPending(action: Action): void {

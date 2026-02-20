@@ -7,8 +7,17 @@ loadEnv({ path: resolve(process.cwd(), "../../.env") });
 // Hardcoded allowed roots for file access security
 // These paths are enforced regardless of environment variables
 const HARDCODED_ALLOWED_ROOTS: readonly string[] = [
-  "/root",   // Clawd home — projects, OpenClaw workspace
-  "/opt",    // Clawd /opt — includes /opt/Devai itself
+  "/root",   // Clawd home — projects, scripts
+  "/opt",    // Clawd /opt — project files, tools
+  "/home",   // Service home directories
+] as const;
+
+// Paths that are explicitly denied even within allowed roots
+// OpenClaw is a separate system — Devai must not read its config, credentials, or workspace
+// Devai must not be able to modify its own deployment
+const HARDCODED_DENIED_PATHS: readonly string[] = [
+  "/root/.openclaw",  // OpenClaw config, credentials, workspace — separate system
+  "/opt/Devai",       // Devai's own deployment — prevent self-modification
 ] as const;
 
 export interface Config {
@@ -28,6 +37,7 @@ export interface Config {
   // Project
   projectRoot?: string;
   allowedRoots: readonly string[];
+  deniedPaths: readonly string[];
 
   // Skills
   skillsDir: string;
@@ -44,10 +54,17 @@ export interface Config {
   supabaseUrl: string;
   supabaseServiceKey: string;
 
+  // CAIO — TaskForge, Email, Telegram
+  taskforgeApiKey: string;
+  resendApiKey: string;
+  resendFromAddress: string;
+  telegramBotToken: string;
+  telegramAllowedChatId: string;
+
   // Persistence
   dbPath: string;
 
-  // Looper-AI
+  // Decision loop runtime tuning (legacy LOOPER_* env var names retained)
   looperMaxIterations: number;
   looperMaxConversationTokens: number;
   looperMaxToolRetries: number;
@@ -73,8 +90,15 @@ export function loadConfig(): Config {
     githubOwner: process.env.GITHUB_OWNER,
     githubRepo: process.env.GITHUB_REPO,
 
+    taskforgeApiKey: process.env.DEVAI_TASKBOARD_API_KEY || '',
+    resendApiKey: process.env.RESEND_API_KEY || '',
+    resendFromAddress: process.env.RESEND_FROM_ADDRESS || '',
+    telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
+    telegramAllowedChatId: process.env.TELEGRAM_ALLOWED_CHAT_ID || '',
+
     projectRoot: undefined, // Disabled - use allowedRoots only
     allowedRoots,
+    deniedPaths: HARDCODED_DENIED_PATHS,
 
     skillsDir: process.env.SKILLS_DIR || resolve(process.cwd(), "../../skills"),
 
@@ -96,7 +120,7 @@ export function loadConfig(): Config {
 
     dbPath: process.env.DB_PATH || resolve(process.cwd(), "../../var/devai.db"),
 
-    // Looper-AI
+    // Decision loop runtime tuning (legacy env names for compatibility)
     looperMaxIterations: parseInt(process.env.LOOPER_MAX_ITERATIONS || "25", 10),
     looperMaxConversationTokens: parseInt(process.env.LOOPER_MAX_CONVERSATION_TOKENS || "120000", 10),
     looperMaxToolRetries: parseInt(process.env.LOOPER_MAX_TOOL_RETRIES || "3", 10),

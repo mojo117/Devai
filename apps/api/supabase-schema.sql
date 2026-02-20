@@ -73,6 +73,56 @@ CREATE TABLE IF NOT EXISTS looper_states (
 CREATE INDEX IF NOT EXISTS idx_looper_states_updated_at ON looper_states(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_looper_states_status ON looper_states(status);
 
+-- User files (uploaded documents with parsed content for AI context injection)
+CREATE TABLE IF NOT EXISTS user_files (
+  id TEXT PRIMARY KEY,
+  filename TEXT NOT NULL,
+  original_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  storage_path TEXT NOT NULL,
+  uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '30 days'),
+  parsed_content TEXT,
+  parse_status TEXT NOT NULL DEFAULT 'pending'
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_files_expires ON user_files(expires_at);
+
+-- Scheduled jobs (cron-based automation)
+CREATE TABLE IF NOT EXISTS scheduled_jobs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  cron_expression TEXT NOT NULL,
+  instruction TEXT NOT NULL,
+  notification_channel TEXT,
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  one_shot BOOLEAN NOT NULL DEFAULT false,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled_by_error', 'paused')),
+  consecutive_failures INTEGER NOT NULL DEFAULT 0,
+  last_run_at TIMESTAMPTZ,
+  last_result TEXT,
+  last_error_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_enabled ON scheduled_jobs(enabled);
+CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_status ON scheduled_jobs(status);
+
+-- External messaging sessions (Telegram, Discord, etc.)
+CREATE TABLE IF NOT EXISTS external_sessions (
+  id TEXT PRIMARY KEY,
+  platform TEXT NOT NULL,
+  external_user_id TEXT NOT NULL,
+  external_chat_id TEXT NOT NULL,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  is_default_channel BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_sessions_platform ON external_sessions(platform, external_user_id);
+CREATE INDEX IF NOT EXISTS idx_external_sessions_session_id ON external_sessions(session_id);
+
 -- Insert default user
 INSERT INTO users (id, name, created_at)
 VALUES ('local', 'Local User', NOW())

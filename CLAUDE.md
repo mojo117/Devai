@@ -18,17 +18,25 @@
 
 You are editing files in `/opt/Klyde/projects/Devai/` on the Klyde server.
 
+## Boundary: Devai vs OpenClaw
+
+**Devai and OpenClaw are independent services that share the Clawd server.**
+
+| | Devai (this project) | OpenClaw |
+|---|---|---|
+| **Purpose** | AI developer assistant (web UI, code editing) | Personal AI assistant (messaging channels) |
+| **Runtime** | PM2 processes | systemd service |
+| **Workspace** | `/opt/Devai/workspace/` | `/root/.openclaw/workspace/` |
+| **Config** | `/opt/Devai/.env` | `/root/.openclaw/openclaw.json` |
+
+**Rules:**
+- Devai MUST NOT access `/root/.openclaw/` — this is enforced via `HARDCODED_DENIED_PATHS` in `config.ts`
+- Devai has its own workspace at `/opt/Devai/workspace/` (and `workspace/` in this repo)
+- Each system has its own SOUL.md, AGENTS.md, MEMORY.md — they are NOT shared
+- Do not read, copy, or reference OpenClaw's personality/workspace files
+
 ## Filesystem Access Policy (DevAI)
 
-DevAI is intentionally restricted to exactly these filesystem roots:
-- `/opt/Klyde/projects/DeviSpace` (sandbox workspace where DevAI can do anything)
-- `/opt/Klyde/projects/Devai` (this repo worktree)
-
-If a user asks about another repo under `/opt/Klyde/projects/*`, do not access it directly. Ask them to copy it into `DeviSpace` or explicitly expand access.
-
-Default behavior:
-- New demo projects (e.g. Hello World sites) go into `DeviSpace`.
-- Do not overwrite DevAI UI entrypoints unless the user explicitly requests modifying DevAI itself.
 
 ```
 Your Edits                    Mutagen Sync                  Live Preview
@@ -145,14 +153,108 @@ ssh root@10.0.0.5 "pm2 status"
 | Branch | Purpose | How to Deploy |
 |--------|---------|---------------|
 | `dev` | Active development | Auto-syncs via Mutagen |
-| `main` | Production | Run project's deploy-main script |
+| `staging` | staging branch
+| `main` | Production | 
 
 ## Project Info
 
 - **GitHub**: https://github.com/mojo117/Devai
-- **PM2 Process**: devai-dev
+- **PM2 Process**: devai-dev (frontend), devai-api-dev (API)
 - **Mutagen Sync**: devai-dev
-- **Dev Port**: 3008
+- **Dev Port**: 3008 (frontend), 3009 (API)
+- **Docs**: [Architecture](./docs/architecture.md) | [Agents](./docs/agents.md) | [Plans](./docs/plans/)
+
+## Multi-Agent System (CHAPO Decision Loop)
+
+> **Full reference:** [docs/agents.md](./docs/agents.md)
+
+DevAI uses a three-agent system orchestrated by the CHAPO Decision Loop:
+
+| Agent | Role | Model | Access |
+|-------|------|-------|--------|
+| **CHAPO** | Coordinator + Assistant | Opus 4.5 (fallback: Sonnet 4) | Read-only + delegation + memory |
+| **DEVO** | Developer & DevOps | Sonnet 4 | Full read/write + bash + SSH + git + PM2 |
+| **SCOUT** | Exploration Specialist | Sonnet 4 (fallback: Haiku 3.5) | Read-only + web search |
+
+**Decision flow:** No separate decision engine — the LLM's `tool_calls` ARE the decisions:
+- No tool calls → **ANSWER** (self-validate, respond)
+- `askUser` → **ASK** (pause, wait for user)
+- `delegateToDevo` / `delegateToScout` → **DELEGATE** (sub-loop)
+- Any other tool → **TOOL** (execute, feed result back)
+- Errors → feed back as context, never crash
+
+**Key files:**
+- Loop: `apps/api/src/agents/chapo-loop.ts`
+- Agents: `apps/api/src/agents/{chapo,devo,scout}.ts`
+- Prompts: `apps/api/src/prompts/{chapo,devo,scout}.ts`
+- Tools: `apps/api/src/tools/registry.ts`
+- Router: `apps/api/src/agents/router.ts`
+- Types: `apps/api/src/agents/types.ts`
+
+## Quick Commands
+
+### Health & Status
+```bash
+# API health
+curl -s https://devai.klyde.tech/api/health | jq
+
+# PM2 status
+ssh root@10.0.0.5 "pm2 status"
+
+# API server logs
+ssh root@10.0.0.5 "pm2 logs devai-api-dev --lines 50 --nostream"
+
+# Frontend logs
+ssh root@10.0.0.5 "pm2 logs devai-dev --lines 50 --nostream"
+```
+
+### Restart Services
+```bash
+# Restart API
+ssh root@10.0.0.5 "pm2 restart devai-api-dev"
+
+# Restart frontend
+ssh root@10.0.0.5 "pm2 restart devai-dev"
+```
+
+### Session Logs
+```bash
+# List recent session logs
+ssh root@10.0.0.5 "ls -la /opt/Devai/var/logs/ | tail -10"
+
+# Read specific session log
+ssh root@10.0.0.5 "cat /opt/Devai/var/logs/<session-id>.md"
+```
+
+### Sync & Preview
+```bash
+# Check Mutagen sync
+mutagen sync list | grep devai-dev
+
+# Monitor sync live
+mutagen sync monitor devai-dev
+
+# Preview URL
+curl -I https://devai.klyde.tech
+```
+
+### Git
+```bash
+# Status
+cd /opt/Klyde/projects/Devai && git status
+
+# Recent commits
+cd /opt/Klyde/projects/Devai && git log --oneline -10
+
+# Push to dev
+cd /opt/Klyde/projects/Devai && git push origin dev
+```
+
+### NPM (on Clawd only)
+```bash
+ssh root@10.0.0.5 "cd /opt/Devai && npm install"
+ssh root@10.0.0.5 "cd /opt/Devai && npm run build"
+```
 
 ## External API: TaskForge Task Access (Appwrite)
 
@@ -204,5 +306,8 @@ ssh root@10.0.0.5 "cd /opt/Devai && npm install"
 ## Reference
 
 - Main Klyde docs: `/opt/Klyde/CLAUDE.md`
+- Agent system docs: [docs/agents.md](./docs/agents.md)
+- Architecture docs: [docs/architecture.md](./docs/architecture.md)
+- Plans: [docs/plans/](./docs/plans/)
 - Monitor sync: `mutagen sync monitor devai-dev`
 - Clawd SSH: `ssh root@10.0.0.5`

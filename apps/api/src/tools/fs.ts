@@ -102,6 +102,15 @@ async function validatePath(path: string): Promise<string> {
 
   // Check if it's already an absolute path within allowed roots
   const normalizedPath = resolve(path);
+
+  // Deny access to explicitly restricted paths
+  for (const denied of config.deniedPaths) {
+    const absoluteDenied = resolve(denied);
+    if (normalizedPath.startsWith(absoluteDenied + '/') || normalizedPath === absoluteDenied) {
+      throw new Error(`Access denied: "${path}" is in a restricted area`);
+    }
+  }
+
   for (const root of allowedRoots) {
     const absoluteRoot = resolve(root);
     if (normalizedPath.startsWith(absoluteRoot + '/') || normalizedPath === absoluteRoot) {
@@ -470,6 +479,15 @@ async function validateTargetPath(path: string): Promise<string> {
 
   // Check if it's already an absolute path within allowed roots
   const normalizedPath = resolve(path);
+
+  // Deny access to explicitly restricted paths
+  for (const denied of config.deniedPaths) {
+    const absoluteDenied = resolve(denied);
+    if (normalizedPath.startsWith(absoluteDenied + '/') || normalizedPath === absoluteDenied) {
+      throw new Error(`Access denied: "${path}" is in a restricted area`);
+    }
+  }
+
   for (const root of allowedRoots) {
     const absoluteRoot = resolve(root);
     if (normalizedPath.startsWith(absoluteRoot + '/') || normalizedPath === absoluteRoot) {

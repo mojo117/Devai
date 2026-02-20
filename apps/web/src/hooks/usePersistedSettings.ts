@@ -6,6 +6,10 @@ import type {
   ProjectContextOverrideSetting,
 } from '../types';
 
+interface PinnedUserfileIdsSetting {
+  ids: string[];
+}
+
 export interface UsePersistedSettingsReturn {
   pinnedFiles: string[];
   setPinnedFiles: React.Dispatch<React.SetStateAction<string[]>>;
@@ -15,6 +19,9 @@ export interface UsePersistedSettingsReturn {
   setProjectContextOverride: React.Dispatch<React.SetStateAction<ProjectContextOverrideSetting>>;
   addPinnedFile: (file: string) => void;
   removePinnedFile: (file: string) => void;
+  pinnedUserfileIds: string[];
+  togglePinnedUserfile: (id: string) => void;
+  clearPinnedUserfiles: () => void;
 }
 
 export function usePersistedSettings(isAuthed: boolean): UsePersistedSettingsReturn {
@@ -24,6 +31,7 @@ export function usePersistedSettings(isAuthed: boolean): UsePersistedSettingsRet
     enabled: false,
     summary: '',
   });
+  const [pinnedUserfileIds, setPinnedUserfileIds] = useState<string[]>([]);
 
   // Load pinned files
   useEffect(() => {
@@ -102,6 +110,30 @@ export function usePersistedSettings(isAuthed: boolean): UsePersistedSettingsRet
     return () => { isMounted = false; };
   }, [isAuthed]);
 
+  // Load pinned userfile IDs
+  useEffect(() => {
+    if (!isAuthed) return;
+    let isMounted = true;
+
+    const loadPinnedUserfiles = async () => {
+      try {
+        const stored = await fetchSetting('pinnedUserfileIds');
+        const value = stored.value as PinnedUserfileIdsSetting | null;
+        if (!isMounted) return;
+        const ids = value && Array.isArray((value as PinnedUserfileIdsSetting).ids)
+          ? (value as PinnedUserfileIdsSetting).ids.filter((id): id is string => typeof id === 'string')
+          : [];
+        setPinnedUserfileIds(ids);
+      } catch {
+        if (!isMounted) return;
+        setPinnedUserfileIds([]);
+      }
+    };
+
+    loadPinnedUserfiles();
+    return () => { isMounted = false; };
+  }, [isAuthed]);
+
   // Persist pinned files
   useEffect(() => {
     if (!isAuthed) return;
@@ -120,12 +152,28 @@ export function usePersistedSettings(isAuthed: boolean): UsePersistedSettingsRet
     saveSetting('projectContextOverride', projectContextOverride).catch(() => {});
   }, [isAuthed, projectContextOverride]);
 
+  // Persist pinned userfile IDs
+  useEffect(() => {
+    if (!isAuthed) return;
+    saveSetting('pinnedUserfileIds', { ids: pinnedUserfileIds }).catch(() => {});
+  }, [isAuthed, pinnedUserfileIds]);
+
   const addPinnedFile = useCallback((file: string) => {
     setPinnedFiles((prev) => (prev.includes(file) ? prev : [...prev, file]));
   }, []);
 
   const removePinnedFile = useCallback((file: string) => {
     setPinnedFiles((prev) => prev.filter((f) => f !== file));
+  }, []);
+
+  const togglePinnedUserfile = useCallback((id: string) => {
+    setPinnedUserfileIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  }, []);
+
+  const clearPinnedUserfiles = useCallback(() => {
+    setPinnedUserfileIds([]);
   }, []);
 
   return {
@@ -137,5 +185,8 @@ export function usePersistedSettings(isAuthed: boolean): UsePersistedSettingsRet
     setProjectContextOverride,
     addPinnedFile,
     removePinnedFile,
+    pinnedUserfileIds,
+    togglePinnedUserfile,
+    clearPinnedUserfiles,
   };
 }

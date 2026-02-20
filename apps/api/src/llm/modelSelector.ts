@@ -168,7 +168,7 @@ export function classifyTaskComplexity(message: string): TaskComplexityLevel {
 /**
  * Detect which agent should handle this task (without LLM)
  */
-export function detectTargetAgent(message: string): 'chapo' | 'koda' | 'devo' {
+export function detectTargetAgent(message: string): 'chapo' | 'devo' {
   const lowercased = message.toLowerCase();
 
   // DevOps indicators
@@ -188,16 +188,16 @@ export function detectTargetAgent(message: string): 'chapo' | 'koda' | 'devo' {
     }
   }
 
-  // Code change indicators
-  const kodaPatterns = [
+  // Code change indicators (also handled by DEVO)
+  const codePatterns = [
     /\b(edit|create|write|add|remove|delete|modify|update|change)\s+(file|code|function|class|component)/,
     /\b(implement|fix|refactor|rewrite)\b/,
     /\b(erstelle|schreibe|ändere|füge.*hinzu)\b/i,
   ];
 
-  for (const pattern of kodaPatterns) {
+  for (const pattern of codePatterns) {
     if (pattern.test(lowercased)) {
-      return 'koda';
+      return 'devo';
     }
   }
 

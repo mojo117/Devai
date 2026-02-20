@@ -63,13 +63,16 @@ export function verifyToken(token: string): JwtPayload | null {
 }
 
 export async function authMiddleware(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-  const authHeader = request.headers.authorization;
+  const cookieToken = request.cookies?.devai_token;
+  const headerToken = request.headers.authorization?.startsWith('Bearer ')
+    ? request.headers.authorization.substring(7)
+    : undefined;
+  const token = cookieToken || headerToken;
 
-  if (!authHeader?.startsWith('Bearer ')) {
+  if (!token) {
     return reply.status(401).send({ error: 'No token provided' });
   }
 
-  const token = authHeader.substring(7);
   const payload = verifyToken(token);
 
   if (!payload) {
@@ -80,7 +83,14 @@ export async function authMiddleware(request: FastifyRequest, reply: FastifyRepl
 }
 
 export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
-  app.post<{ Body: LoginBody }>('/api/auth/login', async (request, reply) => {
+  app.post<{ Body: LoginBody }>('/api/auth/login', {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '15 minutes',
+      },
+    },
+  }, async (request, reply) => {
     const { username, password } = request.body;
 
     if (!username || !password) {
@@ -130,6 +140,14 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(500).send({ error: 'Authentication unavailable' });
     }
 
+    reply.setCookie('devai_token', token, {
+      httpOnly: true,
+      secure: config.nodeEnv !== 'development',
+      sameSite: 'strict',
+      path: '/api',
+      maxAge: 86400, // 24h
+    });
+
     return reply.send({
       success: true,
       token,
@@ -139,13 +157,16 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get('/api/auth/verify', async (request, reply) => {
-    const authHeader = request.headers.authorization;
+    const cookieToken = request.cookies?.devai_token;
+    const headerToken = request.headers.authorization?.startsWith('Bearer ')
+      ? request.headers.authorization.substring(7)
+      : undefined;
+    const token = cookieToken || headerToken;
 
-    if (!authHeader?.startsWith('Bearer ')) {
+    if (!token) {
       return reply.status(401).send({ valid: false, error: 'No token provided' });
     }
 
-    const token = authHeader.substring(7);
     const payload = verifyToken(token);
 
     if (!payload) {
@@ -154,8 +175,14 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
 
     return reply.send({
       valid: true,
+      token,
       user: { username: payload.username },
       expiresAt: new Date(payload.exp * 1000).toISOString(),
     });
+  });
+
+  app.post('/api/auth/logout', async (_request, reply) => {
+    reply.clearCookie('devai_token', { path: '/api' });
+    return reply.send({ success: true });
   });
 }

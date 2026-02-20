@@ -4,9 +4,12 @@ import type { Action } from './types.js';
 import { buildActionPreview } from './preview.js';
 import { checkPermission } from '../permissions/checker.js';
 import { executeTool, type ToolExecutionResult } from '../tools/executor.js';
-import { normalizeToolName, toolRequiresConfirmation } from '../tools/registry.js';
+import { normalizeToolName, toolRequiresConfirmation, toolRegistry } from '../tools/registry.js';
+import { mcpManager } from '../mcp/index.js';
 
 export interface ApprovalBridgeOptions {
+  /** The agent requesting tool execution — used for access control */
+  agentName?: string;
   userId?: string;
   onActionPending?: (action: Action) => void | Promise<void>;
 }
@@ -64,6 +67,22 @@ export async function executeToolWithApprovalBridge(
   options?: ApprovalBridgeOptions
 ): Promise<ApprovalBridgeExecutionResult> {
   const normalizedToolName = normalizeToolName(toolName);
+
+  // Unified agent access check — if an agentName is provided, verify the agent
+  // is allowed to use this tool before doing anything else.
+  if (options?.agentName) {
+    const agent = options.agentName;
+    const allowed =
+      toolRegistry.canAccess(agent, normalizedToolName) ||
+      mcpManager.getToolsForAgent(agent).includes(normalizedToolName);
+    if (!allowed) {
+      return {
+        success: false,
+        error: `Tool "${normalizedToolName}" is not available to ${agent}`,
+      };
+    }
+  }
+
   const permission = await checkPermission(normalizedToolName, toolArgs, options?.userId);
 
   if (!permission.allowed) {

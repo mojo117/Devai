@@ -7,7 +7,7 @@
 
 import { useMemo } from 'react';
 
-export type AgentName = 'chapo' | 'koda' | 'devo' | 'scout';
+export type AgentName = 'chapo' | 'devo' | 'scout';
 export type AgentPhase = 'qualification' | 'thinking' | 'execution' | 'executing' | 'review' | 'error' | 'idle';
 
 interface AgentStatusProps {
@@ -24,15 +24,9 @@ const agentInfo: Record<AgentName, { name: string; role: string; color: string; 
     color: 'text-purple-300 border-purple-500/40 bg-purple-900/10',
     icon: '🎯',
   },
-  koda: {
-    name: 'KODA',
-    role: 'Senior Developer',
-    color: 'text-cyan-300 border-cyan-500/40 bg-cyan-900/10',
-    icon: '💻',
-  },
   devo: {
     name: 'DEVO',
-    role: 'DevOps Engineer',
+    role: 'Developer & DevOps',
     color: 'text-emerald-300 border-emerald-500/40 bg-emerald-900/10',
     icon: '🔧',
   },
@@ -142,64 +136,3 @@ export function AgentBadge({ agent, size = 'sm' }: AgentBadgeProps) {
   );
 }
 
-/**
- * Agent workflow diagram showing the flow between agents
- */
-interface AgentWorkflowProps {
-  activeAgent: AgentName | null;
-  completedSteps: AgentName[];
-}
-
-export function AgentWorkflow({ activeAgent, completedSteps }: AgentWorkflowProps) {
-  const agents: AgentName[] = ['chapo', 'koda', 'devo', 'scout'];
-
-  return (
-    <div className="bg-devai-card border border-devai-border rounded-lg p-4">
-      <div className="text-xs text-devai-text-muted mb-3">Agent Workflow</div>
-
-      <div className="flex items-center justify-between">
-        {agents.map((agent, i) => {
-          const info = agentInfo[agent];
-          const isActive = activeAgent === agent;
-          const isCompleted = completedSteps.includes(agent);
-
-          return (
-            <div key={agent} className="flex items-center">
-              <div
-                className={`flex flex-col items-center ${
-                  isActive
-                    ? info.color
-                    : isCompleted
-                    ? 'text-devai-text-secondary'
-                    : 'text-devai-text-muted'
-                }`}
-              >
-                <div
-                  className={`w-10 h-10 rounded-full border-2 flex items-center justify-center ${
-                    isActive
-                      ? 'border-current bg-current/20'
-                      : isCompleted
-                      ? 'border-gray-500 bg-devai-surface'
-                      : 'border-devai-border'
-                  }`}
-                >
-                  <span className="text-lg">{info.icon}</span>
-                </div>
-                <span className="text-xs mt-1 font-medium">{info.name}</span>
-                <span className="text-[10px] opacity-70">{info.role}</span>
-              </div>
-
-              {i < agents.length - 1 && (
-                <div className="flex-1 h-0.5 mx-2 bg-devai-surface relative">
-                  {(isCompleted || (activeAgent === agents[i + 1])) && (
-                    <div className="absolute inset-0 bg-gray-500" />
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}

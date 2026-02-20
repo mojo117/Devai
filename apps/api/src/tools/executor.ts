@@ -9,6 +9,9 @@ import * as pm2Tools from './pm2.js';
 import * as webTools from './web.js';
 import * as contextTools from './context.js';
 import * as memoryTools from './memory.js';
+import * as schedulerTools from './scheduler.js';
+import * as taskforgeTools from './taskforge.js';
+import * as emailTools from './email.js';
 import { config } from '../config.js';
 import { mcpManager } from '../mcp/index.js';
 import { join } from 'path';
@@ -270,10 +273,94 @@ export async function executeTool(
         case 'memory_readToday':
           return memoryTools.memoryReadToday();
 
+        // Scheduler Tools (DEVO agent)
+        case 'scheduler_create':
+          return schedulerTools.schedulerCreate(
+            args.name as string,
+            args.cronExpression as string,
+            args.instruction as string,
+            args.notificationChannel as string | undefined,
+          );
+
+        case 'scheduler_list':
+          return schedulerTools.schedulerList();
+
+        case 'scheduler_update':
+          return schedulerTools.schedulerUpdate(
+            args.id as string,
+            {
+              name: args.name as string | undefined,
+              cronExpression: args.cronExpression as string | undefined,
+              instruction: args.instruction as string | undefined,
+              notificationChannel: args.notificationChannel as string | null | undefined,
+              enabled: args.enabled as boolean | undefined,
+            },
+          );
+
+        case 'scheduler_delete':
+          return schedulerTools.schedulerDelete(args.id as string);
+
+        case 'reminder_create':
+          return schedulerTools.reminderCreate(
+            args.message as string,
+            args.datetime as string,
+          );
+
+        case 'notify_user':
+          return schedulerTools.notifyUser(
+            args.message as string,
+            args.channel as string | undefined,
+          );
+
+        // TaskForge Tools (CAIO agent)
+        case 'taskforge_list_tasks':
+          return taskforgeTools.taskforgeListTasks(
+            args.project as string | undefined,
+            args.status as string | undefined,
+          );
+
+        case 'taskforge_get_task':
+          return taskforgeTools.taskforgeGetTask(args.taskId as string);
+
+        case 'taskforge_create_task':
+          return taskforgeTools.taskforgeCreateTask(
+            args.title as string,
+            args.description as string,
+            args.status as string | undefined,
+          );
+
+        case 'taskforge_move_task':
+          return taskforgeTools.taskforgeMoveTask(
+            args.taskId as string,
+            args.newStatus as string,
+          );
+
+        case 'taskforge_add_comment':
+          return taskforgeTools.taskforgeAddComment(
+            args.taskId as string,
+            args.comment as string,
+          );
+
+        case 'taskforge_search':
+          return taskforgeTools.taskforgeSearch(args.query as string);
+
+        // Email Tool (CAIO agent)
+        case 'send_email':
+          return emailTools.sendEmail(
+            args.to as string,
+            args.subject as string,
+            args.body as string,
+            args.replyTo as string | undefined,
+          );
+
         default:
           // Route MCP tools to the MCP manager
           if (mcpManager.isMcpTool(normalizedToolName)) {
-            return mcpManager.executeTool(normalizedToolName, args).then((r) => r.result);
+            const mcpResult = await mcpManager.executeTool(normalizedToolName, args);
+            if (!mcpResult.success) {
+              throw new Error(`MCP tool "${normalizedToolName}" failed: ${mcpResult.error}`);
+            }
+            return mcpResult.result;
           }
           throw new Error(`Unknown tool: ${normalizedToolName}`);
       }
@@ -339,6 +426,7 @@ const READ_ONLY_TOOLS = new Set([
   'context_searchDocuments',
   'memory_search',
   'memory_readToday',
+  'scheduler_list',
 ]);
 
 /**

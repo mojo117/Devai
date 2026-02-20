@@ -1,19 +1,25 @@
 /**
- * DEVO - DevOps Engineer Agent
+ * DEVO - Developer & DevOps Engineer Agent
  *
- * Role: Handles all DevOps tasks including git operations, npm commands,
- * SSH, PM2 management, and GitHub Actions. Can escalate problems back to CHAPO.
+ * Role: Handles all code writing, file editing, and DevOps tasks including
+ * git operations, npm commands, SSH, PM2 management, and GitHub Actions.
+ * Can escalate problems back to CHAPO.
  */
 
 import type { AgentDefinition } from './types.js';
 import { DEVO_SYSTEM_PROMPT } from '../prompts/devo.js';
+import { registerMetaTools, registerAgentTools } from '../tools/registry.js';
 
 export const DEVO_AGENT: AgentDefinition = {
   name: 'devo',
-  role: 'DevOps Engineer',
+  role: 'Developer & DevOps Engineer',
   model: 'claude-sonnet-4-20250514',
 
   capabilities: {
+    canWriteFiles: true,
+    canEditFiles: true,
+    canDeleteFiles: true,
+    canCreateDirectories: true,
     canExecuteBash: true,
     canSSH: true,
     canGitCommit: true,
@@ -25,6 +31,16 @@ export const DEVO_AGENT: AgentDefinition = {
   },
 
   tools: [
+    // File system tools (read + write)
+    'fs_listFiles',
+    'fs_readFile',
+    'fs_writeFile',
+    'fs_edit',
+    'fs_mkdir',
+    'fs_move',
+    'fs_delete',
+    'fs_glob',
+    'fs_grep',
     // DevOps tools
     'bash_execute',
     'ssh_execute',
@@ -34,6 +50,7 @@ export const DEVO_AGENT: AgentDefinition = {
     'git_commit',
     'git_push',
     'git_pull',
+    'git_add',
     // GitHub tools
     'github_triggerWorkflow',
     'github_getWorkflowRunStatus',
@@ -44,9 +61,6 @@ export const DEVO_AGENT: AgentDefinition = {
     // NPM tools
     'npm_install',
     'npm_run',
-    // Read tools (for context)
-    'fs_listFiles',
-    'fs_readFile',
     // Logs
     'logs_getStagingLogs',
     // Workspace memory
@@ -93,3 +107,7 @@ export const DEVO_META_TOOLS = [
     requiresConfirmation: false,
   },
 ];
+
+// Register DEVO's meta-tools and agent access in the unified registry
+registerMetaTools(DEVO_META_TOOLS, 'devo');
+registerAgentTools('devo', DEVO_AGENT.tools);

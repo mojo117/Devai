@@ -4,6 +4,11 @@ import type { ChatMessage } from '@devai/shared';
 import { DEFAULT_TRUST_MODE } from '../config/trust.js';
 
 const DEFAULT_USER_ID = 'local';
+let warnedMissingAgentStatesTable = false;
+
+function isMissingAgentStatesTableError(error: { code?: string; message?: string } | null): boolean {
+  return Boolean(error?.code === 'PGRST205' && /agent_states/i.test(error?.message || ''));
+}
 
 export interface SessionSummary {
   id: string;
@@ -387,6 +392,16 @@ export async function getAgentState(sessionId: string): Promise<DbAgentStateRow 
     .single();
 
   if (error) {
+    if (isMissingAgentStatesTableError(error)) {
+      if (!warnedMissingAgentStatesTable) {
+        warnedMissingAgentStatesTable = true;
+        console.warn(
+          '[state] Persistence disabled: table "agent_states" is missing in Supabase. Apply DB migration to re-enable state persistence.',
+        );
+      }
+      return null;
+    }
+
     // PGRST116 = row not found
     if (error.code === 'PGRST116') return null;
     console.error('Failed to get agent state:', error);
@@ -407,6 +422,16 @@ export async function upsertAgentState(sessionId: string, state: unknown): Promi
     }, { onConflict: 'session_id' });
 
   if (error) {
+    if (isMissingAgentStatesTableError(error)) {
+      if (!warnedMissingAgentStatesTable) {
+        warnedMissingAgentStatesTable = true;
+        console.warn(
+          '[state] Persistence disabled: table "agent_states" is missing in Supabase. Apply DB migration to re-enable state persistence.',
+        );
+      }
+      return;
+    }
+
     console.error('Failed to upsert agent state:', error);
     // Surface persistence failures to callers so they can retry/backoff instead of silently dropping writes.
     throw new Error(`Failed to upsert agent state: ${error.message}`);
@@ -420,71 +445,5 @@ export async function deleteAgentState(sessionId: string): Promise<void> {
     .eq('session_id', sessionId);
   if (error) {
     console.error('Failed to delete agent state:', error);
-  }
-}
-
-// ============================================
-// Looper Persistence
-// ============================================
-
-export interface DbLooperStateRow {
-  session_id: string;
-  provider: string;
-  config: unknown;
-  snapshot: unknown;
-  status: string;
-  updated_at: string;
-}
-
-export async function getLooperState(sessionId: string): Promise<DbLooperStateRow | null> {
-  const { data, error } = await getSupabase()
-    .from('looper_states')
-    .select('session_id, provider, config, snapshot, status, updated_at')
-    .eq('session_id', sessionId)
-    .single();
-
-  if (error) {
-    if (error.code === 'PGRST116') return null;
-    console.error('Failed to get looper state:', error);
-    return null;
-  }
-
-  return data as DbLooperStateRow;
-}
-
-export async function upsertLooperState(input: {
-  sessionId: string;
-  provider: string;
-  config: unknown;
-  snapshot: unknown;
-  status: string;
-}): Promise<void> {
-  const now = new Date().toISOString();
-  const { error } = await getSupabase()
-    .from('looper_states')
-    .upsert({
-      session_id: input.sessionId,
-      provider: input.provider,
-      config: input.config,
-      snapshot: input.snapshot,
-      status: input.status,
-      updated_at: now,
-    }, { onConflict: 'session_id' });
-
-  if (error) {
-    console.error('Failed to upsert looper state:', error);
-    // Callers should handle this as a non-fatal error (loop can continue),
-    // but we still want a signal so we can retry and avoid silent data loss.
-    throw new Error(`Failed to upsert looper state: ${error.message}`);
-  }
-}
-
-export async function deleteLooperState(sessionId: string): Promise<void> {
-  const { error } = await getSupabase()
-    .from('looper_states')
-    .delete()
-    .eq('session_id', sessionId);
-  if (error) {
-    console.error('Failed to delete looper state:', error);
   }
 }

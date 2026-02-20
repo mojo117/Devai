@@ -320,30 +320,6 @@ function summarizeResult(result: unknown): string {
   return String(result);
 }
 
-// Clear old actions (optional cleanup)
-export async function clearOldActions(maxAge: number = 24 * 60 * 60 * 1000): Promise<number> {
-  await ensureCache();
-
-  const cutoff = Date.now() - maxAge;
-  let cleared = 0;
-
-  for (const [id, action] of actionsCache.entries()) {
-    const createdAt = new Date(action.createdAt).getTime();
-    if (createdAt < cutoff && action.status !== 'pending') {
-      actionsCache.delete(id);
-      cleared++;
-    }
-  }
-
-  // Also clean up in database
-  const { deleteOldActions: deleteOldActionsFromDb } = await import('../db/queries.js');
-  deleteOldActionsFromDb(maxAge).catch((err) => {
-    console.error('[Action Cleanup] Failed to clean old actions from DB:', err);
-  });
-
-  return cleared;
-}
-
 export function clearActionsForTests(): void {
   actionsCache.clear();
   cachePromise = null;

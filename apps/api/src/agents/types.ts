@@ -1,16 +1,17 @@
 /**
  * Multi-Agent System Types
  *
- * Three agents: CHAPO (Coordinator), KODA (Developer), DEVO (DevOps)
+ * Three agents: CHAPO (Coordinator), DEVO (Developer & DevOps), SCOUT (Explorer)
  */
 
 import type { ActionPreview } from '../actions/types.js';
 
-export type AgentName = 'chapo' | 'koda' | 'devo' | 'scout';
+export type AgentName = 'chapo' | 'devo' | 'scout' | 'caio';
 
-export type AgentRole = 'Task Coordinator' | 'Senior Developer' | 'DevOps Engineer' | 'Exploration Specialist';
+export type AgentRole = 'Task Coordinator' | 'Developer & DevOps Engineer' | 'Exploration Specialist' | 'Communications & Administration Officer';
 
 export type TaskType = 'code_change' | 'devops' | 'exploration' | 'mixed' | 'unclear';
+export type DelegationDomain = 'development' | 'communication' | 'research';
 
 export type RiskLevel = 'low' | 'medium' | 'high';
 
@@ -33,6 +34,7 @@ export interface ModelTier {
 }
 
 export type AgentPhase =
+  | 'idle'
   | 'qualification'
   | 'planning'              // Multi-perspective planning phase
   | 'waiting_plan_approval' // Waiting for user to approve plan
@@ -68,12 +70,16 @@ export interface AgentCapabilities {
   canGitPush?: boolean;
   canTriggerWorkflows?: boolean;
   canManagePM2?: boolean;
-  canDelegateToKoda?: boolean;
   canDelegateToDevo?: boolean;
   canDelegateToScout?: boolean;
   canAskUser?: boolean;
   canRequestApproval?: boolean;
   canEscalate?: boolean;
+  canManageScheduler?: boolean;
+  canSendNotifications?: boolean;
+  canSendEmail?: boolean;
+  canManageTaskForge?: boolean;
+  canDelegateToCaio?: boolean;
 }
 
 // Task Qualification
@@ -101,6 +107,8 @@ export interface GatheredContext {
   projectInfo?: Record<string, unknown>;
   // Delegation context (when CHAPO delegates to another agent)
   delegationTask?: string;
+  delegationDomain?: DelegationDomain;
+  delegationObjective?: string;
   delegationContext?: unknown;
   delegationFiles?: string[];
 }
@@ -277,7 +285,16 @@ export type AgentStreamEvent =
   | { type: 'agent_start'; agent: AgentName; phase: AgentPhase }
   | { type: 'agent_thinking'; agent: AgentName; status: string }
   | { type: 'agent_switch'; from: AgentName; to: AgentName; reason: string }
-  | { type: 'delegation'; from: AgentName; to: AgentName; task: string }
+  | {
+      type: 'delegation';
+      from: AgentName;
+      to: AgentName;
+      task: string;
+      domain?: DelegationDomain;
+      objective?: string;
+      constraints?: string[];
+      expectedOutcome?: string;
+    }
   | { type: 'escalation'; from: AgentName; issue: EscalationIssue }
   | { type: 'tool_call'; agent: AgentName; toolName: string; args: Record<string, unknown> }
   | { type: 'tool_result'; agent: AgentName; toolName: string; result: unknown; success: boolean }
@@ -357,15 +374,6 @@ export interface ChapoPerspective extends AgentPerspective {
   coordinationNeeds: string[];
 }
 
-// KODA's code-focused perspective
-export interface KodaPerspective extends AgentPerspective {
-  agent: 'koda';
-  affectedFiles: string[];
-  codePatterns: string[];
-  potentialBreakingChanges: string[];
-  testingRequirements: string[];
-}
-
 // DEVO's ops-focused perspective
 export interface DevoPerspective extends AgentPerspective {
   agent: 'devo';
@@ -383,7 +391,6 @@ export interface ExecutionPlan {
 
   // Multi-perspective analysis
   chapoPerspective: ChapoPerspective;
-  kodaPerspective?: KodaPerspective;
   devoPerspective?: DevoPerspective;
 
   // Synthesized plan
@@ -470,6 +477,24 @@ export interface ScoutResult {
   webFindings: WebFinding[];
   recommendations: string[];
   confidence: ScoutConfidence;
+}
+
+// ============================================
+// CHAPO LOOP TYPES
+// ============================================
+
+export interface ValidationResult {
+  isComplete: boolean;
+  confidence: number;
+  issues: string[];
+  suggestion?: string;
+}
+
+export interface ChapoLoopResult {
+  answer: string;
+  status: 'completed' | 'waiting_for_user' | 'error';
+  totalIterations: number;
+  question?: string; // if status === 'waiting_for_user'
 }
 
 // SCOUT-specific stream events (extend AgentStreamEvent)

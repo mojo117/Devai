@@ -38,14 +38,6 @@ export type ToolName =
   // Web Tools (SCOUT agent)
   | 'web_search'
   | 'web_fetch'
-  // Agent Meta-Tools
-  | 'delegateToKoda'
-  | 'delegateToDevo'
-  | 'delegateToScout'
-  | 'escalateToChapo'
-  | 'askUser'
-  | 'requestApproval'
-  | 'askForConfirmation'
   // Context Tools (read-only document access)
   | 'context_listDocuments'
   | 'context_readDocument'
@@ -53,7 +45,23 @@ export type ToolName =
   // Workspace Memory Tools
   | 'memory_remember'
   | 'memory_search'
-  | 'memory_readToday';
+  | 'memory_readToday'
+  // Scheduler Tools (DEVO)
+  | 'scheduler_create'
+  | 'scheduler_list'
+  | 'scheduler_update'
+  | 'scheduler_delete'
+  | 'reminder_create'
+  | 'notify_user'
+  // TaskForge Tools (CAIO)
+  | 'taskforge_list_tasks'
+  | 'taskforge_get_task'
+  | 'taskforge_create_task'
+  | 'taskforge_move_task'
+  | 'taskforge_add_comment'
+  | 'taskforge_search'
+  // Email Tool (CAIO)
+  | 'send_email';
 
 export interface ToolPropertyDefinition {
   type: string;
@@ -73,6 +81,142 @@ export interface ToolDefinition {
   };
   requiresConfirmation: boolean;
 }
+
+// ============================================
+// UNIFIED TOOL SYSTEM
+// ============================================
+
+/** Tool category for the unified registry */
+export type ToolCategory = 'native' | 'mcp' | 'meta';
+
+/**
+ * Unified tool definition that covers all tool types:
+ * - native: built-in tools (fs, git, bash, etc.)
+ * - mcp: tools discovered from MCP servers at runtime
+ * - meta: agent coordination tools (delegateToDevo, escalateToChapo, etc.)
+ */
+export interface ToolDef {
+  name: string;
+  description: string;
+  parameters: {
+    type: 'object';
+    properties: Record<string, ToolPropertyDefinition>;
+    required?: string[];
+  };
+  requiresConfirmation: boolean;
+  category: ToolCategory;
+  /** For MCP tools: the MCP server name */
+  mcpServer?: string;
+  /** For meta-tools: which agent owns/defines this tool */
+  ownerAgent?: string;
+}
+
+/**
+ * Unified ToolRegistry — single source of truth for all tools.
+ *
+ * Replaces the fragmented system where native tools lived in TOOL_REGISTRY,
+ * MCP tools in a separate array, and meta-tools inline in agent files.
+ */
+class UnifiedToolRegistry {
+  private tools = new Map<string, ToolDef>();
+  /** Which agents can access which tools: agent name -> set of tool names */
+  private agentAccess = new Map<string, Set<string>>();
+
+  /** Register a single tool */
+  register(tool: ToolDef): void {
+    this.tools.set(tool.name, tool);
+  }
+
+  /** Register multiple tools at once */
+  registerAll(tools: ToolDef[]): void {
+    for (const tool of tools) {
+      this.register(tool);
+    }
+  }
+
+  /** Remove tools by category (used when MCP reconnects) */
+  removeByCategory(category: ToolCategory): void {
+    for (const [name, tool] of this.tools) {
+      if (tool.category === category) {
+        this.tools.delete(name);
+      }
+    }
+  }
+
+  /** Grant an agent access to a specific tool */
+  grantAccess(agentName: string, toolName: string): void {
+    if (!this.agentAccess.has(agentName)) {
+      this.agentAccess.set(agentName, new Set());
+    }
+    this.agentAccess.get(agentName)!.add(toolName);
+  }
+
+  /** Grant an agent access to multiple tools */
+  grantAccessAll(agentName: string, toolNames: string[]): void {
+    for (const name of toolNames) {
+      this.grantAccess(agentName, name);
+    }
+  }
+
+  /** Get all tool names an agent can access */
+  getAgentTools(agentName: string): string[] {
+    return Array.from(this.agentAccess.get(agentName) ?? []);
+  }
+
+  /** Check if an agent can use a specific tool */
+  canAccess(agentName: string, toolName: string): boolean {
+    return this.agentAccess.get(agentName)?.has(toolName) ?? false;
+  }
+
+  /** Get a tool by name */
+  get(name: string): ToolDef | undefined {
+    return this.tools.get(name);
+  }
+
+  /** Check if a tool exists */
+  has(name: string): boolean {
+    return this.tools.has(name);
+  }
+
+  /** Get all registered tools */
+  getAll(): ToolDef[] {
+    return Array.from(this.tools.values());
+  }
+
+  /** Get tools filtered by category */
+  getByCategory(category: ToolCategory): ToolDef[] {
+    return this.getAll().filter((t) => t.category === category);
+  }
+
+  /** Convert all tools to LLM format (name, description, parameters only) */
+  toLLMFormat(): LLMToolDefinition[] {
+    return this.getAll().map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    }));
+  }
+
+  /** Convert tools for a specific agent to LLM format */
+  toLLMFormatForAgent(agentName: string): LLMToolDefinition[] {
+    const agentToolNames = this.getAgentTools(agentName);
+    return this.getAll()
+      .filter((t) => agentToolNames.includes(t.name))
+      .map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+      }));
+  }
+
+  /** Get count of registered tools */
+  get size(): number {
+    return this.tools.size;
+  }
+}
+
+/** Singleton unified registry */
+export const toolRegistry = new UnifiedToolRegistry();
 
 // Whitelisted tools with their definitions
 export const TOOL_REGISTRY: ToolDefinition[] = [
@@ -395,30 +539,6 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     },
     requiresConfirmation: false,
   },
-  {
-    name: 'askForConfirmation',
-    description: 'Request user approval for a tool action. Returns an actionId.',
-    parameters: {
-      type: 'object',
-      properties: {
-        toolName: {
-          type: 'string',
-          description: 'The tool to run after approval (must require confirmation)',
-        },
-        toolArgs: {
-          type: 'object',
-          description: 'Arguments for the tool',
-        },
-        description: {
-          type: 'string',
-          description: 'Short human-readable description of the action',
-        },
-      },
-      required: ['toolName', 'toolArgs'],
-    },
-    requiresConfirmation: false,
-  },
-
   // Web Tools (SCOUT agent)
   {
     name: 'web_search',
@@ -670,150 +790,6 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     requiresConfirmation: true,
   },
 
-  // Agent Meta-Tools
-  {
-    name: 'delegateToKoda',
-    description: 'Delegate a code-related task to KODA (Senior Developer). Only available to CHAPO.',
-    parameters: {
-      type: 'object',
-      properties: {
-        task: {
-          type: 'string',
-          description: 'Description of the coding task',
-        },
-        context: {
-          type: 'object',
-          description: 'Gathered context and relevant information',
-        },
-        files: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'List of relevant file paths',
-        },
-      },
-      required: ['task'],
-    },
-    requiresConfirmation: false,
-  },
-  {
-    name: 'delegateToDevo',
-    description: 'Delegate a DevOps task to DEVO (DevOps Engineer). Only available to CHAPO.',
-    parameters: {
-      type: 'object',
-      properties: {
-        task: {
-          type: 'string',
-          description: 'Description of the DevOps task',
-        },
-        context: {
-          type: 'object',
-          description: 'Gathered context and relevant information',
-        },
-        commands: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Suggested commands to execute',
-        },
-      },
-      required: ['task'],
-    },
-    requiresConfirmation: false,
-  },
-  {
-    name: 'delegateToScout',
-    description: 'Delegate exploration or research task to SCOUT. Available to CHAPO, KODA, and DEVO.',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: {
-          type: 'string',
-          description: 'What to explore or search for',
-        },
-        scope: {
-          type: 'string',
-          description: 'Where to search: "codebase", "web", or "both" (default: "both")',
-        },
-        context: {
-          type: 'string',
-          description: 'Additional context to help SCOUT understand the task',
-        },
-      },
-      required: ['query'],
-    },
-    requiresConfirmation: false,
-  },
-  {
-    name: 'escalateToChapo',
-    description: 'Escalate a problem to CHAPO (Task Coordinator). Available to KODA and DEVO.',
-    parameters: {
-      type: 'object',
-      properties: {
-        issueType: {
-          type: 'string',
-          description: 'Type of issue: error, clarification, or blocker',
-        },
-        description: {
-          type: 'string',
-          description: 'Description of the problem',
-        },
-        context: {
-          type: 'object',
-          description: 'Relevant context (error messages, logs, etc.)',
-        },
-        suggestedSolutions: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Possible solutions to the problem',
-        },
-      },
-      required: ['issueType', 'description'],
-    },
-    requiresConfirmation: false,
-  },
-  {
-    name: 'askUser',
-    description: 'Ask the user a question for clarification. Only available to CHAPO.',
-    parameters: {
-      type: 'object',
-      properties: {
-        question: {
-          type: 'string',
-          description: 'The question to ask the user',
-        },
-        options: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Possible answer options (optional)',
-        },
-      },
-      required: ['question'],
-    },
-    requiresConfirmation: false,
-  },
-  {
-    name: 'requestApproval',
-    description: 'Request user approval for a risky action. Only available to CHAPO.',
-    parameters: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          description: 'Description of the action requiring approval',
-        },
-        risk: {
-          type: 'string',
-          description: 'Risk level: low, medium, or high',
-        },
-        details: {
-          type: 'object',
-          description: 'Additional details about the action',
-        },
-      },
-      required: ['action', 'risk'],
-    },
-    requiresConfirmation: false,
-  },
-
   // Context Tools (read-only document access)
   {
     name: 'context_listDocuments',
@@ -906,44 +882,295 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     },
     requiresConfirmation: false,
   },
+
+  // Scheduler Tools (DEVO agent)
+  {
+    name: 'scheduler_create',
+    description: 'Create a scheduled job (cron). Runs an instruction on a recurring schedule. Use standard cron syntax (e.g. "0 8 * * *" = every day at 8am).',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Human-readable job name (e.g. "Morning PM2 health check")',
+        },
+        cronExpression: {
+          type: 'string',
+          description: 'Cron schedule expression (e.g. "0 8 * * *" for daily at 8am, "*/30 * * * *" for every 30 min)',
+        },
+        instruction: {
+          type: 'string',
+          description: 'Natural language instruction for what to do when the job fires (executed by CHAPO)',
+        },
+        notificationChannel: {
+          type: 'string',
+          description: 'Optional notification channel override (default: use global setting)',
+        },
+      },
+      required: ['name', 'cronExpression', 'instruction'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'scheduler_list',
+    description: 'List all scheduled jobs with their status, schedule, and last run info.',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'scheduler_update',
+    description: 'Update a scheduled job (change name, schedule, instruction, or enable/disable).',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: {
+          type: 'string',
+          description: 'The job ID to update',
+        },
+        name: {
+          type: 'string',
+          description: 'New job name',
+        },
+        cronExpression: {
+          type: 'string',
+          description: 'New cron schedule expression',
+        },
+        instruction: {
+          type: 'string',
+          description: 'New instruction',
+        },
+        enabled: {
+          type: 'boolean',
+          description: 'Enable or disable the job',
+        },
+      },
+      required: ['id'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'scheduler_delete',
+    description: 'Delete a scheduled job permanently.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: {
+          type: 'string',
+          description: 'The job ID to delete',
+        },
+      },
+      required: ['id'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'reminder_create',
+    description: 'Create a one-time reminder. Fires at the specified datetime and auto-deletes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          description: 'The reminder message to send',
+        },
+        datetime: {
+          type: 'string',
+          description: 'ISO 8601 datetime for when to fire (e.g. "2026-02-20T09:00:00")',
+        },
+      },
+      required: ['message', 'datetime'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'notify_user',
+    description: 'Send a notification to the user on their default notification channel (Telegram, etc.).',
+    parameters: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          description: 'The notification message to send',
+        },
+        channel: {
+          type: 'string',
+          description: 'Optional: specific channel to use instead of default',
+        },
+      },
+      required: ['message'],
+    },
+    requiresConfirmation: false,
+  },
+
+  // TaskForge Tools (CAIO agent)
+  {
+    name: 'taskforge_list_tasks',
+    description: 'Liste Tasks aus TaskForge auf. Optional nach Projekt und Status filtern.',
+    parameters: {
+      type: 'object',
+      properties: {
+        project: { type: 'string', description: 'Projektname (optional)' },
+        status: { type: 'string', description: 'Status-Filter: initiierung, planung, umsetzung, review, done (optional)' },
+      },
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'taskforge_get_task',
+    description: 'Hole Details zu einem bestimmten Task aus TaskForge.',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: 'Die Task-ID' },
+      },
+      required: ['taskId'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'taskforge_create_task',
+    description: 'Erstelle einen neuen Task in TaskForge.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Task-Titel (imperativ)' },
+        description: { type: 'string', description: 'Detaillierte Beschreibung mit Akzeptanzkriterien' },
+        status: { type: 'string', description: 'Initialer Status (default: initiierung)', enum: ['initiierung', 'planung', 'umsetzung', 'review'] },
+      },
+      required: ['title', 'description'],
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'taskforge_move_task',
+    description: 'Verschiebe einen Task in einen neuen Status.',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: 'Die Task-ID' },
+        newStatus: { type: 'string', description: 'Neuer Status', enum: ['initiierung', 'planung', 'umsetzung', 'review', 'done'] },
+      },
+      required: ['taskId', 'newStatus'],
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'taskforge_add_comment',
+    description: 'Füge einen Kommentar zu einem TaskForge-Task hinzu.',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: 'Die Task-ID' },
+        comment: { type: 'string', description: 'Der Kommentar-Text' },
+      },
+      required: ['taskId', 'comment'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'taskforge_search',
+    description: 'Suche nach Tasks in TaskForge.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Suchbegriff' },
+      },
+      required: ['query'],
+    },
+    requiresConfirmation: false,
+  },
+  // Email Tool (CAIO agent)
+  {
+    name: 'send_email',
+    description: 'Sende eine E-Mail über Resend.',
+    parameters: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: 'Empfänger E-Mail-Adresse' },
+        subject: { type: 'string', description: 'Betreff der E-Mail' },
+        body: { type: 'string', description: 'Text-Inhalt der E-Mail' },
+        replyTo: { type: 'string', description: 'Reply-To Adresse (optional)' },
+      },
+      required: ['to', 'subject', 'body'],
+    },
+    requiresConfirmation: true,
+  },
 ];
 
-// Dynamic MCP tools (registered at runtime by McpManager)
-let MCP_TOOLS: ToolDefinition[] = [];
+// ============================================
+// UNIFIED REGISTRY INITIALIZATION
+// ============================================
+
+// Seed the unified registry with all native tools
+for (const tool of TOOL_REGISTRY) {
+  toolRegistry.register({
+    ...tool,
+    name: tool.name as string,
+    category: 'native',
+  });
+}
 
 /**
  * Register MCP tools discovered from MCP servers.
  * Called by McpManager during initialization.
  */
 export function registerMcpTools(tools: ToolDefinition[]): void {
-  MCP_TOOLS = tools;
+  // Remove old MCP tools before re-registering
+  toolRegistry.removeByCategory('mcp');
+  for (const tool of tools) {
+    toolRegistry.register({
+      ...tool,
+      name: tool.name as string,
+      category: 'mcp',
+    });
+  }
   console.info(`[registry] Registered ${tools.length} MCP tool(s)`);
 }
 
 /**
- * Get all tool definitions (native + MCP)
+ * Register meta-tools (agent coordination tools like delegateToDevo, escalateToChapo).
+ * Called by agent definitions during setup.
  */
-function getAllTools(): ToolDefinition[] {
-  return [...TOOL_REGISTRY, ...MCP_TOOLS];
+export function registerMetaTools(
+  tools: ReadonlyArray<{
+    name: string;
+    description: string;
+    parameters: { type: string; properties: Record<string, unknown>; required?: string[] };
+    requiresConfirmation: boolean;
+  }>,
+  ownerAgent: string
+): void {
+  for (const tool of tools) {
+    toolRegistry.register({
+      name: tool.name,
+      description: tool.description,
+      parameters: {
+        type: 'object' as const,
+        properties: tool.parameters.properties as unknown as Record<string, ToolPropertyDefinition>,
+        required: tool.parameters.required,
+      },
+      requiresConfirmation: tool.requiresConfirmation,
+      category: 'meta',
+      ownerAgent,
+    });
+  }
+  console.info(`[registry] Registered ${tools.length} meta-tool(s) for ${ownerAgent}`);
 }
 
-// Get tool definition by name
-export function getToolDefinition(name: string): ToolDefinition | undefined {
-  const normalized = normalizeToolName(name);
-  return getAllTools().find((t) => t.name === normalized);
+/**
+ * Register which tools an agent can access.
+ * Called once per agent during setup.
+ */
+export function registerAgentTools(agentName: string, toolNames: string[]): void {
+  toolRegistry.grantAccessAll(agentName, toolNames);
 }
 
-// Check if a tool is whitelisted
-export function isToolWhitelisted(name: string): boolean {
-  const normalized = normalizeToolName(name);
-  return getAllTools().some((t) => t.name === normalized);
-}
-
-// Check if a tool requires confirmation
-export function toolRequiresConfirmation(name: string): boolean {
-  const tool = getToolDefinition(name);
-  return tool?.requiresConfirmation ?? true; // Default to requiring confirmation for unknown tools
-}
+// ============================================
+// BACKWARD-COMPATIBLE API
+// ============================================
 
 /**
  * Normalize tool names to canonical registry format.
@@ -956,11 +1183,25 @@ export function normalizeToolName(name: string): string {
   return raw.replace(/\./g, '_');
 }
 
-// Convert to LLM tool format
+/** Get tool definition by name (delegates to unified registry) */
+export function getToolDefinition(name: string): ToolDef | undefined {
+  const normalized = normalizeToolName(name);
+  return toolRegistry.get(normalized);
+}
+
+/** Check if a tool is registered (delegates to unified registry) */
+export function isToolWhitelisted(name: string): boolean {
+  const normalized = normalizeToolName(name);
+  return toolRegistry.has(normalized);
+}
+
+/** Check if a tool requires confirmation */
+export function toolRequiresConfirmation(name: string): boolean {
+  const tool = getToolDefinition(name);
+  return tool?.requiresConfirmation ?? true; // Default to requiring confirmation for unknown tools
+}
+
+/** Convert all tools to LLM format (delegates to unified registry) */
 export function getToolsForLLM(): LLMToolDefinition[] {
-  return getAllTools().map((tool) => ({
-    name: tool.name,
-    description: tool.description,
-    parameters: tool.parameters,
-  }));
+  return toolRegistry.toLLMFormat();
 }

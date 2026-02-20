@@ -3,11 +3,12 @@
  *
  * Role: Handles codebase exploration and web search tasks.
  * Returns structured JSON summaries without modifying files.
- * Can be spawned by CHAPO, KODA, or DEVO for research tasks.
+ * Can be spawned by CHAPO or DEVO for research tasks.
  */
 
 import type { AgentDefinition } from './types.js';
 import { SCOUT_SYSTEM_PROMPT } from '../prompts/scout.js';
+import { registerMetaTools, registerAgentTools } from '../tools/registry.js';
 
 export const SCOUT_AGENT: AgentDefinition = {
   name: 'scout',
@@ -74,3 +75,7 @@ export const SCOUT_META_TOOLS = [
     requiresConfirmation: false,
   },
 ];
+
+// Register SCOUT's meta-tools and agent access in the unified registry
+registerMetaTools(SCOUT_META_TOOLS, 'scout');
+registerAgentTools('scout', SCOUT_AGENT.tools);
