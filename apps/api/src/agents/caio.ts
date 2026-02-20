@@ -13,7 +13,8 @@ import { registerMetaTools, registerAgentTools } from '../tools/registry.js';
 export const CAIO_AGENT: AgentDefinition = {
   name: 'caio',
   role: 'Communications & Administration Officer',
-  model: 'claude-sonnet-4-20250514',
+  model: 'glm-4.7', // ZAI GLM-4.7 - primary (cost-optimized)
+  fallbackModel: 'claude-sonnet-4-20250514',
 
   capabilities: {
     canManageScheduler: true,

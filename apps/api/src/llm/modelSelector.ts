@@ -12,18 +12,21 @@ import { llmRouter } from './router.js';
 const MODEL_TIERS: Record<string, ModelTier[]> = {
   // Tier 1: Fast/Cheap - simple tasks, classification, routing
   fast: [
-    { provider: 'gemini', model: 'gemini-2.0-flash' },           // Fastest, cheapest
+    { provider: 'zai', model: 'glm-4.7-flash' },                 // FREE
+    { provider: 'gemini', model: 'gemini-2.0-flash' },
     { provider: 'anthropic', model: 'claude-3-5-haiku-20241022' },
     { provider: 'openai', model: 'gpt-4o-mini' },
   ],
   // Tier 2: Balanced - most code tasks
   balanced: [
+    { provider: 'zai', model: 'glm-4.7' },                       // $0.60/$2.20
     { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
     { provider: 'openai', model: 'gpt-4o' },
     { provider: 'gemini', model: 'gemini-1.5-pro' },
   ],
   // Tier 3: Powerful - complex reasoning, architecture
   powerful: [
+    { provider: 'zai', model: 'glm-5' },                         // $1.00/$3.20
     { provider: 'anthropic', model: 'claude-opus-4-5-20251101' },
     { provider: 'anthropic', model: 'claude-opus-4-20250514' },
   ],

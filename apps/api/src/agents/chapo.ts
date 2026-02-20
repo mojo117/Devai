@@ -12,8 +12,8 @@ import { registerMetaTools, registerAgentTools } from '../tools/registry.js';
 export const CHAPO_AGENT: AgentDefinition = {
   name: 'chapo',
   role: 'Task Coordinator',
-  model: 'claude-opus-4-5-20251101', // Claude Opus 4.5 - most capable
-  fallbackModel: 'claude-sonnet-4-20250514', // Fallback if Opus unavailable
+  model: 'glm-5', // ZAI GLM-5 - primary (cost-optimized)
+  fallbackModel: 'claude-opus-4-5-20251101', // Fallback to Opus
 
   capabilities: {
     readOnly: true,

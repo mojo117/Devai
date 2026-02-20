@@ -13,7 +13,8 @@ import { registerMetaTools, registerAgentTools } from '../tools/registry.js';
 export const DEVO_AGENT: AgentDefinition = {
   name: 'devo',
   role: 'Developer & DevOps Engineer',
-  model: 'claude-sonnet-4-20250514',
+  model: 'glm-4.7', // ZAI GLM-4.7 - primary (cost-optimized)
+  fallbackModel: 'claude-sonnet-4-20250514',
 
   capabilities: {
     canWriteFiles: true,

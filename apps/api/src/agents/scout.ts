@@ -13,8 +13,8 @@ import { registerMetaTools, registerAgentTools } from '../tools/registry.js';
 export const SCOUT_AGENT: AgentDefinition = {
   name: 'scout',
   role: 'Exploration Specialist',
-  model: 'claude-sonnet-4-20250514',
-  fallbackModel: 'claude-3-5-haiku-20241022',
+  model: 'glm-4.7-flash', // ZAI GLM-4.7 Flash - FREE
+  fallbackModel: 'claude-sonnet-4-20250514',
 
   capabilities: {
     readOnly: true,

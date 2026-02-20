@@ -2,12 +2,14 @@ import type { LLMProvider, LLMProviderAdapter, GenerateRequest, GenerateResponse
 import { AnthropicProvider } from './providers/anthropic.js';
 import { OpenAIProvider } from './providers/openai.js';
 import { GeminiProvider } from './providers/gemini.js';
+import { ZAIProvider } from './providers/zai.js';
 
 // Default fallback chain
-const DEFAULT_FALLBACK_CHAIN: LLMProvider[] = ['anthropic', 'openai', 'gemini'];
+const DEFAULT_FALLBACK_CHAIN: LLMProvider[] = ['zai', 'anthropic', 'openai', 'gemini'];
 
 // Default models per provider (used when falling back to a different provider)
 const DEFAULT_MODELS: Record<LLMProvider, string> = {
+  zai: 'glm-4.7',
   anthropic: 'claude-sonnet-4-20250514',
   openai: 'gpt-4o',
   gemini: 'gemini-2.0-flash',
@@ -16,6 +18,7 @@ const DEFAULT_MODELS: Record<LLMProvider, string> = {
 // Check if a model belongs to a specific provider
 function isModelForProvider(model: string, provider: LLMProvider): boolean {
   const providerPrefixes: Record<LLMProvider, string[]> = {
+    zai: ['glm'],
     anthropic: ['claude'],
     openai: ['gpt', 'o1', 'o3'],
     gemini: ['gemini'],
@@ -40,6 +43,9 @@ export class LLMRouter {
     const openai = new OpenAIProvider();
     const gemini = new GeminiProvider();
 
+    const zai = new ZAIProvider();
+
+    this.providers.set('zai', zai);
     this.providers.set('anthropic', anthropic);
     this.providers.set('openai', openai);
     this.providers.set('gemini', gemini);
