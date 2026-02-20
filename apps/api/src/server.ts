@@ -25,6 +25,7 @@ import { registerMcpTools } from './tools/registry.js';
 import { registerProjections } from './workflow/projections/index.js';
 import { getExpiredUserfiles, deleteExpiredUserfiles } from './db/userfileQueries.js';
 import { schedulerService } from './scheduler/schedulerService.js';
+import { runDecay } from './memory/memoryStore.js';
 import { processRequest } from './agents/router.js';
 import { sendTelegramMessage } from './external/telegram.js';
 import { getDefaultNotificationChannel } from './db/schedulerQueries.js';
@@ -209,6 +210,19 @@ const start = async () => {
     // Run immediately then every 24h
     cleanupExpiredUserfiles();
     setInterval(cleanupExpiredUserfiles, 24 * 60 * 60 * 1000);
+
+    // Run memory decay daily
+    const DECAY_INTERVAL_MS = 24 * 60 * 60 * 1000;
+    const runDecayJob = async () => {
+      try {
+        const result = await runDecay();
+        console.info(`[server] memory decay: ${result.decayed} decayed, ${result.pruned} pruned`);
+      } catch (err) {
+        console.error('[server] memory decay failed:', err);
+      }
+    };
+    setTimeout(runDecayJob, 30_000);
+    setInterval(runDecayJob, DECAY_INTERVAL_MS);
   } catch (err) {
     app.log.error(err);
     process.exit(1);
