@@ -54,6 +54,13 @@ export interface Config {
   supabaseUrl: string;
   supabaseServiceKey: string;
 
+  // CAIO — TaskForge, Email, Telegram
+  taskforgeApiKey: string;
+  resendApiKey: string;
+  resendFromAddress: string;
+  telegramBotToken: string;
+  telegramAllowedChatId: string;
+
   // Persistence
   dbPath: string;
 
@@ -82,6 +89,12 @@ export function loadConfig(): Config {
     githubToken: process.env.GITHUB_TOKEN,
     githubOwner: process.env.GITHUB_OWNER,
     githubRepo: process.env.GITHUB_REPO,
+
+    taskforgeApiKey: process.env.DEVAI_TASKBOARD_API_KEY || '',
+    resendApiKey: process.env.RESEND_API_KEY || '',
+    resendFromAddress: process.env.RESEND_FROM_ADDRESS || '',
+    telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
+    telegramAllowedChatId: process.env.TELEGRAM_ALLOWED_CHAT_ID || '',
 
     projectRoot: undefined, // Disabled - use allowedRoots only
     allowedRoots,
