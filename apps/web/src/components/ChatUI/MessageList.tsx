@@ -1,7 +1,23 @@
 import { Fragment, type RefObject } from 'react';
 import type { ChatMessage, SessionSummary } from '../../types';
 import type { ToolEvent } from './types';
+import { mergeConsecutiveThinking } from './mergeEvents';
+import type { MergedToolEvent } from './mergeEvents';
 import { renderMessageContent } from './utils';
+
+const AGENT_COLORS: Record<string, string> = {
+  chapo: 'text-cyan-400',
+  devo: 'text-orange-400',
+  caio: 'text-blue-400',
+  scout: 'text-purple-400',
+};
+
+const AGENT_DOT_COLORS: Record<string, string> = {
+  chapo: 'bg-cyan-400',
+  devo: 'bg-orange-400',
+  caio: 'bg-blue-400',
+  scout: 'bg-purple-400',
+};
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -40,19 +56,23 @@ export function MessageList({
   onRestartChat,
   onNewChat,
 }: MessageListProps) {
-  const renderToolEventsBlock = (events: ToolEvent[], live: boolean) => (
-    <div className="space-y-1.5">
-      {events.map((event) => (
-        <InlineSystemEvent
-          key={event.id}
-          event={event}
-          isExpanded={expandedEvents.has(event.id)}
-          onToggle={() => toggleEventExpanded(event.id)}
-          isLoading={live}
-        />
-      ))}
-    </div>
-  );
+  const renderToolEventsBlock = (events: ToolEvent[], live: boolean) => {
+    const merged = mergeConsecutiveThinking(events);
+    return (
+      <div className="space-y-1.5">
+        {merged.map((event) => (
+          <InlineSystemEvent
+            key={event.id}
+            event={event}
+            mergedCount={event.mergedCount}
+            isExpanded={expandedEvents.has(event.id)}
+            onToggle={() => toggleEventExpanded(event.id)}
+            isLoading={live}
+          />
+        ))}
+      </div>
+    );
+  };
 
   const renderMessage = (message: ChatMessage) => {
     if (message.role === 'system') {
@@ -199,21 +219,27 @@ export function MessageList({
 /** Inline System Event — compact left-aligned badge with inline detail */
 function InlineSystemEvent({
   event,
+  mergedCount,
   isExpanded,
   onToggle,
   isLoading,
 }: {
   event: ToolEvent;
+  mergedCount?: number;
   isExpanded: boolean;
   onToggle: () => void;
   isLoading: boolean;
 }) {
   const getEventLabel = () => {
-    if (event.type === 'thinking') return 'Thinking';
-    if (event.type === 'status') return String(event.result || 'Status');
-    if (event.type === 'tool_call') return `Using: ${event.name || 'tool'}`;
-    if (event.type === 'tool_result') return `Result: ${event.name || 'tool'}`;
-    return event.type;
+    const agentPrefix = event.agent ? `${event.agent.toUpperCase()}: ` : '';
+    if (event.type === 'thinking') {
+      const countSuffix = mergedCount && mergedCount > 1 ? ` (${mergedCount}x)` : '';
+      return `${agentPrefix}Thinking${countSuffix}`;
+    }
+    if (event.type === 'status') return `${agentPrefix}${String(event.result || 'Status')}`;
+    if (event.type === 'tool_call') return `${agentPrefix}Using: ${event.name || 'tool'}`;
+    if (event.type === 'tool_result') return `${agentPrefix}Result: ${event.name || 'tool'}`;
+    return `${agentPrefix}${event.type}`;
   };
 
   const getEventColor = () => {
@@ -239,6 +265,9 @@ function InlineSystemEvent({
         onClick={hasContent ? onToggle : undefined}
         className={`inline-flex items-center gap-2 rounded-lg border text-xs px-3 py-1.5 max-w-[80%] ${getEventColor()} ${hasContent ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
       >
+        {event.agent && (
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${AGENT_DOT_COLORS[event.agent] || 'bg-gray-400'}`} />
+        )}
         {event.type === 'thinking' && (
           <span className={`w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 ${isLoading ? 'animate-pulse' : ''}`} />
         )}
