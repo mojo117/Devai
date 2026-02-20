@@ -164,6 +164,22 @@ ssh root@10.0.0.5 "pm2 status"
 - **Dev Port**: 3008 (frontend), 3009 (API)
 - **Docs**: [Architecture](./docs/architecture.md) | [Agents](./docs/agents.md) | [Plans](./docs/plans/)
 
+## Database (Supabase / PostgreSQL)
+
+| Item | Value |
+|------|-------|
+| **Provider** | Supabase |
+| **Project Ref** | `zzmvofskibpffcxbukuk` |
+| **URL** | `https://zzmvofskibpffcxbukuk.supabase.co` |
+| **Config** | `/opt/Devai/.env` on Clawd (`DEVAI_SUPABASE_URL`, `DEVAI_SUPABASE_KEY`) |
+
+**Tables:**
+- `sessions` — chat sessions (id, title, created_at)
+- `messages` — chat messages (id, session_id, role, content, timestamp, tool_events JSONB)
+- `settings` — key-value user settings
+
+**Access from code:** `apps/api/src/db/index.ts` (Supabase client), `apps/api/src/db/queries.ts` (queries)
+
 ## Multi-Agent System (CHAPO Decision Loop)
 
 > **Full reference:** [docs/agents.md](./docs/agents.md)
