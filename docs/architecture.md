@@ -1,5 +1,5 @@
 # DevAI Architecture
-Last updated 2026-02-18
+Last updated 2026-02-20
 
 This document describes the architecture of DevAI, including the CHAPO Decision Loop and the multi-agent system.
 
@@ -11,14 +11,16 @@ This document describes the architecture of DevAI, including the CHAPO Decision 
 
 DevAI is an AI-powered assistant platform. The user interacts with **Chapo** -- a versatile AI agent, orchestrator, and personal assistant who helps with coding, automation, task management, research, and casual conversation.
 
-**Architecture: CHAPO Decision Loop with DEVO + SCOUT**
+**Architecture: CHAPO Decision Loop with DEVO + SCOUT + CAIO**
 
 ```
                     +----------------------------+
                     |           USER             |
-                    +-------------+--------------+
-                                  |
-                                  v
+                    +-----+-----------+----------+
+                          |           |
+                     Web UI (WS)  Telegram
+                          |           |
+                          v           v
               +--------------------------------------+
               |     CHAPO -- DECISION LOOP            |
               |                                       |
@@ -32,19 +34,22 @@ DevAI is an AI-powered assistant platform. The user interacts with **Chapo** -- 
               |  | Validator     |  | Context       | |
               |  +---------------+  +---------------+ |
               |                                       |
-              |  4 Actions:                           |
+              |  5 Actions:                           |
               |  +--------+  +--------+  +--------+  |
               |  | ANSWER |  | ASK    |  | TOOL   |  |
               |  +--------+  +--------+  +--------+  |
-              |  +----------+                         |
-              |  | DELEGATE |                         |
-              |  +----+-----+                         |
-              |       |                               |
-              |  +----v---------+  +-----------+      |
-              |  | DEVO         |  | SCOUT     |      |
-              |  | (Dev+DevOps) |  | (Explorer)|      |
-              |  +--------------+  +-----------+      |
+              |  +----------+  +-------------------+  |
+              |  | DELEGATE |  | DELEGATE_PARALLEL |  |
+              |  +----+-----+  +--------+----------+  |
+              |       |                 |              |
+              |  +----v---------+  +----v------+  +--------+
+              |  | DEVO         |  | SCOUT     |  | CAIO   |
+              |  | (Dev+DevOps) |  | (Explorer)|  | (Comms)|
+              |  +--------------+  +-----------+  +--------+
               +--------------------------------------+
+                          ^
+                          |
+                    Scheduler (cron)
 ```
 
 **Key design principles:**
@@ -52,8 +57,10 @@ DevAI is an AI-powered assistant platform. The user interacts with **Chapo** -- 
 - No separate decision engine -- the LLM's `tool_calls` ARE the decisions
 - Errors feed back into the loop as context (never crash)
 - Self-validation runs before every ANSWER (advisory, never blocks)
-- Delegation via `delegateToDevo` / `delegateToScout` tool calls
+- Delegation via `delegateToDevo` / `delegateToScout` / `delegateToCaio` tool calls
+- `delegateParallel` fires multiple agents concurrently via Promise.all()
 - Memory tools executed directly by CHAPO within the loop
+- External input: Telegram webhook and cron scheduler feed into processRequest()
 - Approval flow supported; can be bypassed in trusted mode
 - Loop exhaustion asks user for next steps
 
@@ -71,6 +78,7 @@ apps/
 |       |   +-- chapo.ts          # CHAPO agent definition
 |       |   +-- devo.ts           # DEVO agent definition
 |       |   +-- scout.ts          # SCOUT agent definition
+|       |   +-- caio.ts           # CAIO agent definition (comms & admin)
 |       |   +-- error-handler.ts  # AgentErrorHandler (resilient error wrapping)
 |       |   +-- self-validation.ts# SelfValidator (LLM reviews its own answers)
 |       |   +-- conversation-manager.ts # 120k token sliding window
@@ -84,6 +92,7 @@ apps/
 |       |   +-- chapo.ts          # CHAPO_SYSTEM_PROMPT (personality + identity)
 |       |   +-- devo.ts           # DEVO_SYSTEM_PROMPT
 |       |   +-- scout.ts          # SCOUT_SYSTEM_PROMPT
+|       |   +-- caio.ts           # CAIO_SYSTEM_PROMPT (comms & admin)
 |       |   +-- self-validation.ts# VALIDATION_SYSTEM_PROMPT
 |       |   +-- context.ts        # MEMORY_BEHAVIOR_BLOCK
 |       +-- tools/                # Tool implementations
@@ -97,6 +106,13 @@ apps/
 |       |   +-- web.ts            # Web search/fetch
 |       |   +-- memory.ts         # Memory tools
 |       |   +-- pm2.ts            # PM2 management
+|       |   +-- scheduler.ts      # Scheduler & reminder tools
+|       |   +-- taskforge.ts      # TaskForge ticket management tools
+|       |   +-- email.ts          # Email via Resend REST API
+|       +-- external/             # External platform integrations
+|       |   +-- telegram.ts       # Telegram Bot API client
+|       +-- scheduler/            # Cron scheduler service
+|       |   +-- schedulerService.ts # In-process croner, Supabase-backed
 |       +-- routes/               # API routes
 |       |   +-- actions.ts        # Action endpoints
 |       |   +-- auth.ts           # Authentication
@@ -106,6 +122,7 @@ apps/
 |       |   +-- settings.ts       # Settings
 |       |   +-- skills.ts         # Skills registry
 |       |   +-- health.ts         # Health check
+|       |   +-- external.ts       # Telegram webhook + external platforms
 |       +-- websocket/            # WebSocket handlers
 |       |   +-- routes.ts         # WS /api/ws/chat + /api/ws/actions
 |       |   +-- chatGateway.ts    # Chat event broadcast & replay
@@ -276,20 +293,22 @@ interface ChapoLoopResult {
 
 ## Agents
 
-Three agents with distinct roles:
+Four agents with distinct roles:
 
 | Agent | Role | Tools | System Prompt |
 |-------|------|-------|---------------|
 | **CHAPO** | Coordinator | All tools (via ChapoLoop) | `CHAPO_SYSTEM_PROMPT` |
 | **DEVO** | Developer + DevOps | `fs_*`, `git_*`, `bash_execute`, `ssh_execute`, `pm2_*`, `npm_*`, `github_*` | `DEVO_SYSTEM_PROMPT` |
 | **SCOUT** | Exploration Specialist | `fs_readFile`, `fs_glob`, `fs_grep`, `web_search`, `web_fetch`, `context_*` | `SCOUT_SYSTEM_PROMPT` |
+| **CAIO** | Communications & Admin | `taskforge_*`, `scheduler_*`, `send_email`, `reminder_create`, `notify_user`, `memory_*` | `CAIO_SYSTEM_PROMPT` |
 
 ### CHAPO (Coordinator)
 
 CHAPO is the main agent the user interacts with. It runs the decision loop and can:
 - Answer directly (chat, explanations, brainstorming)
 - Use tools itself (memory, file reads, web search)
-- Delegate complex work to DEVO or SCOUT
+- Delegate complex work to DEVO, SCOUT, or CAIO
+- Fire multiple agents in parallel via `delegateParallel`
 - Ask the user for clarification
 
 ### DEVO (Developer + DevOps)
@@ -300,10 +319,14 @@ DEVO handles development and operations tasks. When CHAPO delegates via `delegat
 
 SCOUT specializes in codebase exploration and web research. Runs as a focused sub-agent spawned by CHAPO via `delegateToScout`. Returns structured results: relevant files, code patterns, web findings, recommendations.
 
+### CAIO (Communications & Administration Officer)
+
+CAIO handles non-code tasks: TaskForge ticket management, email sending, scheduler jobs, reminders, and notifications. Has NO access to filesystem, bash, SSH, git, or PM2. Can delegate research to SCOUT and escalate issues back to CHAPO.
+
 ### Agent Definitions
 
 ```typescript
-type AgentName = 'chapo' | 'devo' | 'scout';
+type AgentName = 'chapo' | 'devo' | 'scout' | 'caio';
 
 interface AgentDefinition {
   name: AgentName;
@@ -572,6 +595,9 @@ Tools are defined in `apps/api/src/tools/registry.ts`. Each tool is whitelisted 
 | **Web** | `web_search`, `web_fetch` |
 | **Context** | `context_listDocuments`, `context_readDocument`, `context_searchDocuments` |
 | **Memory** | `memory_remember`, `memory_search`, `memory_readToday` |
+| **Scheduler** | `scheduler_create`, `scheduler_list`, `scheduler_update`, `scheduler_delete`, `reminder_create`, `notify_user` |
+| **TaskForge** | `taskforge_list_tasks`, `taskforge_get_task`, `taskforge_create_task`, `taskforge_move_task`, `taskforge_add_comment`, `taskforge_search` |
+| **Email** | `send_email` |
 | **Logs** | `logs_getStagingLogs` |
 
 ### Agent --> Tool Mapping
@@ -581,6 +607,7 @@ Tools are defined in `apps/api/src/tools/registry.ts`. Each tool is whitelisted 
 | **CHAPO** | All tools (coordinator) |
 | **DEVO** | `fs_*`, `git_*`, `bash_execute`, `ssh_execute`, `github_*`, `pm2_*`, `npm_*` |
 | **SCOUT** | `fs_readFile`, `fs_glob`, `fs_grep`, `web_search`, `web_fetch`, `context_*` |
+| **CAIO** | `taskforge_*`, `scheduler_*`, `reminder_create`, `notify_user`, `send_email`, `memory_*` |
 
 ### Special Tools (Coordination)
 
@@ -589,11 +616,84 @@ These are meta-tools used for coordination within the decision loop:
 | Tool | Available to | Purpose |
 |------|-------------|---------|
 | `delegateToDevo` | CHAPO | Delegate a dev/devops task to DEVO sub-loop |
-| `delegateToKoda` | CHAPO | Alias for `delegateToDevo` (legacy name) |
-| `delegateToScout` | CHAPO, DEVO | Delegate exploration/research to SCOUT |
+| `delegateToCaio` | CHAPO | Delegate comms/admin task to CAIO sub-loop |
+| `delegateToScout` | CHAPO, DEVO, CAIO | Delegate exploration/research to SCOUT |
+| `delegateParallel` | CHAPO | Fire multiple agents concurrently (e.g. DEVO + CAIO) |
 | `askUser` | CHAPO | Pause the loop and ask the user a question |
 | `requestApproval` | CHAPO | Request user approval (pause loop) |
-| `escalateToChapo` | DEVO | Escalate an issue back to CHAPO from DEVO sub-loop |
+| `escalateToChapo` | DEVO, CAIO | Escalate an issue back to CHAPO from sub-loop |
+
+---
+
+## Scheduler Service
+
+DevAI includes an in-process cron scheduler backed by Supabase, enabling automated recurring tasks and one-time reminders.
+
+### Architecture
+
+```
+Supabase (scheduled_jobs table)
+      |
+      v
+SchedulerService (in-process croner)
+      |
+      +-- Job fires --> processRequest(instruction) --> ChapoLoop
+      |
+      +-- Notification --> sendTelegramMessage() / console.log
+      |
+      +-- Error --> ring buffer (last 20) --> injected into CHAPO system context
+```
+
+### Features
+
+- **Cron jobs**: Standard cron expressions, stored in Supabase, registered with croner
+- **Reminders**: One-time fire-and-forget, auto-deleted after execution
+- **Error tracking**: Ring buffer of last 20 errors, injected into CHAPO's system context so it can react to failing jobs
+- **Notification channels**: Per-job channel override or global default (from `external_sessions` table)
+
+### Tools
+
+Scheduler tools are owned by CAIO: `scheduler_create`, `scheduler_list`, `scheduler_update`, `scheduler_delete`, `reminder_create`, `notify_user`.
+
+---
+
+## External Messaging (Telegram)
+
+DevAI can be accessed from Telegram via a webhook. This enables mobile access and scheduled job notifications.
+
+### Flow
+
+```
+Telegram Bot API
+      |
+      v
+POST /api/telegram/webhook (no JWT auth — single-user chat ID check)
+      |
+      v
+getOrCreateExternalSession('telegram', userId, chatId)
+      |
+      v
+processRequest(sessionId, text, [], null, noop)
+      |
+      v
+ExternalOutputProjection listens for WF_COMPLETED/GATE_QUESTION_QUEUED
+      |
+      v
+sendTelegramMessage(chatId, response)
+```
+
+### Security
+
+- **Single-user**: Only the configured `TELEGRAM_ALLOWED_CHAT_ID` can interact
+- **No auth middleware**: The `/api/telegram/*` path is excluded from JWT verification
+- **Fire-and-forget**: Webhook responds 200 immediately, processing happens in background
+
+### Projection
+
+`ExternalOutputProjection` implements the `Projection` interface and listens for:
+- `WF_COMPLETED` — sends final answer to Telegram
+- `GATE_QUESTION_QUEUED` — sends question to Telegram
+- `GATE_APPROVAL_QUEUED` — sends approval request to Telegram
 
 ---
 
