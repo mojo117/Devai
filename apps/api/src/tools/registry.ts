@@ -52,7 +52,16 @@ export type ToolName =
   | 'scheduler_update'
   | 'scheduler_delete'
   | 'reminder_create'
-  | 'notify_user';
+  | 'notify_user'
+  // TaskForge Tools (CAIO)
+  | 'taskforge_list_tasks'
+  | 'taskforge_get_task'
+  | 'taskforge_create_task'
+  | 'taskforge_move_task'
+  | 'taskforge_add_comment'
+  | 'taskforge_search'
+  // Email Tool (CAIO)
+  | 'send_email';
 
 export interface ToolPropertyDefinition {
   type: string;
@@ -994,6 +1003,100 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
       required: ['message'],
     },
     requiresConfirmation: false,
+  },
+
+  // TaskForge Tools (CAIO agent)
+  {
+    name: 'taskforge_list_tasks',
+    description: 'Liste Tasks aus TaskForge auf. Optional nach Projekt und Status filtern.',
+    parameters: {
+      type: 'object',
+      properties: {
+        project: { type: 'string', description: 'Projektname (optional)' },
+        status: { type: 'string', description: 'Status-Filter: initiierung, planung, umsetzung, review, done (optional)' },
+      },
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'taskforge_get_task',
+    description: 'Hole Details zu einem bestimmten Task aus TaskForge.',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: 'Die Task-ID' },
+      },
+      required: ['taskId'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'taskforge_create_task',
+    description: 'Erstelle einen neuen Task in TaskForge.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Task-Titel (imperativ)' },
+        description: { type: 'string', description: 'Detaillierte Beschreibung mit Akzeptanzkriterien' },
+        status: { type: 'string', description: 'Initialer Status (default: initiierung)', enum: ['initiierung', 'planung', 'umsetzung', 'review'] },
+      },
+      required: ['title', 'description'],
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'taskforge_move_task',
+    description: 'Verschiebe einen Task in einen neuen Status.',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: 'Die Task-ID' },
+        newStatus: { type: 'string', description: 'Neuer Status', enum: ['initiierung', 'planung', 'umsetzung', 'review', 'done'] },
+      },
+      required: ['taskId', 'newStatus'],
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'taskforge_add_comment',
+    description: 'Füge einen Kommentar zu einem TaskForge-Task hinzu.',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: 'Die Task-ID' },
+        comment: { type: 'string', description: 'Der Kommentar-Text' },
+      },
+      required: ['taskId', 'comment'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'taskforge_search',
+    description: 'Suche nach Tasks in TaskForge.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Suchbegriff' },
+      },
+      required: ['query'],
+    },
+    requiresConfirmation: false,
+  },
+  // Email Tool (CAIO agent)
+  {
+    name: 'send_email',
+    description: 'Sende eine E-Mail über Resend.',
+    parameters: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: 'Empfänger E-Mail-Adresse' },
+        subject: { type: 'string', description: 'Betreff der E-Mail' },
+        body: { type: 'string', description: 'Text-Inhalt der E-Mail' },
+        replyTo: { type: 'string', description: 'Reply-To Adresse (optional)' },
+      },
+      required: ['to', 'subject', 'body'],
+    },
+    requiresConfirmation: true,
   },
 ];
 
