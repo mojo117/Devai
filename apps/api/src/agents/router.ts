@@ -507,7 +507,7 @@ Antworte mit einem JSON-Block:
 }
 \`\`\``;
 
-  const response = await llmRouter.generate('anthropic', {
+  const response = await llmRouter.generateWithFallback('zai', {
     model: chapo.model,
     messages: [{ role: 'user', content: userMessage }],
     systemPrompt,
@@ -603,7 +603,7 @@ Antworte am Ende mit einem JSON-Block:
   while (turn < MAX_TURNS) {
     turn++;
 
-    const response = await llmRouter.generate('anthropic', {
+    const response = await llmRouter.generateWithFallback('zai', {
       model: devo.model,
       messages,
       systemPrompt,
@@ -770,7 +770,7 @@ Antworte mit einem JSON-Block:
 }
 \`\`\``;
 
-  const response = await llmRouter.generate('anthropic', {
+  const response = await llmRouter.generateWithFallback('zai', {
     model: chapo.model,
     messages: [{ role: 'user', content: userMessage }],
     systemPrompt,
@@ -1164,7 +1164,7 @@ export async function spawnScout(
   while (turn < MAX_TURNS) {
     turn++;
 
-    const response = await llmRouter.generate('anthropic', {
+    const response = await llmRouter.generateWithFallback('zai', {
       model: scout.model,
       messages,
       systemPrompt: `${scout.systemPrompt}\n${systemContextBlock}`,

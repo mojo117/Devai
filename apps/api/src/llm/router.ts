@@ -3,6 +3,7 @@ import { AnthropicProvider } from './providers/anthropic.js';
 import { OpenAIProvider } from './providers/openai.js';
 import { GeminiProvider } from './providers/gemini.js';
 import { ZAIProvider } from './providers/zai.js';
+import { logUsage } from './usage-logger.js';
 
 // Default fallback chain
 const DEFAULT_FALLBACK_CHAIN: LLMProvider[] = ['zai', 'anthropic', 'openai', 'gemini'];
@@ -77,7 +78,11 @@ export class LLMRouter {
       throw new Error(`Provider ${providerName} is not configured. Please set the API key.`);
     }
 
-    return provider.generate(request);
+    const response = await provider.generate(request);
+    if (response.usage) {
+      logUsage(providerName, request.model || 'unknown', response.usage.inputTokens, response.usage.outputTokens);
+    }
+    return response;
   }
 
   /**
