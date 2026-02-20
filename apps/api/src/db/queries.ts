@@ -4,6 +4,11 @@ import type { ChatMessage } from '@devai/shared';
 import { DEFAULT_TRUST_MODE } from '../config/trust.js';
 
 const DEFAULT_USER_ID = 'local';
+let warnedMissingAgentStatesTable = false;
+
+function isMissingAgentStatesTableError(error: { code?: string; message?: string } | null): boolean {
+  return Boolean(error?.code === 'PGRST205' && /agent_states/i.test(error?.message || ''));
+}
 
 export interface SessionSummary {
   id: string;
@@ -387,6 +392,16 @@ export async function getAgentState(sessionId: string): Promise<DbAgentStateRow 
     .single();
 
   if (error) {
+    if (isMissingAgentStatesTableError(error)) {
+      if (!warnedMissingAgentStatesTable) {
+        warnedMissingAgentStatesTable = true;
+        console.warn(
+          '[state] Persistence disabled: table "agent_states" is missing in Supabase. Apply DB migration to re-enable state persistence.',
+        );
+      }
+      return null;
+    }
+
     // PGRST116 = row not found
     if (error.code === 'PGRST116') return null;
     console.error('Failed to get agent state:', error);
@@ -407,6 +422,16 @@ export async function upsertAgentState(sessionId: string, state: unknown): Promi
     }, { onConflict: 'session_id' });
 
   if (error) {
+    if (isMissingAgentStatesTableError(error)) {
+      if (!warnedMissingAgentStatesTable) {
+        warnedMissingAgentStatesTable = true;
+        console.warn(
+          '[state] Persistence disabled: table "agent_states" is missing in Supabase. Apply DB migration to re-enable state persistence.',
+        );
+      }
+      return;
+    }
+
     console.error('Failed to upsert agent state:', error);
     // Surface persistence failures to callers so they can retry/backoff instead of silently dropping writes.
     throw new Error(`Failed to upsert agent state: ${error.message}`);

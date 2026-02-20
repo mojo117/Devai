@@ -5,6 +5,7 @@ import { loadClaudeMdContext, formatClaudeMdBlock } from '../scanner/claudeMdLoa
 import { loadWorkspaceMdContext, formatWorkspaceMdBlock, type WorkspaceLoadMode } from '../scanner/workspaceMdLoader.js';
 import { getSetting } from '../db/queries.js';
 import { MEMORY_BEHAVIOR_BLOCK } from '../prompts/context.js';
+import { getSchedulerErrors } from '../scheduler/schedulerService.js';
 
 const GLOBAL_CONTEXT_MAX_CHARS = 4000;
 
@@ -128,12 +129,22 @@ export async function refreshGlobalContextBlockForSession(sessionId: string): Pr
 export function getCombinedSystemContextBlock(sessionId: string): string {
   const state = stateManager.getState(sessionId);
   const info = state?.taskContext.gatheredInfo || {};
+  const schedulerErrors = getSchedulerErrors();
+  const schedulerErrorBlock = schedulerErrors.length > 0
+    ? [
+      '## Letzte Scheduler-Fehler',
+      ...schedulerErrors.slice(-5).map((entry) =>
+        `- [${entry.timestamp}] ${entry.jobName} (${entry.jobId}): ${entry.error}`
+      ),
+    ].join('\n')
+    : '';
 
   const blocks = [
     (info.devaiMdBlock as string) || '',
     (info.claudeMdBlock as string) || '',
     (info.workspaceMdBlock as string) || '',
     (info.globalContextBlock as string) || '',
+    schedulerErrorBlock,
   ]
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);

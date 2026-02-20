@@ -164,13 +164,8 @@ class SchedulerService {
     const failures = job.consecutive_failures + 1;
     console.error(`[Scheduler] Job "${job.name}" failed (${failures}/${MAX_CONSECUTIVE_FAILURES}): ${errorMessage}`);
 
-    // Track error in ring buffer
-    this.pushError({
-      jobId: job.id,
-      jobName: job.name,
-      error: errorMessage,
-      timestamp,
-    });
+    // Track error in ring buffer for CHAPO context injection.
+    addSchedulerError(job.name, errorMessage, job.id);
 
     // Retry once after delay
     if (failures === 1) {
@@ -233,6 +228,10 @@ class SchedulerService {
     }
   }
 
+  recordError(error: SchedulerError): void {
+    this.pushError(error);
+  }
+
   /**
    * Get recent scheduler errors for CHAPO context injection.
    */
@@ -257,3 +256,16 @@ class SchedulerService {
 
 /** Singleton */
 export const schedulerService = new SchedulerService();
+
+export function addSchedulerError(jobName: string, error: string, jobId: string = 'unknown'): void {
+  schedulerService.recordError({
+    jobId,
+    jobName,
+    error,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+export function getSchedulerErrors(): ReadonlyArray<SchedulerError> {
+  return schedulerService.getRecentErrors();
+}

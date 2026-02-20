@@ -4,6 +4,7 @@ import { createEvent } from '../events/envelope.js';
 import type { EventContext } from '../events/envelope.js';
 import {
   AGENT_STARTED,
+  AGENT_DELEGATED,
   AGENT_SWITCHED,
   TOOL_CALL_STARTED,
   GATE_QUESTION_QUEUED,
@@ -66,6 +67,32 @@ describe('StreamProjection', () => {
       type: 'agent_switch',
       from: 'chapo',
       to: 'devo',
+    }));
+  });
+
+  it('maps AGENT_DELEGATED with delegation contract metadata', () => {
+    const event = createEvent(makeCtx(), AGENT_DELEGATED, {
+      from: 'chapo',
+      to: 'caio',
+      task: 'Sende Update an den Kunden',
+      domain: 'communication',
+      objective: 'Kundenstatus-Update senden',
+      constraints: ['formal', 'kurz'],
+      expectedOutcome: 'Kunde hat eine klare Statusmail',
+    });
+
+    projection.handle(event);
+
+    expect(emitChatEvent).toHaveBeenCalledWith('sess-1', expect.objectContaining({
+      type: 'delegation',
+      from: 'chapo',
+      to: 'caio',
+      task: 'Sende Update an den Kunden',
+      domain: 'communication',
+      objective: 'Kundenstatus-Update senden',
+      constraints: ['formal', 'kurz'],
+      expectedOutcome: 'Kunde hat eine klare Statusmail',
+      requestId: 'req-1',
     }));
   });
 
@@ -146,6 +173,27 @@ describe('StreamProjection', () => {
 
     expect(emitChatEvent).toHaveBeenCalledWith('sess-1', expect.objectContaining({
       requestId: 'my-req-123',
+    }));
+  });
+
+  it('normalizes legacy nested question payloads', () => {
+    const event = createEvent(makeCtx(), GATE_QUESTION_QUEUED, {
+      question: {
+        questionId: 'q-legacy-1',
+        question: 'Welcher Betreff?',
+        fromAgent: 'chapo',
+      },
+    });
+
+    projection.handle(event);
+
+    expect(emitChatEvent).toHaveBeenCalledWith('sess-1', expect.objectContaining({
+      type: 'user_question',
+      question: expect.objectContaining({
+        questionId: 'q-legacy-1',
+        question: 'Welcher Betreff?',
+        fromAgent: 'chapo',
+      }),
     }));
   });
 });

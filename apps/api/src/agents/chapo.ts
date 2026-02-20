@@ -18,6 +18,7 @@ export const CHAPO_AGENT: AgentDefinition = {
   capabilities: {
     readOnly: true,
     canDelegateToDevo: true,
+    canDelegateToCaio: true,
     canDelegateToScout: true,
     canAskUser: true,
     canRequestApproval: true,
@@ -42,6 +43,8 @@ export const CHAPO_AGENT: AgentDefinition = {
     'memory_readToday',
     // Meta-tools for coordination
     'delegateToDevo',
+    'delegateToCaio',
+    'delegateParallel',
     'delegateToScout',
     'askUser',
     'requestApproval',
@@ -54,40 +57,158 @@ export const CHAPO_AGENT: AgentDefinition = {
 export const CHAPO_META_TOOLS = [
   {
     name: 'delegateToDevo',
-    description: 'Delegiere Code- und DevOps-Arbeit an DEVO (Developer & DevOps Engineer). Nutze dies für: Dateien erstellen/bearbeiten/löschen, Code refactoring, neue Features implementieren, Git operations, npm commands, SSH, PM2, GitHub Actions.',
+    description: 'Delegiere Entwicklungs-/DevOps-Aufgaben an DEVO. Entscheide nur die Domäne und das Ziel; DEVO wählt die konkreten Tools.',
     parameters: {
       type: 'object',
       properties: {
-        task: {
+        domain: {
           type: 'string',
-          description: 'Beschreibung der Aufgabe für DEVO',
+          enum: ['development'],
+          description: 'Delegationsdomäne für DEVO.',
+        },
+        objective: {
+          type: 'string',
+          description: 'Konkretes Ziel der Delegation (ohne Toolnamen).',
         },
         context: {
           type: 'object',
-          description: 'Gesammelter Kontext (Server-Info, Git-Status)',
+          description: 'Zusätzlicher Kontext (Fakten, Rahmenbedingungen).',
         },
-        commands: {
+        contextFacts: {
           type: 'array',
-          description: 'Vorgeschlagene Befehle (optional)',
+          description: 'Optionale Faktenpunkte als Strings.',
+          items: { type: 'string' },
         },
         constraints: {
           type: 'array',
-          description: 'Einschränkungen oder besondere Anweisungen',
+          description: 'Einschränkungen/Leitplanken für die Ausführung.',
+          items: { type: 'string' },
+        },
+        expectedOutcome: {
+          type: 'string',
+          description: 'Erwartetes Ergebnis als Klartext.',
+        },
+        task: {
+          type: 'string',
+          description: 'Legacy-Feld: wird als objective interpretiert.',
         },
       },
-      required: ['task'],
+      required: ['domain', 'objective'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'delegateToCaio',
+    description: 'Delegiere Kommunikations-/Admin-Aufgaben an CAIO. Entscheide nur die Domäne und das Ziel; CAIO wählt die konkreten Tools.',
+    parameters: {
+      type: 'object',
+      properties: {
+        domain: {
+          type: 'string',
+          enum: ['communication'],
+          description: 'Delegationsdomäne für CAIO.',
+        },
+        objective: {
+          type: 'string',
+          description: 'Konkretes Ziel der Delegation (ohne Toolnamen).',
+        },
+        context: {
+          type: 'object',
+          description: 'Zusätzlicher Kontext (Fakten, Rahmenbedingungen).',
+        },
+        contextFacts: {
+          type: 'array',
+          description: 'Optionale Faktenpunkte als Strings.',
+          items: { type: 'string' },
+        },
+        constraints: {
+          type: 'array',
+          description: 'Einschränkungen/Leitplanken für die Ausführung.',
+          items: { type: 'string' },
+        },
+        expectedOutcome: {
+          type: 'string',
+          description: 'Erwartetes Ergebnis als Klartext.',
+        },
+        task: {
+          type: 'string',
+          description: 'Legacy-Feld: wird als objective interpretiert.',
+        },
+      },
+      required: ['domain', 'objective'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'delegateParallel',
+    description: 'Führe mehrere unabhängige Delegationen parallel aus (DEVO/CAIO/SCOUT). Nur nutzen, wenn keine harte Datenabhängigkeit zwischen den Teilaufgaben besteht.',
+    parameters: {
+      type: 'object',
+      properties: {
+        delegations: {
+          type: 'array',
+          description: 'Liste der Delegationen',
+          items: {
+            type: 'object',
+            properties: {
+              agent: {
+                type: 'string',
+                enum: ['devo', 'caio', 'scout'],
+                description: 'Ziel-Agent',
+              },
+              domain: {
+                type: 'string',
+                enum: ['development', 'communication', 'research'],
+                description: 'Delegationsdomäne für diesen Teilauftrag.',
+              },
+              objective: {
+                type: 'string',
+                description: 'Ziel/Aufgabe für den Ziel-Agenten (ohne Toolnamen).',
+              },
+              context: {
+                type: 'object',
+                description: 'Optionaler Zusatzkontext.',
+              },
+              constraints: {
+                type: 'array',
+                description: 'Optionale Leitplanken.',
+                items: { type: 'string' },
+              },
+              expectedOutcome: {
+                type: 'string',
+                description: 'Optionales erwartetes Ergebnis.',
+              },
+              task: {
+                type: 'string',
+                description: 'Legacy-Feld: wird als objective interpretiert.',
+              },
+            },
+            required: ['agent', 'domain', 'objective'],
+          },
+        },
+      },
+      required: ['delegations'],
     },
     requiresConfirmation: false,
   },
   {
     name: 'delegateToScout',
-    description: 'Delegiere Exploration/Recherche an SCOUT. Nutze dies für: Codebase durchsuchen, Web-Recherche, Dokumentation finden, Muster erkennen.',
+    description: 'Delegiere Exploration/Recherche an SCOUT. Entscheide Domäne + Ziel, SCOUT wählt die Recherche-Tools.',
     parameters: {
       type: 'object',
       properties: {
-        query: {
+        domain: {
+          type: 'string',
+          enum: ['research'],
+          description: 'Delegationsdomäne für SCOUT.',
+        },
+        objective: {
           type: 'string',
           description: 'Was soll SCOUT suchen/erforschen?',
+        },
+        query: {
+          type: 'string',
+          description: 'Legacy-Feld: wird als objective interpretiert.',
         },
         scope: {
           type: 'string',
@@ -95,11 +216,20 @@ export const CHAPO_META_TOOLS = [
           description: 'Wo soll gesucht werden? (default: both)',
         },
         context: {
-          type: 'string',
+          type: 'object',
           description: 'Zusätzlicher Kontext für die Suche (optional)',
         },
+        constraints: {
+          type: 'array',
+          description: 'Optionale Leitplanken für die Recherche.',
+          items: { type: 'string' },
+        },
+        expectedOutcome: {
+          type: 'string',
+          description: 'Erwartetes Ergebnis als Klartext.',
+        },
       },
-      required: ['query'],
+      required: ['domain', 'objective'],
     },
     requiresConfirmation: false,
   },
@@ -116,6 +246,7 @@ export const CHAPO_META_TOOLS = [
         options: {
           type: 'array',
           description: 'Mögliche Antworten (optional)',
+          items: { type: 'string' },
         },
         context: {
           type: 'string',
@@ -144,6 +275,7 @@ export const CHAPO_META_TOOLS = [
         actions: {
           type: 'array',
           description: 'Liste der geplanten Aktionen',
+          items: { type: 'object' },
         },
       },
       required: ['description', 'riskLevel'],

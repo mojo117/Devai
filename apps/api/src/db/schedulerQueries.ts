@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid';
 import { getSupabase } from './index.js';
+import { createSession } from './queries.js';
 
 // ============================================
 // Scheduled Jobs
@@ -226,6 +227,70 @@ export async function getDefaultNotificationChannel(): Promise<ExternalSessionRo
   }
 
   return data as ExternalSessionRow;
+}
+
+export async function getExternalSessionBySessionId(
+  sessionId: string
+): Promise<ExternalSessionRow | null> {
+  const { data, error } = await getSupabase()
+    .from('external_sessions')
+    .select('*')
+    .eq('session_id', sessionId)
+    .order('created_at', { ascending: true })
+    .limit(1);
+
+  if (error) {
+    console.error('[ExternalSession] Failed to get session by session_id:', error);
+    return null;
+  }
+
+  const rows = (data || []) as ExternalSessionRow[];
+  return rows[0] || null;
+}
+
+export async function getOrCreateExternalSession(
+  platform: string,
+  externalUserId: string,
+  externalChatId: string
+): Promise<ExternalSessionRow> {
+  const existing = await getExternalSession(platform, externalUserId);
+  if (existing) {
+    if (existing.external_chat_id !== externalChatId) {
+      const { error } = await getSupabase()
+        .from('external_sessions')
+        .update({ external_chat_id: externalChatId })
+        .eq('id', existing.id);
+      if (error) {
+        console.error('[ExternalSession] Failed to update external_chat_id:', error);
+      } else {
+        existing.external_chat_id = externalChatId;
+      }
+    }
+    return existing;
+  }
+
+  const session = await createSession(`${platform}:${externalUserId}`);
+  return createExternalSession({
+    platform,
+    externalUserId,
+    externalChatId,
+    sessionId: session.id,
+  });
+}
+
+export async function updateExternalSessionSessionId(
+  id: string,
+  sessionId: string
+): Promise<void> {
+  const { error } = await getSupabase()
+    .from('external_sessions')
+    .update({ session_id: sessionId })
+    .eq('id', id);
+
+  if (error) {
+    console.error('[ExternalSession] Failed to update session_id:', error);
+    throw new Error(`Failed to update external session binding: ${error.message}`);
+  }
 }
 
 export async function setDefaultNotificationChannel(id: string): Promise<void> {

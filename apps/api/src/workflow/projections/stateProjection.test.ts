@@ -4,6 +4,7 @@ import { createEvent } from '../events/envelope.js';
 import type { EventContext } from '../events/envelope.js';
 import {
   AGENT_STARTED,
+  AGENT_DELEGATED,
   AGENT_SWITCHED,
   GATE_QUESTION_QUEUED,
   GATE_APPROVAL_QUEUED,
@@ -25,6 +26,7 @@ vi.mock('../../agents/stateManager.js', () => ({
   addPendingApproval: vi.fn(),
   flushState: vi.fn().mockResolvedValue(undefined),
   setOriginalRequest: vi.fn(),
+  setGatheredInfo: vi.fn(),
   updateTaskStatus: vi.fn(),
 }));
 
@@ -73,6 +75,31 @@ describe('StateProjection', () => {
     await projection.handle(event);
 
     expect(stateManager.setActiveAgent).toHaveBeenCalledWith('sess-1', 'devo');
+  });
+
+  it('stores delegation metadata on AGENT_DELEGATED', async () => {
+    const event = createEvent(makeCtx(), AGENT_DELEGATED, {
+      from: 'chapo',
+      to: 'caio',
+      task: 'Sende Kundenmail',
+      domain: 'communication',
+      objective: 'Kunden ueber Status informieren',
+      constraints: ['kurz'],
+      expectedOutcome: 'Mail mit klarem Status versendet',
+    });
+
+    await projection.handle(event);
+
+    expect(stateManager.setGatheredInfo).toHaveBeenCalledWith(
+      'sess-1',
+      'lastDelegation',
+      expect.objectContaining({
+        from: 'chapo',
+        to: 'caio',
+        domain: 'communication',
+        objective: 'Kunden ueber Status informieren',
+      }),
+    );
   });
 
   // ── AC-3: GATE_QUESTION_QUEUED adds question and flushes ───────

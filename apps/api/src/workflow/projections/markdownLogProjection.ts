@@ -33,6 +33,20 @@ const SKIP_EVENTS = new Set([
   'system.heartbeat',
 ]);
 
+function normalizeUserQuestionPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const nested = payload.question;
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    return nested as Record<string, unknown>;
+  }
+
+  const normalized: Record<string, unknown> = {};
+  if (typeof payload.questionId === 'string') normalized.questionId = payload.questionId;
+  if (typeof payload.question === 'string') normalized.question = payload.question;
+  if (typeof payload.fromAgent === 'string') normalized.fromAgent = payload.fromAgent;
+  if (typeof payload.timestamp === 'string') normalized.timestamp = payload.timestamp;
+  return normalized;
+}
+
 export class MarkdownLogProjection implements Projection {
   name = 'markdown';
 
@@ -55,7 +69,16 @@ export class MarkdownLogProjection implements Projection {
         break;
 
       case AGENT_DELEGATED:
-        logger.logAgentEvent({ type: 'delegation', from: p.from, to: p.to, task: p.task });
+        logger.logAgentEvent({
+          type: 'delegation',
+          from: p.from,
+          to: p.to,
+          task: p.task,
+          ...(typeof p.domain === 'string' ? { domain: p.domain } : {}),
+          ...(typeof p.objective === 'string' ? { objective: p.objective } : {}),
+          ...(Array.isArray(p.constraints) ? { constraints: p.constraints } : {}),
+          ...(typeof p.expectedOutcome === 'string' ? { expectedOutcome: p.expectedOutcome } : {}),
+        });
         break;
 
       case AGENT_COMPLETED:
@@ -79,8 +102,7 @@ export class MarkdownLogProjection implements Projection {
         break;
 
       case GATE_QUESTION_QUEUED:
-        // FIX: the question field is `question`, not `text`
-        logger.logAgentEvent({ type: 'user_question', question: p });
+        logger.logAgentEvent({ type: 'user_question', question: normalizeUserQuestionPayload(p) });
         break;
 
       case GATE_APPROVAL_QUEUED:

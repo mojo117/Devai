@@ -13,6 +13,7 @@ import { skillsRoutes } from './routes/skills.js';
 import { sessionsRoutes } from './routes/sessions.js';
 import { settingsRoutes } from './routes/settings.js';
 import { memoryRoutes } from './routes/memory.js';
+import { externalRoutes } from './routes/external.js';
 import { SessionLogger } from './audit/sessionLogger.js';
 import { userfilesRoutes } from './routes/userfiles.js';
 import { transcribeRoutes } from './routes/transcribe.js';
@@ -24,10 +25,13 @@ import { registerMcpTools } from './tools/registry.js';
 import { registerProjections } from './workflow/projections/index.js';
 import { getExpiredUserfiles, deleteExpiredUserfiles } from './db/userfileQueries.js';
 import { schedulerService } from './scheduler/schedulerService.js';
+import { processRequest } from './agents/router.js';
+import { sendTelegramMessage } from './external/telegram.js';
+import { getDefaultNotificationChannel } from './db/schedulerQueries.js';
 
 await initDb();
 
-// Register workflow event projections (state → stream → markdown → audit)
+// Register workflow event projections (state → stream → external-output → markdown → audit)
 registerProjections();
 
 const app = Fastify({
@@ -91,7 +95,12 @@ await registerAuthRoutes(app);
 app.addHook('preHandler', async (request, reply) => {
   const url = request.url || '';
   if (!url.startsWith('/api')) return;
-  if (url.startsWith('/api/health') || url.startsWith('/api/auth') || url.startsWith('/api/ws')) return;
+  if (
+    url.startsWith('/api/health') ||
+    url.startsWith('/api/auth') ||
+    url.startsWith('/api/ws') ||
+    url.startsWith('/api/telegram')
+  ) return;
   await authMiddleware(request, reply);
 });
 
@@ -103,6 +112,7 @@ await app.register(skillsRoutes, { prefix: '/api' });
 await app.register(sessionsRoutes, { prefix: '/api' });
 await app.register(settingsRoutes, { prefix: '/api' });
 await app.register(memoryRoutes, { prefix: '/api' });
+await app.register(externalRoutes, { prefix: '/api' });
 await app.register(websocketRoutes, { prefix: '/api' });
 await app.register(userfilesRoutes, { prefix: '/api' });
 await app.register(transcribeRoutes, { prefix: '/api' });
@@ -143,14 +153,30 @@ const start = async () => {
 
     // Initialize scheduler (loads jobs from DB, registers cron schedules)
     schedulerService.configure(
-      // Job executor: placeholder — will be wired to CommandDispatcher in Phase 5-7
-      async (instruction: string, _jobId: string) => {
-        console.log(`[Scheduler] Executing instruction: ${instruction.substring(0, 80)}...`);
-        return `Executed: ${instruction.substring(0, 80)}`;
+      async (instruction: string, jobId: string) => {
+        const sessionId = `scheduler-${jobId}-${Date.now()}`;
+        const result = await processRequest(
+          sessionId,
+          instruction,
+          [],
+          null,
+          () => {},
+        );
+        return result;
       },
-      // Notification sender: placeholder — will be wired to Telegram in Phase 5-7
-      async (message: string, _channel?: string | null) => {
-        console.log(`[Scheduler] Notification: ${message.substring(0, 100)}`);
+      async (message: string, targetChannel?: string | null) => {
+        let chatId = targetChannel ? String(targetChannel) : '';
+        if (!chatId) {
+          const defaultChannel = await getDefaultNotificationChannel();
+          chatId = defaultChannel?.external_chat_id || '';
+        }
+
+        if (!chatId) {
+          console.warn('[Scheduler] No Telegram target channel configured; skipping notification.');
+          return;
+        }
+
+        await sendTelegramMessage(chatId, message);
       },
     );
     await schedulerService.start();

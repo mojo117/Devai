@@ -11,6 +11,7 @@ export type AgentName = 'chapo' | 'devo' | 'scout' | 'caio';
 export type AgentRole = 'Task Coordinator' | 'Developer & DevOps Engineer' | 'Exploration Specialist' | 'Communications & Administration Officer';
 
 export type TaskType = 'code_change' | 'devops' | 'exploration' | 'mixed' | 'unclear';
+export type DelegationDomain = 'development' | 'communication' | 'research';
 
 export type RiskLevel = 'low' | 'medium' | 'high';
 
@@ -106,6 +107,8 @@ export interface GatheredContext {
   projectInfo?: Record<string, unknown>;
   // Delegation context (when CHAPO delegates to another agent)
   delegationTask?: string;
+  delegationDomain?: DelegationDomain;
+  delegationObjective?: string;
   delegationContext?: unknown;
   delegationFiles?: string[];
 }
@@ -282,7 +285,16 @@ export type AgentStreamEvent =
   | { type: 'agent_start'; agent: AgentName; phase: AgentPhase }
   | { type: 'agent_thinking'; agent: AgentName; status: string }
   | { type: 'agent_switch'; from: AgentName; to: AgentName; reason: string }
-  | { type: 'delegation'; from: AgentName; to: AgentName; task: string }
+  | {
+      type: 'delegation';
+      from: AgentName;
+      to: AgentName;
+      task: string;
+      domain?: DelegationDomain;
+      objective?: string;
+      constraints?: string[];
+      expectedOutcome?: string;
+    }
   | { type: 'escalation'; from: AgentName; issue: EscalationIssue }
   | { type: 'tool_call'; agent: AgentName; toolName: string; args: Record<string, unknown> }
   | { type: 'tool_result'; agent: AgentName; toolName: string; result: unknown; success: boolean }

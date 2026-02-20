@@ -7,8 +7,55 @@ import { config } from '../config.js';
 
 interface EmailResult {
   success: boolean;
-  result?: { id: string; message: string };
+  result?: {
+    id: string;
+    message: string;
+    providerStatus?: string;
+    providerCreatedAt?: string;
+  };
   error?: string;
+}
+
+interface ResendEmailDetails {
+  id: string;
+  created_at?: string;
+  last_event?: string;
+}
+
+async function fetchResendEmailDetails(apiKey: string, emailId: string): Promise<ResendEmailDetails | null> {
+  try {
+    const response = await fetch(`https://api.resend.com/emails/${encodeURIComponent(emailId)}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+
+    if (!response.ok) return null;
+    return (await response.json()) as ResendEmailDetails;
+  } catch {
+    return null;
+  }
+}
+
+function describeProviderStatus(lastEvent?: string): string {
+  const normalized = (lastEvent || '').trim().toLowerCase();
+  switch (normalized) {
+    case 'delivered':
+      return 'Provider-Status: delivered (an den empfangenden Mailserver uebergeben).';
+    case 'bounced':
+      return 'Provider-Status: bounced (nicht zustellbar).';
+    case 'complained':
+      return 'Provider-Status: complained (Empfaenger hat Beschwerde gemeldet).';
+    case 'delivery_delayed':
+      return 'Provider-Status: delivery_delayed (Zustellung verzoegert).';
+    case 'sent':
+      return 'Provider-Status: sent (angenommen und in Zustellung).';
+    default:
+      return normalized
+        ? `Provider-Status: ${normalized}.`
+        : 'Provider-Status: accepted (noch ohne finales Zustell-Event).';
+  }
 }
 
 export async function sendEmail(
@@ -56,11 +103,23 @@ export async function sendEmail(
   }
 
   const result = await response.json() as { id: string };
+  if (!result?.id) {
+    return {
+      success: false,
+      error: 'Resend API antwortete ohne E-Mail-ID.',
+    };
+  }
+
+  const details = await fetchResendEmailDetails(apiKey, result.id);
+  const statusText = describeProviderStatus(details?.last_event);
+
   return {
     success: true,
     result: {
       id: result.id,
-      message: `Email sent to ${to}: "${subject}"`,
+      providerStatus: details?.last_event,
+      providerCreatedAt: details?.created_at,
+      message: `Email von Resend zur Zustellung angenommen an ${to}: "${subject}". ${statusText} Inbox-Platzierung (Posteingang vs. Spam) kann technisch nicht garantiert werden.`,
     },
   };
 }

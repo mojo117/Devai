@@ -94,6 +94,10 @@ export interface AgentDelegatedPayload {
   from: string;
   to: string;
   task: string;
+  domain?: string;
+  objective?: string;
+  constraints?: string[];
+  expectedOutcome?: string;
 }
 
 export interface AgentCompletedPayload {

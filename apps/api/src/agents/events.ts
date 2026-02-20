@@ -9,6 +9,7 @@ import { nanoid } from 'nanoid';
 import type {
   AgentName,
   AgentPhase,
+  DelegationDomain,
   TaskStatus,
   PlanTask,
   ExecutionPlan,
@@ -90,12 +91,24 @@ export const AgentEvents = {
   }),
 
   /** Agent delegating task to another agent */
-  delegation: (sessionId: string, from: AgentName, to: AgentName, task: string) => ({
+  delegation: (
+    sessionId: string,
+    from: AgentName,
+    to: AgentName,
+    task: string,
+    details?: {
+      domain?: DelegationDomain;
+      objective?: string;
+      constraints?: string[];
+      expectedOutcome?: string;
+    },
+  ) => ({
     ...createBaseEvent('agent', sessionId),
     type: 'delegation' as const,
     from,
     to,
     task,
+    ...details,
   }),
 
   /** Agent escalating an issue */

@@ -12,6 +12,7 @@ import type { AgentPhase, AgentName, UserQuestion, ApprovalRequest, TaskStatus }
 import {
   AGENT_STARTED,
   AGENT_SWITCHED,
+  AGENT_DELEGATED,
   GATE_QUESTION_QUEUED,
   GATE_APPROVAL_QUEUED,
   WF_TURN_STARTED,
@@ -38,14 +39,32 @@ export class StateProjection implements Projection {
         stateManager.setActiveAgent(sessionId, p.to as AgentName);
         break;
 
+      case AGENT_DELEGATED:
+        stateManager.setGatheredInfo(sessionId, 'lastDelegation', {
+          from: p.from,
+          to: p.to,
+          task: p.task,
+          domain: p.domain,
+          objective: p.objective,
+          constraints: p.constraints,
+          expectedOutcome: p.expectedOutcome,
+        });
+        break;
+
       case GATE_QUESTION_QUEUED:
-        stateManager.addPendingQuestion(sessionId, p as unknown as UserQuestion);
+        stateManager.addPendingQuestion(
+          sessionId,
+          ((p.question && typeof p.question === 'object') ? p.question : p) as unknown as UserQuestion,
+        );
         stateManager.setPhase(sessionId, 'waiting_user');
         await stateManager.flushState(sessionId);
         break;
 
       case GATE_APPROVAL_QUEUED:
-        stateManager.addPendingApproval(sessionId, p as unknown as ApprovalRequest);
+        stateManager.addPendingApproval(
+          sessionId,
+          ((p.request && typeof p.request === 'object') ? p.request : p) as unknown as ApprovalRequest,
+        );
         stateManager.setPhase(sessionId, 'waiting_user');
         await stateManager.flushState(sessionId);
         break;

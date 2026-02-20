@@ -38,12 +38,35 @@ import {
 type PayloadMap = Record<string, unknown>;
 type StreamMapper = (p: PayloadMap) => Record<string, unknown> | null;
 
+function normalizeUserQuestionPayload(payload: PayloadMap): Record<string, unknown> {
+  const nested = payload.question;
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    return nested as Record<string, unknown>;
+  }
+
+  const normalized: Record<string, unknown> = {};
+  if (typeof payload.questionId === 'string') normalized.questionId = payload.questionId;
+  if (typeof payload.question === 'string') normalized.question = payload.question;
+  if (typeof payload.fromAgent === 'string') normalized.fromAgent = payload.fromAgent;
+  if (typeof payload.timestamp === 'string') normalized.timestamp = payload.timestamp;
+  return normalized;
+}
+
 /** Maps domain event types to WS stream event constructors. */
 const EVENT_TO_STREAM: Record<string, StreamMapper> = {
   [AGENT_STARTED]: (p) => ({ type: 'agent_start', agent: p.agent, phase: p.phase }),
   [AGENT_THINKING]: (p) => ({ type: 'agent_thinking', agent: p.agent, status: p.status }),
   [AGENT_SWITCHED]: (p) => ({ type: 'agent_switch', from: p.from, to: p.to, reason: p.reason }),
-  [AGENT_DELEGATED]: (p) => ({ type: 'delegation', from: p.from, to: p.to, task: p.task }),
+  [AGENT_DELEGATED]: (p) => ({
+    type: 'delegation',
+    from: p.from,
+    to: p.to,
+    task: p.task,
+    ...(typeof p.domain === 'string' ? { domain: p.domain } : {}),
+    ...(typeof p.objective === 'string' ? { objective: p.objective } : {}),
+    ...(Array.isArray(p.constraints) ? { constraints: p.constraints } : {}),
+    ...(typeof p.expectedOutcome === 'string' ? { expectedOutcome: p.expectedOutcome } : {}),
+  }),
   [AGENT_COMPLETED]: (p) => ({ type: 'agent_complete', agent: p.agent, result: p.result }),
   [AGENT_FAILED]: (p) => ({ type: 'error', agent: p.agent, error: p.error }),
   [AGENT_HISTORY]: (p) => ({ type: 'agent_history', entries: p.entries }),
@@ -51,7 +74,7 @@ const EVENT_TO_STREAM: Record<string, StreamMapper> = {
   [TOOL_CALL_COMPLETED]: (p) => ({ type: 'tool_result', agent: p.agent, toolName: p.toolName, result: p.result, success: p.success }),
   [TOOL_CALL_FAILED]: (p) => ({ type: 'tool_result', agent: p.agent, toolName: p.toolName, result: p.error, success: false }),
   [TOOL_ACTION_PENDING]: (p) => ({ type: 'action_pending', actionId: p.actionId, toolName: p.toolName, toolArgs: p.toolArgs, description: p.description, preview: p.preview }),
-  [GATE_QUESTION_QUEUED]: (p) => ({ type: 'user_question', question: p }),
+  [GATE_QUESTION_QUEUED]: (p) => ({ type: 'user_question', question: normalizeUserQuestionPayload(p) }),
   [GATE_APPROVAL_QUEUED]: (p) => ({ type: 'approval_request', request: p, sessionId: p.sessionId }),
   [PLAN_STARTED]: (p) => ({ type: 'plan_start', sessionId: p.sessionId }),
   [PLAN_READY]: (p) => ({ type: 'plan_ready', plan: p.plan }),
