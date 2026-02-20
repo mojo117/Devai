@@ -66,6 +66,23 @@ export interface DispatchResult {
   responseMessage: ChatMessage;
 }
 
+/** Lightweight tool event collected during a request for DB persistence. */
+interface CollectedToolEvent {
+  id: string;
+  type: 'status' | 'tool_call' | 'tool_result' | 'thinking';
+  name?: string;
+  arguments?: unknown;
+  result?: unknown;
+  completed?: boolean;
+  agent?: string;
+}
+
+/** Event types worth persisting as tool events. */
+const COLLECTIBLE_TYPES = new Set([
+  'status', 'tool_call', 'tool_result', 'tool_result_chunk',
+  'agent_thinking', 'agent_start', 'agent_switch',
+]);
+
 type JoinSessionFn = (id: string) => void;
 
 interface DispatchOptions {
@@ -89,6 +106,60 @@ function buildSessionTitle(message: string): string | null {
 }
 
 /**
+ * Creates a collecting bridge: wraps the legacy event bridge with tool event
+ * collection for DB persistence. Returns both the sendEvent function and
+ * the collected events array.
+ */
+function createCollectingBridge(ctx: EventContext): {
+  sendEvent: (event: AgentStreamEvent | Record<string, unknown>) => void;
+  collectedToolEvents: CollectedToolEvent[];
+} {
+  const baseSend = createLegacyBridgeRaw(ctx);
+  const collectedToolEvents: CollectedToolEvent[] = [];
+  let currentAgent: string | undefined;
+
+  const sendEvent = (event: AgentStreamEvent | Record<string, unknown>) => {
+    baseSend(event);
+
+    const ev = event as Record<string, unknown>;
+    const evType = ev?.type as string | undefined;
+    if (!evType || !COLLECTIBLE_TYPES.has(evType)) return;
+
+    if (evType === 'agent_start' || evType === 'agent_switch') {
+      currentAgent = (ev.to ?? ev.agent) as string | undefined;
+      return;
+    }
+
+    const agent = (ev.agent as string | undefined) || currentAgent;
+
+    if (evType === 'agent_thinking') {
+      collectedToolEvents.push({ id: nanoid(), type: 'thinking', result: ev.status, agent });
+    } else if (evType === 'status') {
+      collectedToolEvents.push({ id: nanoid(), type: 'status', result: ev.status, agent });
+    } else if (evType === 'tool_call') {
+      collectedToolEvents.push({
+        id: String(ev.id || nanoid()),
+        type: 'tool_call',
+        name: (ev.toolName ?? ev.name) as string | undefined,
+        arguments: ev.args ?? ev.arguments,
+        agent,
+      });
+    } else if (evType === 'tool_result' || evType === 'tool_result_chunk') {
+      collectedToolEvents.push({
+        id: String(ev.id || nanoid()),
+        type: 'tool_result',
+        name: (ev.toolName ?? ev.name) as string | undefined,
+        result: ev.result,
+        completed: ev.completed as boolean | undefined,
+        agent,
+      });
+    }
+  };
+
+  return { sendEvent, collectedToolEvents };
+}
+
+/**
  * Creates a bridge sendEvent function that translates legacy stream events
  * into domain events and emits them through the bus.
  *
@@ -96,7 +167,7 @@ function buildSessionTitle(message: string): string | null {
  * emit old-style `{ type: 'agent_start', ... }` events. This bridge maps
  * them to domain events so projections handle all side effects.
  */
-function createLegacyBridge(ctx: EventContext): (event: AgentStreamEvent | Record<string, unknown>) => void {
+function createLegacyBridgeRaw(ctx: EventContext): (event: AgentStreamEvent | Record<string, unknown>) => void {
   return (event: AgentStreamEvent | Record<string, unknown>) => {
     const eventObj = event as Record<string, unknown>;
     const legacyType = eventObj?.type as string | undefined;
@@ -254,8 +325,8 @@ export class CommandDispatcher {
       userMessage: message,
     }, { source: 'ws', visibility: 'internal' }));
 
-    // Bridge sendEvent: legacy events → domain events via bus
-    const sendEvent = createLegacyBridge(ctx);
+    // Bridge sendEvent: legacy events → domain events via bus + event collection
+    const { sendEvent, collectedToolEvents } = createCollectingBridge(ctx);
 
     // Emit initial agent switch event through the bridge
     sendEvent({
@@ -302,7 +373,7 @@ export class CommandDispatcher {
       };
 
       await saveMessage(activeSessionId, userMessage);
-      await saveMessage(activeSessionId, responseMessage);
+      await saveMessage(activeSessionId, responseMessage, collectedToolEvents.length > 0 ? collectedToolEvents : undefined);
 
       const title = buildSessionTitle(message);
       if (title) {
@@ -354,7 +425,7 @@ export class CommandDispatcher {
       answer: command.answer,
     }, { source: 'ws', visibility: 'ui' }));
 
-    const sendEvent = createLegacyBridge(ctx);
+    const { sendEvent, collectedToolEvents } = createCollectingBridge(ctx);
 
     const result = await handleUserResponse(
       command.sessionId,
@@ -379,7 +450,7 @@ export class CommandDispatcher {
         timestamp: new Date().toISOString(),
       };
       await saveMessage(command.sessionId, userMsg);
-      await saveMessage(command.sessionId, responseMessage);
+      await saveMessage(command.sessionId, responseMessage, collectedToolEvents.length > 0 ? collectedToolEvents : undefined);
     }
 
     const pendingActions = await getPendingActions();
@@ -405,7 +476,7 @@ export class CommandDispatcher {
       approved: command.approved,
     }, { source: 'ws', visibility: 'ui' }));
 
-    const sendEvent = createLegacyBridge(ctx);
+    const { sendEvent, collectedToolEvents } = createCollectingBridge(ctx);
 
     const result = await handleUserApproval(
       command.sessionId,
@@ -423,7 +494,7 @@ export class CommandDispatcher {
 
     const state = getState(command.sessionId);
     if (state) {
-      await saveMessage(command.sessionId, responseMessage);
+      await saveMessage(command.sessionId, responseMessage, collectedToolEvents.length > 0 ? collectedToolEvents : undefined);
     }
 
     const pendingActions = await getPendingActions();
@@ -450,7 +521,7 @@ export class CommandDispatcher {
       reason: command.reason,
     }, { source: 'ws', visibility: 'ui' }));
 
-    const sendEvent = createLegacyBridge(ctx);
+    const { sendEvent, collectedToolEvents } = createCollectingBridge(ctx);
 
     const result = await handlePlanApproval(
       command.sessionId,
@@ -469,7 +540,7 @@ export class CommandDispatcher {
 
     const state = getState(command.sessionId);
     if (state) {
-      await saveMessage(command.sessionId, responseMessage);
+      await saveMessage(command.sessionId, responseMessage, collectedToolEvents.length > 0 ? collectedToolEvents : undefined);
     }
 
     const pendingActions = await getPendingActions();
