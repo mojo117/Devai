@@ -6,6 +6,7 @@ import { loadWorkspaceMdContext, formatWorkspaceMdBlock, type WorkspaceLoadMode 
 import { getSetting } from '../db/queries.js';
 import { MEMORY_BEHAVIOR_BLOCK } from '../prompts/context.js';
 import { getSchedulerErrors } from '../scheduler/schedulerService.js';
+import { retrieveRelevantMemories } from '../memory/service.js';
 
 const GLOBAL_CONTEXT_MAX_CHARS = 4000;
 
@@ -126,6 +127,25 @@ export async function refreshGlobalContextBlockForSession(sessionId: string): Pr
   return block;
 }
 
+export async function warmMemoryBlockForSession(sessionId: string, userMessage: string): Promise<string> {
+  const state = stateManager.getState(sessionId);
+  const projectRoot = (state?.taskContext.gatheredInfo['projectRoot'] as string) || null;
+
+  let projectName: string | undefined;
+  if (projectRoot) {
+    const parts = projectRoot.split('/').filter(Boolean);
+    projectName = parts[parts.length - 1]?.toLowerCase();
+  }
+
+  try {
+    const { block } = await retrieveRelevantMemories(userMessage, projectName);
+    stateManager.setGatheredInfo(sessionId, 'memoryBlock', block);
+    return block;
+  } catch {
+    return '';
+  }
+}
+
 export function getCombinedSystemContextBlock(sessionId: string): string {
   const state = stateManager.getState(sessionId);
   const info = state?.taskContext.gatheredInfo || {};
@@ -144,6 +164,7 @@ export function getCombinedSystemContextBlock(sessionId: string): string {
     (info.claudeMdBlock as string) || '',
     (info.workspaceMdBlock as string) || '',
     (info.globalContextBlock as string) || '',
+    (info.memoryBlock as string) || '',
     schedulerErrorBlock,
   ]
     .map((entry) => entry.trim())
@@ -154,9 +175,16 @@ export function getCombinedSystemContextBlock(sessionId: string): string {
   return blocks.join('\n');
 }
 
-export async function warmSystemContextForSession(sessionId: string, projectRoot: string | null): Promise<void> {
+export async function warmSystemContextForSession(
+  sessionId: string,
+  projectRoot: string | null,
+  userMessage?: string
+): Promise<void> {
   await getDevaiMdBlockForSession(sessionId);
   await getClaudeMdBlockForSession(sessionId, projectRoot);
   await getWorkspaceMdBlockForSession(sessionId);
   await refreshGlobalContextBlockForSession(sessionId);
+  if (userMessage) {
+    await warmMemoryBlockForSession(sessionId, userMessage);
+  }
 }
