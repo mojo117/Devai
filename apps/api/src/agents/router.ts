@@ -36,6 +36,7 @@ import type { LLMMessage } from '../llm/types.js';
 import { CHAPO_AGENT } from './chapo.js';
 import { DEVO_AGENT } from './devo.js';
 import { SCOUT_AGENT } from './scout.js';
+import { CAIO_AGENT } from './caio.js';
 import { getMessages, getTrustMode } from '../db/queries.js';
 import { rememberNote } from '../memory/workspaceMemory.js';
 import { getCombinedSystemContextBlock, warmSystemContextForSession } from './systemContext.js';
@@ -51,6 +52,7 @@ const AGENTS: Record<AgentName, AgentDefinition> = {
   chapo: CHAPO_AGENT,
   devo: DEVO_AGENT,
   scout: SCOUT_AGENT,
+  caio: CAIO_AGENT,
 };
 
 function parseYesNo(input: string): boolean | null {
@@ -362,7 +364,7 @@ export async function handleUserResponse(
   }
 
   const historyAgent: AgentName =
-    question.fromAgent === 'chapo' || question.fromAgent === 'devo' || question.fromAgent === 'scout'
+    question.fromAgent === 'chapo' || question.fromAgent === 'devo' || question.fromAgent === 'scout' || question.fromAgent === 'caio'
       ? question.fromAgent
       : 'chapo';
 
