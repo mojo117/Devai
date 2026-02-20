@@ -20,7 +20,7 @@ export type TaskComplexity = 'simple' | 'moderate' | 'complex';
 // Smart model selection - for performance optimization
 export type TaskComplexityLevel = 'trivial' | 'simple' | 'moderate' | 'complex';
 
-export type LLMProviderName = 'anthropic' | 'openai' | 'gemini';
+export type LLMProviderName = 'anthropic' | 'openai' | 'gemini' | 'zai';
 
 export interface ModelSelection {
   provider: LLMProviderName;

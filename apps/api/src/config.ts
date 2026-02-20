@@ -28,6 +28,7 @@ export interface Config {
   anthropicApiKey?: string;
   openaiApiKey?: string;
   geminiApiKey?: string;
+  zaiApiKey?: string;
 
   // GitHub
   githubToken?: string;
@@ -85,6 +86,7 @@ export function loadConfig(): Config {
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,
     openaiApiKey: process.env.OPENAI_API_KEY,
     geminiApiKey: process.env.GEMINI_API_KEY,
+    zaiApiKey: process.env.ZAI_API_KEY,
 
     githubToken: process.env.GITHUB_TOKEN,
     githubOwner: process.env.GITHUB_OWNER,
