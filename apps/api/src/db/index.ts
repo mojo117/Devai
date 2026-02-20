@@ -21,6 +21,9 @@ export async function initDb(): Promise<void> {
 
   // Ensure default user exists
   await ensureDefaultUser();
+
+  // Verify pgvector memory table
+  await verifyPgvector();
 }
 
 export function getSupabase(): SupabaseClient {
@@ -50,5 +53,15 @@ async function ensureDefaultUser(): Promise<void> {
 
   if (error && !error.message.includes('duplicate')) {
     console.error('Failed to create default user:', error);
+  }
+}
+
+async function verifyPgvector(): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.from('devai_memories').select('id').limit(0);
+  if (error) {
+    console.warn('[db] devai_memories table not found — memory system disabled:', error.message);
+  } else {
+    console.info('[db] devai_memories table verified — memory system ready');
   }
 }
