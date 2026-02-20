@@ -67,13 +67,6 @@ export const DEVO_AGENT: AgentDefinition = {
     'memory_remember',
     'memory_search',
     'memory_readToday',
-    // Scheduler tools
-    'scheduler_create',
-    'scheduler_list',
-    'scheduler_update',
-    'scheduler_delete',
-    'reminder_create',
-    'notify_user',
     // Exploration (spawn SCOUT for searches)
     'delegateToScout',
     // Escalation
