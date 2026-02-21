@@ -9,6 +9,7 @@ import { getDefaultNotificationChannel } from '../db/schedulerQueries.js';
 import { getUserfileById } from '../db/userfileQueries.js';
 import { getSupabase } from '../db/index.js';
 import { sendTelegramDocument } from '../external/telegram.js';
+import { config } from '../config.js';
 import type { ToolExecutionResult } from './executor.js';
 
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
@@ -132,16 +133,17 @@ export async function telegramSendDocument(
   overrideFilename?: string,
 ): Promise<ToolExecutionResult> {
   try {
-    // 1. Resolve chat ID from default notification channel
+    // 1. Resolve chat ID: default notification channel → fallback to allowed chat ID
     const channel = await getDefaultNotificationChannel();
-    if (!channel) {
+    const chatId = channel?.external_chat_id
+      || config.telegramAllowedChatId?.split(/[,\s;]+/)[0]?.trim();
+
+    if (!chatId) {
       return {
         success: false,
-        error: 'No default notification channel configured. A Telegram chat must be set as the default channel first.',
+        error: 'No Telegram chat ID available. Set a default notification channel or configure TELEGRAM_ALLOWED_CHAT_ID.',
       };
     }
-
-    const chatId = channel.external_chat_id;
 
     // 2. Resolve file buffer + filename based on source
     let buffer: Buffer;
