@@ -61,7 +61,9 @@ export type ToolName =
   | 'taskforge_add_comment'
   | 'taskforge_search'
   // Email Tool (CAIO)
-  | 'send_email';
+  | 'send_email'
+  // Telegram Tools (CAIO)
+  | 'telegram_send_document';
 
 export interface ToolPropertyDefinition {
   type: string;
@@ -1101,6 +1103,35 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
       required: ['to', 'subject', 'body'],
     },
     requiresConfirmation: true,
+  },
+  // Telegram Document Tool (CAIO agent)
+  {
+    name: 'telegram_send_document',
+    description: 'Sende ein Dokument/eine Datei an den Benutzer via Telegram. Quellen: Dateisystem (path), Supabase Storage (fileId), oder URL.',
+    parameters: {
+      type: 'object',
+      properties: {
+        source: {
+          type: 'string',
+          description: 'Dateiquelle: "filesystem" (lokaler Pfad), "supabase" (Supabase userfile ID), oder "url" (HTTP/HTTPS URL)',
+          enum: ['filesystem', 'supabase', 'url'],
+        },
+        path: {
+          type: 'string',
+          description: 'Pfad, Supabase File-ID, oder URL je nach source',
+        },
+        caption: {
+          type: 'string',
+          description: 'Optionale Bildunterschrift/Beschreibung (max 1024 Zeichen)',
+        },
+        filename: {
+          type: 'string',
+          description: 'Optionaler Dateiname (default: wird aus path abgeleitet)',
+        },
+      },
+      required: ['source', 'path'],
+    },
+    requiresConfirmation: false,
   },
 ];
 
