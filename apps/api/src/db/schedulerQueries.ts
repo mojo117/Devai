@@ -171,15 +171,16 @@ export async function getExternalSession(
     .select('*')
     .eq('platform', platform)
     .eq('external_user_id', externalUserId)
-    .single();
+    .order('created_at', { ascending: false })
+    .limit(1);
 
   if (error) {
-    if (error.code === 'PGRST116') return null;
     console.error('[ExternalSession] Failed to get session:', error);
     return null;
   }
 
-  return data as ExternalSessionRow;
+  const rows = (data || []) as ExternalSessionRow[];
+  return rows[0] || null;
 }
 
 export async function createExternalSession(session: {
