@@ -1,7 +1,9 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
 import { commandDispatcher } from '../workflow/commands/dispatcher.js';
-import { ensureStateLoaded, getState } from '../agents/stateManager.js';
+import { ensureStateLoaded, getState, isLoopActive } from '../agents/stateManager.js';
+import { pushToInbox } from '../agents/inbox.js';
+import type { InboxMessage } from '../agents/types.js';
 import {
   getOrCreateExternalSession,
   updateExternalSessionSessionId,
@@ -182,6 +184,23 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
             answer: messageText,
           };
         } else {
+          // Multi-message: if loop is running, queue and acknowledge via Telegram
+          if (isLoopActive(externalSession.session_id)) {
+            const inboxMsg: InboxMessage = {
+              id: nanoid(),
+              content: messageText,
+              receivedAt: new Date(),
+              acknowledged: false,
+              source: 'telegram' as const,
+            };
+            pushToInbox(externalSession.session_id, inboxMsg);
+            await sendTelegramMessage(
+              extracted.chatId,
+              'Nachricht erhalten — ich kuemmere mich darum, sobald ich mit dem aktuellen Task fertig bin.',
+            );
+            return;
+          }
+
           const pinnedUserfileIds = shouldAttachPinnedContext(messageText)
             ? await getPinnedUserfileIds(externalSession.id)
             : [];
