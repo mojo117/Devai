@@ -19,6 +19,7 @@ export class ZAIProvider implements LLMProviderAdapter {
       this.client = new OpenAI({
         apiKey: config.zaiApiKey,
         baseURL: 'https://api.z.ai/api/coding/paas/v4',
+        timeout: 60_000, // 60s request timeout
       });
     }
     return this.client;

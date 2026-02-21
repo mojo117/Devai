@@ -17,7 +17,10 @@ export class AnthropicProvider implements LLMProviderAdapter {
       if (!config.anthropicApiKey) {
         throw new Error('ANTHROPIC_API_KEY is not configured');
       }
-      this.client = new Anthropic({ apiKey: config.anthropicApiKey });
+      this.client = new Anthropic({
+        apiKey: config.anthropicApiKey,
+        timeout: 60_000, // 60s request timeout
+      });
     }
     return this.client;
   }
