@@ -59,6 +59,7 @@ import { emitChatEvent } from '../../websocket/chatGateway.js';
 import { config } from '../../config.js';
 import type { ChatMessage } from '@devai/shared';
 import { buildUserfileContext } from '../../services/userfileContext.js';
+import type { ContentBlock, TextContentBlock } from '../../llm/types.js';
 
 /** Result returned after dispatching a command. */
 export interface DispatchResult {
@@ -337,12 +338,23 @@ export class CommandDispatcher {
     });
 
     // Inject pinned userfile content into the message
-    let augmentedMessage = message;
+    let augmentedMessage: string | ContentBlock[] = message;
     if (command.pinnedUserfileIds && command.pinnedUserfileIds.length > 0) {
       try {
-        const fileContext = await buildUserfileContext(command.pinnedUserfileIds);
-        if (fileContext) {
-          augmentedMessage = fileContext + '\n\n' + message;
+        const fileBlocks = await buildUserfileContext(command.pinnedUserfileIds);
+        if (fileBlocks.length > 0) {
+          const hasImages = fileBlocks.some((b) => b.type === 'image_url');
+          if (hasImages) {
+            // Multimodal: keep as ContentBlock array so images pass through to the LLM
+            augmentedMessage = [...fileBlocks, { type: 'text' as const, text: message }];
+          } else {
+            // Text-only: flatten to plain string for backwards compatibility
+            const textContext = fileBlocks
+              .filter((b): b is TextContentBlock => b.type === 'text')
+              .map((b) => b.text)
+              .join('\n\n');
+            augmentedMessage = textContext ? textContext + '\n\n' + message : message;
+          }
         }
       } catch (err) {
         console.error('[CommandDispatcher] Failed to build userfile context:', err);
