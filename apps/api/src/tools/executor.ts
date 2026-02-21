@@ -30,6 +30,8 @@ type ToolArgs = Record<string, unknown>;
 export interface ToolExecutionOptions {
   // Internal escape hatch used only after explicit user approval (e.g. approved action queue).
   bypassConfirmation?: boolean;
+  // The agent requesting this tool — used for self-inspection access control.
+  agentName?: string;
 }
 
 export async function executeTool(
@@ -72,13 +74,17 @@ export async function executeTool(
     };
 
     const execution = (async () => {
+      // Self-inspection: only SCOUT gets read access to Devai's own codebase
+      const fsOpts: import('./fs.js').FsOptions | undefined =
+        options?.agentName === 'scout' ? { selfInspection: true } : undefined;
+
       switch (normalizedToolName) {
         // File System Tools
         case 'fs_listFiles':
-          return fsTools.listFiles(args.path as string);
+          return fsTools.listFiles(args.path as string, fsOpts);
 
         case 'fs_readFile':
-          return fsTools.readFile(args.path as string);
+          return fsTools.readFile(args.path as string, fsOpts);
 
         case 'fs_writeFile':
           return fsTools.writeFile(
@@ -89,14 +95,18 @@ export async function executeTool(
         case 'fs_glob':
           return fsTools.globFiles(
             args.pattern as string,
-            args.path as string | undefined
+            args.path as string | undefined,
+            undefined, // ignore
+            fsOpts
           );
 
         case 'fs_grep':
           return fsTools.grepFiles(
             args.pattern as string,
             args.path as string,
-            args.glob as string | undefined
+            args.glob as string | undefined,
+            undefined, // ignore
+            fsOpts
           );
 
         case 'fs_edit':
