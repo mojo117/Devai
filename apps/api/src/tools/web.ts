@@ -5,6 +5,9 @@
  * Used by SCOUT agent for research tasks.
  */
 
+import { isIP } from 'node:net';
+import dns from 'node:dns/promises';
+
 import {
   getPerplexityClient,
   isPerplexityConfigured,
@@ -110,6 +113,52 @@ export function formatWebSearchResult(result: WebSearchResult): string {
 }
 
 // ============================================
+// SSRF PROTECTION
+// ============================================
+
+const PRIVATE_IP_RANGES = [
+  /^127\./,                    // loopback
+  /^10\./,                     // class A private
+  /^172\.(1[6-9]|2\d|3[01])\./, // class B private
+  /^192\.168\./,               // class C private
+  /^169\.254\./,               // link-local
+  /^0\./,                      // current network
+  /^::1$/,                     // IPv6 loopback
+  /^fc00:/i,                   // IPv6 ULA
+  /^fe80:/i,                   // IPv6 link-local
+  /^fd/i,                      // IPv6 ULA
+];
+
+function isPrivateIp(ip: string): boolean {
+  return PRIVATE_IP_RANGES.some((range) => range.test(ip));
+}
+
+async function checkSsrf(hostname: string): Promise<void> {
+  // Check if hostname is already an IP
+  if (isIP(hostname)) {
+    if (isPrivateIp(hostname)) {
+      throw new Error(`Blocked: "${hostname}" resolves to a private/internal IP address.`);
+    }
+    return;
+  }
+
+  // Resolve DNS and check all addresses
+  try {
+    const addresses = await dns.resolve4(hostname);
+    for (const addr of addresses) {
+      if (isPrivateIp(addr)) {
+        throw new Error(`Blocked: "${hostname}" resolves to private IP ${addr}.`);
+      }
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOTFOUND') {
+      throw new Error(`DNS lookup failed for "${hostname}".`);
+    }
+    // For other DNS errors, allow the request (will fail at fetch level)
+  }
+}
+
+// ============================================
 // WEB FETCH (URL Content Extraction)
 // ============================================
 
@@ -138,6 +187,9 @@ export async function webFetch(
   if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
     throw new Error(`Unsupported protocol: ${parsedUrl.protocol}. Only http/https allowed.`);
   }
+
+  // SSRF protection: block private/internal IPs
+  await checkSsrf(parsedUrl.hostname);
 
   // Create abort controller for timeout
   const controller = new AbortController();
