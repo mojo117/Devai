@@ -17,7 +17,7 @@ export class ZAIProvider implements LLMProviderAdapter {
       }
       this.client = new OpenAI({
         apiKey: config.zaiApiKey,
-        baseURL: 'https://open.bigmodel.cn/api/paas/v4',
+        baseURL: 'https://api.z.ai/api/coding/paas/v4',
       });
     }
     return this.client;
