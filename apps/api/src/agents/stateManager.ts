@@ -248,6 +248,8 @@ function buildDefaultState(sessionId: string): ConversationState {
     // Task Tracking state
     tasks: [],
     taskOrder: [],
+    // Multi-message state
+    isLoopRunning: false,
   };
 }
 

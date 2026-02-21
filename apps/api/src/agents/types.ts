@@ -208,6 +208,15 @@ export interface ApprovalResponse {
   timestamp: string;
 }
 
+// Session Inbox
+export interface InboxMessage {
+  id: string;
+  content: string;
+  receivedAt: Date;
+  acknowledged: boolean;
+  source: 'websocket' | 'telegram';
+}
+
 // Conversation State
 export interface ConversationState {
   sessionId: string;
@@ -226,6 +235,9 @@ export interface ConversationState {
   // Task Tracking state
   tasks: PlanTask[];
   taskOrder: string[]; // Ordered list of taskIds
+
+  // Multi-message state
+  isLoopRunning: boolean;
 }
 
 export interface TaskContext {
@@ -326,7 +338,11 @@ export type AgentStreamEvent =
   | { type: 'scout_start'; query: string; scope: ScoutScope }
   | { type: 'scout_tool'; tool: string }
   | { type: 'scout_complete'; summary: ScoutResult }
-  | { type: 'scout_error'; error: string };
+  | { type: 'scout_error'; error: string }
+  // Inbox events
+  | { type: 'message_queued'; messageId: string; preview: string }
+  | { type: 'inbox_processing'; count: number }
+  | { type: 'inbox_classified'; messageId: string; classification: 'parallel' | 'amendment' | 'expansion'; summary: string };
 
 // Agent Response
 export interface AgentResponse {
