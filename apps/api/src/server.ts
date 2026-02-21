@@ -5,7 +5,7 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import fastifyWebsocket from '@fastify/websocket';
 import multipart from '@fastify/multipart';
-import { config } from './config.js';
+import { config, validateRequiredEnv } from './config.js';
 import { healthRoutes } from './routes/health.js';
 import { actionRoutes } from './routes/actions.js';
 import { projectRoutes } from './routes/project.js';
@@ -18,17 +18,38 @@ import { SessionLogger } from './audit/sessionLogger.js';
 import { userfilesRoutes } from './routes/userfiles.js';
 import { transcribeRoutes } from './routes/transcribe.js';
 import { authMiddleware, registerAuthRoutes } from './routes/auth.js';
-import { initDb, getSupabase } from './db/index.js';
+import { initDb } from './db/index.js';
 import { websocketRoutes } from './websocket/routes.js';
 import { mcpManager } from './mcp/index.js';
 import { registerMcpTools } from './tools/registry.js';
 import { registerProjections } from './workflow/projections/index.js';
-import { getExpiredUserfiles, deleteExpiredUserfiles } from './db/userfileQueries.js';
 import { schedulerService } from './scheduler/schedulerService.js';
-import { runDecay } from './memory/memoryStore.js';
 import { processRequest } from './agents/router.js';
 import { sendTelegramMessage } from './external/telegram.js';
-import { getDefaultNotificationChannel } from './db/schedulerQueries.js';
+import { getDefaultNotificationChannel, logSchedulerExecution } from './db/schedulerQueries.js';
+import {
+  backupLocalDbJob,
+  cleanupExpiredUserfilesJob,
+  collectSystemHealthSnapshot,
+  formatHealthAlert,
+  memoryDecayJob,
+} from './services/systemReliability.js';
+
+const envValidation = validateRequiredEnv(config);
+if (!envValidation.ok) {
+  console.error('[startup] Missing required environment configuration:');
+  for (const issue of envValidation.errors) {
+    console.error(`  - ${issue.key}: ${issue.reason}`);
+  }
+  process.exit(1);
+}
+
+if (envValidation.warnings.length > 0) {
+  console.warn('[startup] Optional integrations not configured:');
+  for (const issue of envValidation.warnings) {
+    console.warn(`  - ${issue.key}: ${issue.reason}`);
+  }
+}
 
 await initDb();
 
@@ -153,7 +174,22 @@ const start = async () => {
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
     (app as any).mcpInitPromise = mcpInitPromise;
 
-    // Initialize scheduler (loads jobs from DB, registers cron schedules)
+    const sendSchedulerNotification = async (message: string, targetChannel?: string | null) => {
+      let chatId = targetChannel ? String(targetChannel) : '';
+      if (!chatId) {
+        const defaultChannel = await getDefaultNotificationChannel();
+        chatId = defaultChannel?.external_chat_id || '';
+      }
+
+      if (!chatId) {
+        console.warn('[Scheduler] No Telegram target channel configured; skipping notification.');
+        return;
+      }
+
+      await sendTelegramMessage(chatId, message);
+    };
+
+    // Initialize scheduler (loads DB jobs, registers cron schedules, enables recovery loop)
     schedulerService.configure(
       async (instruction: string, jobId: string) => {
         const sessionId = `scheduler-${jobId}-${Date.now()}`;
@@ -166,63 +202,80 @@ const start = async () => {
         );
         return result;
       },
-      async (message: string, targetChannel?: string | null) => {
-        let chatId = targetChannel ? String(targetChannel) : '';
-        if (!chatId) {
-          const defaultChannel = await getDefaultNotificationChannel();
-          chatId = defaultChannel?.external_chat_id || '';
-        }
-
-        if (!chatId) {
-          console.warn('[Scheduler] No Telegram target channel configured; skipping notification.');
-          return;
-        }
-
-        await sendTelegramMessage(chatId, message);
-      },
+      sendSchedulerNotification,
     );
     await schedulerService.start();
 
-    // 30-day userfile cleanup: run on startup + every 24h
-    const cleanupExpiredUserfiles = async () => {
-      try {
-        const expired = await getExpiredUserfiles();
-        if (expired.length === 0) return;
+    let lastHealthStatus: 'ok' | 'degraded' | null = null;
+    let lastHealthAlertAt = 0;
+    const HEALTH_ALERT_COOLDOWN_MS = 30 * 60 * 1000;
 
-        // Remove from Supabase Storage
-        const paths = expired.map((f) => f.storage_path);
-        const { error: storageError } = await getSupabase()
-          .storage
-          .from('userfiles')
-          .remove(paths);
-        if (storageError) {
-          console.error('[Cleanup] Storage delete error:', storageError);
+    const runHealthWatchdog = async (): Promise<string> => {
+      const snapshot = await collectSystemHealthSnapshot();
+      const phase = snapshot.status === 'ok' ? 'success' : 'failure';
+      await logSchedulerExecution({
+        jobId: 'system-health-watchdog',
+        jobName: 'system-health-watchdog',
+        executionType: 'watchdog',
+        phase,
+        message: `Health snapshot: ${snapshot.status}`,
+        metadata: {
+          supabaseOk: snapshot.dependencies.supabase.ok,
+          schedulerRunning: snapshot.dependencies.scheduler.running,
+          configuredProviders: snapshot.llm.configuredProviders,
+        },
+      });
+
+      const now = Date.now();
+      if (snapshot.status === 'degraded') {
+        if (lastHealthStatus !== 'degraded' || now - lastHealthAlertAt >= HEALTH_ALERT_COOLDOWN_MS) {
+          app.log.warn(formatHealthAlert(snapshot));
+          lastHealthAlertAt = now;
         }
-
-        // Remove DB rows
-        await deleteExpiredUserfiles(expired.map((f) => f.id));
-        console.log(`[Cleanup] Removed ${expired.length} expired userfile(s)`);
-      } catch (err) {
-        console.error('[Cleanup] Userfile cleanup failed:', err);
+      } else if (lastHealthStatus === 'degraded') {
+        app.log.info(`System health recovered at ${snapshot.timestamp}`);
       }
+
+      lastHealthStatus = snapshot.status;
+      return `Health status: ${snapshot.status}`;
     };
 
-    // Run immediately then every 24h
-    cleanupExpiredUserfiles();
-    setInterval(cleanupExpiredUserfiles, 24 * 60 * 60 * 1000);
+    // Internal maintenance jobs run through scheduler framework (cron + retry + telemetry).
+    schedulerService.registerInternalJob({
+      id: 'maintenance-userfile-cleanup',
+      name: 'Maintenance: Userfile Cleanup',
+      cronExpression: '0 3 * * *',
+      run: cleanupExpiredUserfilesJob,
+      runOnStart: true,
+      notifyOnFailure: false,
+    });
 
-    // Run memory decay daily
-    const DECAY_INTERVAL_MS = 24 * 60 * 60 * 1000;
-    const runDecayJob = async () => {
-      try {
-        const result = await runDecay();
-        console.info(`[server] memory decay: ${result.decayed} decayed, ${result.pruned} pruned`);
-      } catch (err) {
-        console.error('[server] memory decay failed:', err);
-      }
-    };
-    setTimeout(runDecayJob, 30_000);
-    setInterval(runDecayJob, DECAY_INTERVAL_MS);
+    schedulerService.registerInternalJob({
+      id: 'maintenance-memory-decay',
+      name: 'Maintenance: Memory Decay',
+      cronExpression: '30 3 * * *',
+      run: memoryDecayJob,
+      runOnStart: true,
+      notifyOnFailure: false,
+    });
+
+    schedulerService.registerInternalJob({
+      id: 'maintenance-local-db-backup',
+      name: 'Maintenance: Local DB Backup',
+      cronExpression: '0 4 * * *',
+      run: () => backupLocalDbJob(14),
+      runOnStart: true,
+      notifyOnFailure: false,
+    });
+
+    schedulerService.registerInternalJob({
+      id: 'system-health-watchdog',
+      name: 'System Health Watchdog',
+      cronExpression: '*/5 * * * *',
+      run: runHealthWatchdog,
+      runOnStart: true,
+      notifyOnFailure: false,
+    });
   } catch (err) {
     app.log.error(err);
     process.exit(1);
