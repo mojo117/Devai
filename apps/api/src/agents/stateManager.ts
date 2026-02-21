@@ -478,6 +478,16 @@ export function setGatheredInfo(
   schedulePersist(sessionId);
 }
 
+export function setLoopRunning(sessionId: string, running: boolean): void {
+  const state = getOrCreateState(sessionId);
+  state.isLoopRunning = running;
+}
+
+export function isLoopActive(sessionId: string): boolean {
+  const state = getState(sessionId);
+  return state?.isLoopRunning ?? false;
+}
+
 export function grantApproval(sessionId: string): void {
   const state = getOrCreateState(sessionId);
   state.taskContext.approvalGranted = true;
