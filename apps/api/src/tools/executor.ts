@@ -12,6 +12,7 @@ import * as memoryTools from './memory.js';
 import * as schedulerTools from './scheduler.js';
 import * as taskforgeTools from './taskforge.js';
 import * as emailTools from './email.js';
+import * as telegramTools from './telegram.js';
 import { config } from '../config.js';
 import { mcpManager } from '../mcp/index.js';
 import { join } from 'path';
@@ -362,6 +363,15 @@ export async function executeTool(
             args.subject as string,
             args.body as string,
             args.replyTo as string | undefined,
+          );
+
+        // Telegram Tools (CAIO agent)
+        case 'telegram_send_document':
+          return telegramTools.telegramSendDocument(
+            args.source as 'filesystem' | 'supabase' | 'url',
+            args.path as string,
+            args.caption as string | undefined,
+            args.filename as string | undefined,
           );
 
         default:
