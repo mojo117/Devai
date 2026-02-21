@@ -9,6 +9,15 @@ import { executeSSH } from './ssh.js';
 // Default server where PM2 runs
 const DEFAULT_PM2_HOST = 'baso';
 
+const VALID_PROCESS_NAME = /^[a-zA-Z0-9_-]+$/;
+
+function validateProcessName(name: string): string {
+  if (!VALID_PROCESS_NAME.test(name)) {
+    throw new Error(`Invalid PM2 process name: "${name}". Only alphanumeric, dash, and underscore allowed.`);
+  }
+  return name;
+}
+
 export interface PM2Process {
   name: string;
   id: number;
@@ -95,6 +104,7 @@ export async function pm2Restart(
   processName: string,
   host: string = DEFAULT_PM2_HOST
 ): Promise<PM2RestartResult> {
+  processName = validateProcessName(processName);
   const result = await executeSSH(host, `pm2 restart ${processName}`, {
     timeout: 30000,
   });
@@ -116,6 +126,7 @@ export async function pm2Stop(
   processName: string,
   host: string = DEFAULT_PM2_HOST
 ): Promise<PM2RestartResult> {
+  processName = validateProcessName(processName);
   const result = await executeSSH(host, `pm2 stop ${processName}`, {
     timeout: 15000,
   });
@@ -137,6 +148,7 @@ export async function pm2Start(
   processName: string,
   host: string = DEFAULT_PM2_HOST
 ): Promise<PM2RestartResult> {
+  processName = validateProcessName(processName);
   const result = await executeSSH(host, `pm2 start ${processName}`, {
     timeout: 15000,
   });
@@ -159,6 +171,10 @@ export async function pm2Logs(
   lines: number = 50,
   host: string = DEFAULT_PM2_HOST
 ): Promise<PM2LogsResult> {
+  processName = validateProcessName(processName);
+  if (!Number.isInteger(lines) || lines < 1 || lines > 5000) {
+    throw new Error(`Invalid lines parameter: ${lines}. Must be integer 1-5000.`);
+  }
   const result = await executeSSH(
     host,
     `pm2 logs ${processName} --lines ${lines} --nostream`,
