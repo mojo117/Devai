@@ -4,6 +4,7 @@ import type { ToolEvent } from './types';
 import { mergeConsecutiveThinking } from './mergeEvents';
 import type { MergedToolEvent } from './mergeEvents';
 import { renderMessageContent } from './utils';
+import { getUserfileDownloadUrl } from '../../api';
 
 const AGENT_COLORS: Record<string, string> = {
   chapo: 'text-cyan-400',
@@ -60,16 +61,30 @@ export function MessageList({
     const merged = mergeConsecutiveThinking(events);
     return (
       <div className="space-y-1.5">
-        {merged.map((event) => (
-          <InlineSystemEvent
-            key={event.id}
-            event={event}
-            mergedCount={event.mergedCount}
-            isExpanded={expandedEvents.has(event.id)}
-            onToggle={() => toggleEventExpanded(event.id)}
-            isLoading={live}
-          />
-        ))}
+        {merged.map((event) => {
+          const doc = getDocumentDelivery(event);
+          if (doc) {
+            return (
+              <DocumentDownloadCard
+                key={event.id}
+                fileId={doc.fileId}
+                filename={doc.filename}
+                sizeBytes={doc.sizeBytes}
+                description={doc.description}
+              />
+            );
+          }
+          return (
+            <InlineSystemEvent
+              key={event.id}
+              event={event}
+              mergedCount={event.mergedCount}
+              isExpanded={expandedEvents.has(event.id)}
+              onToggle={() => toggleEventExpanded(event.id)}
+              isLoading={live}
+            />
+          );
+        })}
       </div>
     );
   };
@@ -212,6 +227,58 @@ export function MessageList({
       )}
 
       <div ref={messagesEndRef} />
+    </div>
+  );
+}
+
+/** Check if a tool_result event represents a document delivery with download info */
+function getDocumentDelivery(event: ToolEvent): { fileId: string; filename: string; sizeBytes: number; downloadUrl: string; description?: string } | null {
+  if (event.type !== 'tool_result' || event.name !== 'deliver_document') return null;
+  const r = event.result as Record<string, unknown> | undefined;
+  if (!r || typeof r !== 'object') return null;
+  if (typeof r.fileId !== 'string' || typeof r.downloadUrl !== 'string') return null;
+  return {
+    fileId: r.fileId as string,
+    filename: (r.filename as string) || 'document',
+    sizeBytes: (r.sizeBytes as number) || 0,
+    downloadUrl: r.downloadUrl as string,
+    description: r.description as string | undefined,
+  };
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Document download card — rendered for deliver_document results */
+function DocumentDownloadCard({ fileId, filename, sizeBytes, description }: {
+  fileId: string;
+  filename: string;
+  sizeBytes: number;
+  description?: string;
+}) {
+  const downloadUrl = getUserfileDownloadUrl(fileId);
+  return (
+    <div className="flex justify-start">
+      <a
+        href={downloadUrl}
+        download={filename}
+        className="inline-flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-2.5 max-w-[80%] hover:bg-emerald-500/10 transition-colors group"
+      >
+        <span className="text-xl shrink-0">{'\u{1F4E5}'}</span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-emerald-400 font-medium truncate">{filename}</p>
+          <p className="text-xs text-devai-text-muted">
+            {formatBytes(sizeBytes)}
+            {description ? ` \u00B7 ${description}` : ''}
+          </p>
+        </div>
+        <svg className="w-4 h-4 text-emerald-400 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        </svg>
+      </a>
     </div>
   );
 }

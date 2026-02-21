@@ -469,6 +469,15 @@ export async function executeTool(
             args.filename as string | undefined,
           );
 
+        // Web Document Delivery (CAIO agent)
+        case 'deliver_document':
+          return telegramTools.deliverDocument(
+            args.source as 'filesystem' | 'supabase' | 'url',
+            args.path as string,
+            args.description as string | undefined,
+            args.filename as string | undefined,
+          );
+
         // Skill Management Tools
         case 'skill_create':
           return skillCreate(args);

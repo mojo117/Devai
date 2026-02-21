@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { listUserfiles, uploadUserfile, deleteUserfile } from '../api';
+import { listUserfiles, uploadUserfile, deleteUserfile, getUserfileDownloadUrl } from '../api';
 import type { UserfileInfo } from '../api';
 
 const ALLOWED_EXTENSIONS = [
@@ -261,6 +261,17 @@ export function UserfilesPanelContent({
                     <span>{expiryDays}d left</span>
                   </div>
                 </div>
+                <a
+                  href={getUserfileDownloadUrl(file.id)}
+                  download={file.original_name || file.name}
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-devai-text-muted hover:text-devai-accent opacity-0 group-hover:opacity-100 transition-all flex-shrink-0"
+                  title="Download"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                </a>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();

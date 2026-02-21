@@ -64,6 +64,8 @@ export type ToolName =
   | 'send_email'
   // Telegram Tools (CAIO)
   | 'telegram_send_document'
+  // Web Document Delivery (CAIO)
+  | 'deliver_document'
   // Skill Management Tools
   | 'skill_create'
   | 'skill_update'
@@ -1129,6 +1131,36 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
         caption: {
           type: 'string',
           description: 'Optionale Bildunterschrift/Beschreibung (max 1024 Zeichen)',
+        },
+        filename: {
+          type: 'string',
+          description: 'Optionaler Dateiname (default: wird aus path abgeleitet)',
+        },
+      },
+      required: ['source', 'path'],
+    },
+    requiresConfirmation: false,
+  },
+
+  // Web Document Delivery Tool (CAIO agent)
+  {
+    name: 'deliver_document',
+    description: 'Stelle ein Dokument/eine Datei im Web-UI zum Download bereit. Quellen: Dateisystem (path), Supabase Storage (fileId), oder URL. Die Datei wird in Supabase Storage hochgeladen und ist über einen Download-Link im Chat verfügbar.',
+    parameters: {
+      type: 'object',
+      properties: {
+        source: {
+          type: 'string',
+          description: 'Dateiquelle: "filesystem" (lokaler Pfad), "supabase" (Supabase userfile ID), oder "url" (HTTP/HTTPS URL)',
+          enum: ['filesystem', 'supabase', 'url'],
+        },
+        path: {
+          type: 'string',
+          description: 'Pfad, Supabase File-ID, oder URL je nach source',
+        },
+        description: {
+          type: 'string',
+          description: 'Optionale Beschreibung des Dokuments',
         },
         filename: {
           type: 'string',

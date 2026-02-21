@@ -44,6 +44,8 @@ export const CAIO_AGENT: AgentDefinition = {
     'send_email',
     // Telegram document sending
     'telegram_send_document',
+    // Web document delivery
+    'deliver_document',
     // Workspace memory
     'memory_remember',
     'memory_search',

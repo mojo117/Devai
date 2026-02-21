@@ -91,6 +91,35 @@ export const userfilesRoutes: FastifyPluginAsync = async (app) => {
     });
   });
 
+  // Download file (serves binary from Supabase Storage)
+  app.get<{ Params: { id: string } }>('/userfiles/:id/download', async (request, reply) => {
+    const { id } = request.params;
+    const file = await getUserfileById(id);
+
+    if (!file) {
+      return reply.status(404).send({ error: 'File not found' });
+    }
+
+    const { data, error } = await getSupabase()
+      .storage
+      .from(STORAGE_BUCKET)
+      .download(file.storage_path);
+
+    if (error || !data) {
+      console.error('Supabase Storage download failed:', error);
+      return reply.status(500).send({ error: 'Failed to download file from storage' });
+    }
+
+    const buffer = Buffer.from(await data.arrayBuffer());
+    const displayName = file.original_name || file.filename;
+
+    return reply
+      .header('Content-Type', file.mime_type || 'application/octet-stream')
+      .header('Content-Disposition', `attachment; filename="${displayName.replace(/"/g, '\\"')}"`)
+      .header('Content-Length', buffer.length)
+      .send(buffer);
+  });
+
   // Delete file (by ID) — removes from Storage + DB
   app.delete<{ Params: { id: string } }>('/userfiles/:id', async (request, reply) => {
     const { id } = request.params;

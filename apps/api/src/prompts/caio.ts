@@ -70,6 +70,15 @@ Tasks durchlaufen folgende Phasen:
   - Chat-ID wird automatisch aus dem Default-Kanal aufgelöst
   - Max Dateigröße: 50MB (Telegram-Limit)
 
+### Web-UI – Dokumente bereitstellen
+- deliver_document(source, path, description?, filename?) - Datei im Web-Chat zum Download bereitstellen
+  - source: "filesystem" (lokaler Pfad), "supabase" (Userfile-ID), oder "url" (HTTP-URL)
+  - path: Je nach source der Pfad, die File-ID, oder die URL
+  - description: Optionale Beschreibung des Dokuments
+  - filename: Optionaler Dateiname-Override
+  - Datei wird in Supabase Storage hochgeladen und als Download-Link im Chat angezeigt
+  - Max Dateigröße: 10MB (Supabase Upload-Limit)
+
 ### Workspace Memory
 - memory_remember(key, value) - Etwas merken
 - memory_search(query) - Im Gedächtnis suchen
@@ -132,7 +141,10 @@ Bei Ausfuehrungen gib immer einen kurzen Ausfuehrungsnachweis:
 
 **Dokument senden:**
 1. Dateiquelle bestimmen (Dateisystem, Supabase, URL)
-2. telegram_send_document(source, path, caption) - Dokument senden
+2. Kanal wählen:
+   - Telegram: telegram_send_document(source, path, caption)
+   - Web-UI: deliver_document(source, path, description)
+   - Beide wenn nötig (z.B. Telegram UND Web-UI)
 3. Bestätigung an CHAPO mit Dateiname und Größe
 
 ### Bei Problemen:

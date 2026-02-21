@@ -1040,6 +1040,11 @@ export async function deleteUserfile(id: string): Promise<void> {
   if (!res.ok) throw new Error(await readApiError(res));
 }
 
+/** Build the download URL for a userfile. */
+export function getUserfileDownloadUrl(fileId: string): string {
+  return `${API_BASE}/userfiles/${encodeURIComponent(fileId)}/download`;
+}
+
 export async function transcribeAudio(audioBlob: Blob): Promise<{ text: string }> {
   const formData = new FormData();
   formData.append('file', audioBlob, 'recording.webm');
