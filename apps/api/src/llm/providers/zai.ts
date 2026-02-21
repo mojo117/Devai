@@ -198,10 +198,10 @@ export class ZAIProvider implements LLMProviderAdapter {
     }
 
     // Simple text/multimodal message
-    if (Array.isArray(message.content)) {
-      // Multimodal: pass ContentBlock[] through as OpenAI-compatible format
+    if (Array.isArray(message.content) && message.role === 'user') {
+      // Multimodal user message: pass ContentBlock[] as OpenAI-compatible format
       messages.push({
-        role: message.role as 'user' | 'assistant',
+        role: 'user',
         content: message.content.map((block) => {
           if (block.type === 'image_url') {
             return { type: 'image_url' as const, image_url: block.image_url };
@@ -212,7 +212,7 @@ export class ZAIProvider implements LLMProviderAdapter {
     } else {
       messages.push({
         role: message.role as 'user' | 'assistant',
-        content: message.content,
+        content: getTextContent(message.content),
       });
     }
   }
