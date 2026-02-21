@@ -372,17 +372,18 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
               isError: true,
             });
           } else {
+            const envelope = this.buildVerificationEnvelope(delegation, devoResult);
             this.sendEvent({
               type: 'tool_result',
               agent: 'chapo',
               toolName: toolCall.name,
-              result: { delegated: true, agent: 'devo' },
-              success: true,
+              result: { delegated: true, agent: 'devo', status: devoResult.status },
+              success: devoResult.status === 'success',
             });
             toolResults.push({
               toolUseId: toolCall.id,
-              result: devoResult || 'DEVO hat die Aufgabe ausgefuehrt.',
-              isError: false,
+              result: envelope,
+              isError: devoResult.status === 'failed',
             });
           }
           continue;
@@ -410,17 +411,18 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
               isError: true,
             });
           } else {
+            const envelope = this.buildVerificationEnvelope(delegation, caioResult);
             this.sendEvent({
               type: 'tool_result',
               agent: 'chapo',
               toolName: toolCall.name,
-              result: { delegated: true, agent: 'caio' },
-              success: true,
+              result: { delegated: true, agent: 'caio', status: caioResult.status },
+              success: caioResult.status === 'success',
             });
             toolResults.push({
               toolUseId: toolCall.id,
-              result: caioResult || 'CAIO hat die Aufgabe ausgefuehrt.',
-              isError: false,
+              result: envelope,
+              isError: caioResult.status === 'failed',
             });
           }
           continue;
@@ -509,6 +511,24 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
               isError: true,
             });
           } else {
+            const scoutFindings: ScoutFindings = {
+              relevantFiles: scoutResult.relevantFiles || [],
+              codePatterns: scoutResult.codePatterns || {},
+              webFindings: scoutResult.webFindings || [],
+              recommendations: scoutResult.recommendations || [],
+              confidence: scoutResult.confidence || 'low',
+            };
+            const loopResult: LoopDelegationResult = {
+              status: scoutFindings.confidence === 'low' ? 'partial' : 'success',
+              summary: scoutResult.summary || JSON.stringify(scoutResult, null, 2),
+              toolEvidence: [{
+                tool: 'scout_research',
+                success: true,
+                summary: `SCOUT found ${scoutFindings.relevantFiles.length} files, ${scoutFindings.recommendations.length} recommendations (confidence: ${scoutFindings.confidence})`,
+              }],
+              findings: scoutFindings,
+            };
+            const envelope = this.buildVerificationEnvelope(delegation, loopResult);
             this.sendEvent({
               type: 'tool_result',
               agent: 'chapo',
@@ -518,7 +538,7 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
             });
             toolResults.push({
               toolUseId: toolCall.id,
-              result: JSON.stringify(scoutResult, null, 2),
+              result: envelope,
               isError: false,
             });
           }
@@ -871,13 +891,14 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
   /**
    * DELEGATE to DEVO: Run a sub-loop with DEVO agent for code/devops tasks.
    */
-  private async delegateToDevo(delegation: ParallelDelegation): Promise<string> {
+  private async delegateToDevo(delegation: ParallelDelegation): Promise<LoopDelegationResult> {
     const devo = getAgent('devo');
     const provider = (this.modelSelection.provider || 'anthropic') as LLMProvider;
     const devoToolNames = getToolsForAgent('devo');
     const tools = getToolsForLLM().filter((t) => devoToolNames.includes(t.name));
     const systemContextBlock = getCombinedSystemContextBlock(this.sessionId);
     const delegationContext = this.formatDelegationContext(delegation);
+    const toolEvidence: ToolEvidence[] = [];
 
     // StateProjection handles setActiveAgent via agent.switched event
     this.sendEvent({
@@ -958,7 +979,12 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
             reason: 'DEVO eskaliert an CHAPO',
           });
           this.sendEvent({ type: 'agent_complete', agent: 'devo', result: `DEVO eskaliert: ${desc}` });
-          return `DEVO eskaliert: ${desc}\n\nBisheriges Ergebnis:\n${finalContent}`;
+          return {
+            status: 'escalated',
+            summary: `DEVO eskaliert: ${desc}\n\nBisheriges Ergebnis:\n${finalContent}`,
+            toolEvidence,
+            escalation: desc,
+          };
         }
 
         // Handle scout delegation from DEVO
@@ -973,6 +999,11 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
               context: scoutContext,
               sendEvent: this.sendEvent,
             });
+            toolEvidence.push({
+              tool: 'delegateToScout',
+              success: true,
+              summary: `SCOUT: ${(query || '').slice(0, 80)}`,
+            });
             toolResults.push({
               toolUseId: toolCall.id,
               result: JSON.stringify(scoutResult, null, 2),
@@ -980,6 +1011,11 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
             });
           } catch (error) {
             const errMsg = error instanceof Error ? error.message : 'SCOUT spawn failed';
+            toolEvidence.push({
+              tool: 'delegateToScout',
+              success: false,
+              summary: errMsg,
+            });
             toolResults.push({
               toolUseId: toolCall.id,
               result: `Error: ${errMsg}`,
@@ -1023,6 +1059,11 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
             result: { error: toolErr.message },
             success: false,
           });
+          toolEvidence.push({
+            tool: toolCall.name,
+            success: false,
+            summary: toolErr.message,
+          });
           toolResults.push({
             toolUseId: toolCall.id,
             result: `Error: ${toolErr.message}`,
@@ -1035,6 +1076,13 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
             toolName: toolCall.name,
             result: result.result,
             success: result.success,
+          });
+          toolEvidence.push({
+            tool: toolCall.name,
+            success: result.success,
+            summary: result.success
+              ? `${toolCall.name} OK (${duration}ms)`
+              : (result.error || `${toolCall.name} failed`),
           });
 
           const content = this.buildToolResultContent(result);
@@ -1062,13 +1110,18 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
     });
     this.sendEvent({ type: 'agent_complete', agent: 'devo', result: finalContent });
 
-    return finalContent;
+    const status = this.deriveDelegationStatus(toolEvidence, false, finalContent.length > 0);
+    return {
+      status,
+      summary: finalContent,
+      toolEvidence,
+    };
   }
 
   /**
    * DELEGATE to CAIO: Run a sub-loop with CAIO for communication/admin tasks.
    */
-  private async delegateToCaio(delegation: ParallelDelegation): Promise<string> {
+  private async delegateToCaio(delegation: ParallelDelegation): Promise<LoopDelegationResult> {
     const caio = getAgent('caio');
     const provider = (this.modelSelection.provider || 'anthropic') as LLMProvider;
     const caioToolNames = getToolsForAgent('caio');
@@ -1159,7 +1212,19 @@ Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
             reason: 'CAIO eskaliert an CHAPO',
           });
           this.sendEvent({ type: 'agent_complete', agent: 'caio', result: `CAIO eskaliert: ${desc}` });
-          return `CAIO eskaliert: ${desc}\n\nBisheriges Ergebnis:\n${finalContent}`;
+          return {
+            status: 'escalated',
+            summary: `CAIO eskaliert: ${desc}\n\nBisheriges Ergebnis:\n${finalContent}`,
+            toolEvidence: evidenceLog.map((e) => ({
+              tool: e.tool,
+              success: e.success,
+              summary: e.summary,
+              pendingApproval: e.pendingApproval,
+              externalId: e.externalId,
+              nextStep: e.nextStep,
+            })),
+            escalation: desc,
+          };
         }
 
         if (toolCall.name === 'delegateToScout') {
@@ -1286,8 +1351,6 @@ Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
       });
     }
 
-    finalContent = this.applyCaioEvidenceSummary(finalContent, evidenceLog);
-
     this.sendEvent({
       type: 'agent_switch',
       from: 'caio',
@@ -1296,7 +1359,20 @@ Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
     });
     this.sendEvent({ type: 'agent_complete', agent: 'caio', result: finalContent });
 
-    return finalContent;
+    const mappedEvidence: ToolEvidence[] = evidenceLog.map((e) => ({
+      tool: e.tool,
+      success: e.success,
+      summary: e.summary,
+      pendingApproval: e.pendingApproval,
+      externalId: e.externalId,
+      nextStep: e.nextStep,
+    }));
+    const status = this.deriveDelegationStatus(mappedEvidence, false, finalContent.length > 0);
+    return {
+      status,
+      summary: finalContent,
+      toolEvidence: mappedEvidence,
+    };
   }
 
   private preflightCaioToolCall(toolName: string, args: Record<string, unknown>): ToolPreflightResult {
@@ -1561,15 +1637,22 @@ Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
   }
 
   private async delegateParallel(delegations: ParallelDelegation[]): Promise<string> {
-    const jobs = delegations.map(async (delegation) => {
+    interface ParallelJobResult extends ParallelDelegation {
+      success: boolean;
+      result?: string;
+      loopResult?: LoopDelegationResult;
+      error?: string;
+    }
+
+    const jobs = delegations.map(async (delegation): Promise<ParallelJobResult> => {
       try {
         if (delegation.target === 'devo') {
-          const result = await this.delegateToDevo(delegation);
-          return { ...delegation, success: true as const, result };
+          const loopResult = await this.delegateToDevo(delegation);
+          return { ...delegation, success: loopResult.status === 'success' || loopResult.status === 'partial', result: loopResult.summary, loopResult };
         }
         if (delegation.target === 'caio') {
-          const result = await this.delegateToCaio(delegation);
-          return { ...delegation, success: true as const, result };
+          const loopResult = await this.delegateToCaio(delegation);
+          return { ...delegation, success: loopResult.status === 'success' || loopResult.status === 'partial', result: loopResult.summary, loopResult };
         }
 
         const scoutResult = await spawnScout(this.sessionId, delegation.objective, {
@@ -1577,19 +1660,36 @@ Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
           context: this.formatDelegationContext(delegation),
           sendEvent: this.sendEvent,
         });
-        return { ...delegation, success: true as const, result: JSON.stringify(scoutResult, null, 2) };
+        const scoutFindings: ScoutFindings = {
+          relevantFiles: scoutResult.relevantFiles || [],
+          codePatterns: scoutResult.codePatterns || {},
+          webFindings: scoutResult.webFindings || [],
+          recommendations: scoutResult.recommendations || [],
+          confidence: scoutResult.confidence || 'low',
+        };
+        const loopResult: LoopDelegationResult = {
+          status: scoutFindings.confidence === 'low' ? 'partial' : 'success',
+          summary: scoutResult.summary || JSON.stringify(scoutResult, null, 2),
+          toolEvidence: [{
+            tool: 'scout_research',
+            success: true,
+            summary: `SCOUT found ${scoutFindings.relevantFiles.length} files, ${scoutFindings.recommendations.length} recommendations`,
+          }],
+          findings: scoutFindings,
+        };
+        return { ...delegation, success: true, result: loopResult.summary, loopResult };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        return { ...delegation, success: false as const, error: message };
+        return { ...delegation, success: false, error: message };
       }
     });
 
     const settled = await Promise.allSettled(jobs);
-    const results = settled.map((entry, index) => {
+    const results: ParallelJobResult[] = settled.map((entry, index) => {
       if (entry.status === 'fulfilled') return entry.value;
       return {
         ...delegations[index],
-        success: false as const,
+        success: false,
         error: entry.reason instanceof Error ? entry.reason.message : String(entry.reason),
       };
     });
@@ -1603,7 +1703,9 @@ Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
     if (okCount > 0) {
       lines.push('Successful delegations:');
       for (const result of results.filter((r) => r.success)) {
-        const content = (result.result || '').toString();
+        const content = result.loopResult
+          ? this.buildVerificationEnvelope(result, result.loopResult)
+          : ((result.result || '').toString());
         const preview = content.length > 1200 ? `${content.slice(0, 1200)}\n...[truncated]` : content;
         lines.push(`- [${result.target}/${result.domain}] ${result.objective}`);
         lines.push(preview || '(no content)');
