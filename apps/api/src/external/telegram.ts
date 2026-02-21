@@ -1,6 +1,8 @@
 import { config } from '../config.js';
 
 const TELEGRAM_MESSAGE_MAX = 4000;
+const TELEGRAM_CAPTION_MAX = 1024;
+const TELEGRAM_DOCUMENT_MAX_BYTES = 50 * 1024 * 1024;
 const TELEGRAM_CHAT_ACTIONS = new Set(['typing', 'upload_photo', 'record_video', 'upload_video', 'record_voice', 'upload_voice', 'upload_document']);
 
 export interface TelegramVoice {
@@ -25,6 +27,11 @@ export interface TelegramPhotoSize {
   width: number;
   height: number;
   file_size?: number;
+}
+
+export interface TelegramDocumentResult {
+  messageId: number;
+  filename: string;
 }
 
 export interface TelegramUpdate {
@@ -90,6 +97,68 @@ export async function sendTelegramMessage(chatId: string | number, text: string)
     const responseText = await retry.text();
     console.error('[Telegram] Failed to send message:', responseText);
   }
+}
+
+interface TelegramSendDocumentResponse {
+  ok: boolean;
+  result?: {
+    message_id: number;
+    document?: { file_name?: string };
+  };
+  description?: string;
+}
+
+/**
+ * Send a document (file) to a Telegram chat via the Bot API.
+ * Uses multipart/form-data with FormData + Blob for the file upload.
+ * Maximum file size: 50 MB (Telegram Bot API limit).
+ */
+export async function sendTelegramDocument(
+  chatId: string | number,
+  buffer: Buffer,
+  filename: string,
+  caption?: string
+): Promise<TelegramDocumentResult> {
+  const token = config.telegramBotToken;
+  if (!token) {
+    throw new Error('Telegram bot token not configured');
+  }
+
+  if (buffer.length > TELEGRAM_DOCUMENT_MAX_BYTES) {
+    throw new Error(
+      `File size ${buffer.length} bytes exceeds Telegram limit of ${TELEGRAM_DOCUMENT_MAX_BYTES} bytes (50 MB)`
+    );
+  }
+
+  await sendTelegramChatAction(chatId, 'upload_document');
+
+  const formData = new FormData();
+  formData.append('chat_id', String(chatId));
+  formData.append('document', new Blob([buffer]), filename);
+
+  if (caption) {
+    formData.append('caption', caption.slice(0, TELEGRAM_CAPTION_MAX));
+    formData.append('parse_mode', 'Markdown');
+  }
+
+  const url = `https://api.telegram.org/bot${token}/sendDocument`;
+  const response = await fetch(url, {
+    method: 'POST',
+    body: formData,
+  });
+
+  const data = (await response.json()) as TelegramSendDocumentResponse;
+
+  if (!response.ok || !data.ok) {
+    const errorMsg = data.description || `HTTP ${response.status}`;
+    console.error('[Telegram] Failed to send document:', errorMsg);
+    throw new Error(`Telegram sendDocument failed: ${errorMsg}`);
+  }
+
+  return {
+    messageId: data.result!.message_id,
+    filename,
+  };
 }
 
 export async function sendTelegramChatAction(
