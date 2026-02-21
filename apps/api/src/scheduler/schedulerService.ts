@@ -138,8 +138,8 @@ class SchedulerService {
         console.log(`[Scheduler] One-shot job "${job.name}" completed and disabled`);
       }
 
-      // Send result to notification channel if configured
-      if (this.notifier && job.notification_channel) {
+      // Send result notification (uses job channel or falls back to default)
+      if (this.notifier) {
         await this.notifier(
           `[${job.name}] ${result}`,
           job.notification_channel,
