@@ -23,9 +23,11 @@ import { websocketRoutes } from './websocket/routes.js';
 import { mcpManager } from './mcp/index.js';
 import { registerMcpTools } from './tools/registry.js';
 import { registerProjections } from './workflow/projections/index.js';
+import { refreshSkills } from './skills/registry.js';
 import { schedulerService } from './scheduler/schedulerService.js';
 import { processRequest } from './agents/router.js';
 import { sendTelegramMessage } from './external/telegram.js';
+import { getAgentSoulStatusReport } from './prompts/agentSoul.js';
 import { getDefaultNotificationChannel, logSchedulerExecution } from './db/schedulerQueries.js';
 import {
   backupLocalDbJob,
@@ -154,6 +156,20 @@ const start = async () => {
     if (config.openaiApiKey) providers.push('OpenAI');
     if (config.geminiApiKey) providers.push('Gemini');
     console.log(`Configured LLM providers: ${providers.length > 0 ? providers.join(', ') : 'None'}`);
+
+    // Log agent soul loading status (CAIO/DEVO/SCOUT)
+    const soulStatuses = getAgentSoulStatusReport();
+    for (const soul of soulStatuses) {
+      if (soul.loaded) {
+        console.log(`[Soul] ${soul.agent.toUpperCase()} loaded from ${soul.soulFile} (${soul.charCount} chars)`);
+      } else {
+        console.warn(`[Soul] ${soul.agent.toUpperCase()} missing or empty (${soul.soulFile})`);
+      }
+    }
+
+    // Load skills and register as tools
+    const skillResult = await refreshSkills();
+    console.info(`[server] Skills loaded: ${skillResult.count} skills, ${skillResult.errors.length} errors`);
 
     // Initialize MCP servers asynchronously so the API starts quickly even if MCP servers are slow.
     // This avoids long startup delays (e.g. Serena scanning large project trees).
