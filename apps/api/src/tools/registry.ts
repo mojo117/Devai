@@ -61,7 +61,15 @@ export type ToolName =
   | 'taskforge_add_comment'
   | 'taskforge_search'
   // Email Tool (CAIO)
-  | 'send_email';
+  | 'send_email'
+  // Telegram Tools (CAIO)
+  | 'telegram_send_document'
+  // Skill Management Tools
+  | 'skill_create'
+  | 'skill_update'
+  | 'skill_delete'
+  | 'skill_reload'
+  | 'skill_list';
 
 export interface ToolPropertyDefinition {
   type: string;
@@ -980,6 +988,10 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
           type: 'string',
           description: 'ISO 8601 datetime for when to fire (e.g. "2026-02-20T09:00:00")',
         },
+        notificationChannel: {
+          type: 'string',
+          description: 'Optional channel override (Telegram chat ID). If omitted, default notification channel is used.',
+        },
       },
       required: ['message', 'datetime'],
     },
@@ -1097,6 +1109,99 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
       required: ['to', 'subject', 'body'],
     },
     requiresConfirmation: true,
+  },
+  // Telegram Document Tool (CAIO agent)
+  {
+    name: 'telegram_send_document',
+    description: 'Sende ein Dokument/eine Datei an den Benutzer via Telegram. Quellen: Dateisystem (path), Supabase Storage (fileId), oder URL.',
+    parameters: {
+      type: 'object',
+      properties: {
+        source: {
+          type: 'string',
+          description: 'Dateiquelle: "filesystem" (lokaler Pfad), "supabase" (Supabase userfile ID), oder "url" (HTTP/HTTPS URL)',
+          enum: ['filesystem', 'supabase', 'url'],
+        },
+        path: {
+          type: 'string',
+          description: 'Pfad, Supabase File-ID, oder URL je nach source',
+        },
+        caption: {
+          type: 'string',
+          description: 'Optionale Bildunterschrift/Beschreibung (max 1024 Zeichen)',
+        },
+        filename: {
+          type: 'string',
+          description: 'Optionaler Dateiname (default: wird aus path abgeleitet)',
+        },
+      },
+      required: ['source', 'path'],
+    },
+    requiresConfirmation: false,
+  },
+
+  // ============ Skill Management Tools ============
+  {
+    name: 'skill_create',
+    description: 'Create a new skill. Writes skill.json manifest and execute.ts code, then registers it as a tool.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Unique skill ID (lowercase, hyphens allowed, e.g. "generate-image")' },
+        name: { type: 'string', description: 'Human-readable skill name' },
+        description: { type: 'string', description: 'What the skill does (shown to agents as tool description)' },
+        parameters: { type: 'object', description: 'Skill parameters as { paramName: { type, description, required?, default? } }' },
+        code: { type: 'string', description: 'TypeScript source code for execute.ts. Must export async function execute(args, ctx).' },
+        tags: { type: 'string', description: 'Comma-separated tags for categorization' },
+      },
+      required: ['id', 'name', 'description', 'code'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'skill_update',
+    description: 'Update an existing skill. Overwrites code and/or manifest fields, then re-registers the tool.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Skill ID to update' },
+        code: { type: 'string', description: 'New execute.ts source code (optional)' },
+        description: { type: 'string', description: 'New description (optional)' },
+        parameters: { type: 'object', description: 'New parameters definition (optional)' },
+      },
+      required: ['id'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'skill_delete',
+    description: 'Delete a skill and unregister its tool.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Skill ID to delete' },
+      },
+      required: ['id'],
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'skill_reload',
+    description: 'Reload all skills from disk and re-register their tools.',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'skill_list',
+    description: 'List all loaded skills with their status.',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+    requiresConfirmation: false,
   },
 ];
 

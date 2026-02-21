@@ -13,7 +13,7 @@ import { registerMetaTools, registerAgentTools } from '../tools/registry.js';
 export const CAIO_AGENT: AgentDefinition = {
   name: 'caio',
   role: 'Communications & Administration Officer',
-  model: 'glm-4.7', // ZAI GLM-4.7 - primary (cost-optimized)
+  model: 'glm-4.5-air', // ZAI GLM-4.5-Air - admin tasks don't need heavy models
   fallbackModel: 'claude-sonnet-4-20250514',
 
   capabilities: {
@@ -42,6 +42,8 @@ export const CAIO_AGENT: AgentDefinition = {
     // Notification & Email
     'notify_user',
     'send_email',
+    // Telegram document sending
+    'telegram_send_document',
     // Workspace memory
     'memory_remember',
     'memory_search',

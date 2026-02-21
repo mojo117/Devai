@@ -119,8 +119,13 @@ export async function executeToolWithApprovalBridge(
 
   const needsBypass = toolRequiresConfirmation(normalizedToolName);
   if (needsBypass) {
-    return executeTool(normalizedToolName, toolArgs, { bypassConfirmation: true });
+    return executeTool(normalizedToolName, toolArgs, {
+      bypassConfirmation: true,
+      agentName: options?.agentName,
+    });
   }
 
-  return executeTool(normalizedToolName, toolArgs);
+  return executeTool(normalizedToolName, toolArgs, {
+    agentName: options?.agentName,
+  });
 }

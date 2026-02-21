@@ -480,6 +480,37 @@ export interface ScoutResult {
 }
 
 // ============================================
+// UNIFIED DELEGATION PROTOCOL (Ralph Verification)
+// ============================================
+
+export type LoopDelegationStatus = 'success' | 'partial' | 'failed' | 'escalated';
+
+export interface ToolEvidence {
+  tool: string;
+  success: boolean;
+  summary: string;
+  pendingApproval?: boolean;
+  externalId?: string;
+  nextStep?: string;
+}
+
+export interface ScoutFindings {
+  relevantFiles: string[];
+  codePatterns: Record<string, string>;
+  webFindings: WebFinding[];
+  recommendations: string[];
+  confidence: ScoutConfidence;
+}
+
+export interface LoopDelegationResult {
+  status: LoopDelegationStatus;
+  summary: string;
+  toolEvidence: ToolEvidence[];
+  escalation?: string;
+  findings?: ScoutFindings;
+}
+
+// ============================================
 // CHAPO LOOP TYPES
 // ============================================
 

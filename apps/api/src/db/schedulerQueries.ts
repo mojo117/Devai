@@ -158,6 +158,7 @@ export interface ExternalSessionRow {
   external_chat_id: string;
   session_id: string;
   is_default_channel: boolean;
+  pinned_userfile_ids: string[];
   created_at: string;
 }
 
@@ -170,15 +171,16 @@ export async function getExternalSession(
     .select('*')
     .eq('platform', platform)
     .eq('external_user_id', externalUserId)
-    .single();
+    .order('created_at', { ascending: false })
+    .limit(1);
 
   if (error) {
-    if (error.code === 'PGRST116') return null;
     console.error('[ExternalSession] Failed to get session:', error);
     return null;
   }
 
-  return data as ExternalSessionRow;
+  const rows = (data || []) as ExternalSessionRow[];
+  return rows[0] || null;
 }
 
 export async function createExternalSession(session: {
@@ -290,6 +292,63 @@ export async function updateExternalSessionSessionId(
   if (error) {
     console.error('[ExternalSession] Failed to update session_id:', error);
     throw new Error(`Failed to update external session binding: ${error.message}`);
+  }
+}
+
+// ============================================
+// Pinned Userfiles (External Sessions)
+// ============================================
+
+export async function addPinnedUserfile(externalSessionId: string, fileId: string): Promise<void> {
+  // Use raw SQL via rpc to append to array without race conditions
+  const { data, error: fetchError } = await getSupabase()
+    .from('external_sessions')
+    .select('pinned_userfile_ids')
+    .eq('id', externalSessionId)
+    .single();
+
+  if (fetchError) {
+    console.error('[ExternalSession] Failed to fetch pinned files:', fetchError);
+    return;
+  }
+
+  const current = (data as { pinned_userfile_ids: string[] })?.pinned_userfile_ids || [];
+  if (current.includes(fileId)) return;
+
+  const { error } = await getSupabase()
+    .from('external_sessions')
+    .update({ pinned_userfile_ids: [...current, fileId] })
+    .eq('id', externalSessionId);
+
+  if (error) {
+    console.error('[ExternalSession] Failed to add pinned userfile:', error);
+  }
+}
+
+export async function getPinnedUserfileIds(externalSessionId: string): Promise<string[]> {
+  const { data, error } = await getSupabase()
+    .from('external_sessions')
+    .select('pinned_userfile_ids')
+    .eq('id', externalSessionId)
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') return [];
+    console.error('[ExternalSession] Failed to get pinned files:', error);
+    return [];
+  }
+
+  return (data as { pinned_userfile_ids: string[] })?.pinned_userfile_ids || [];
+}
+
+export async function clearPinnedUserfiles(externalSessionId: string): Promise<void> {
+  const { error } = await getSupabase()
+    .from('external_sessions')
+    .update({ pinned_userfile_ids: [] })
+    .eq('id', externalSessionId);
+
+  if (error) {
+    console.error('[ExternalSession] Failed to clear pinned files:', error);
   }
 }
 

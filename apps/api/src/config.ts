@@ -20,6 +20,16 @@ const HARDCODED_DENIED_PATHS: readonly string[] = [
   "/opt/Devai",       // Devai's own deployment — prevent self-modification
 ] as const;
 
+// Directories/files within /opt/Devai that SCOUT must NOT read (secrets, runtime data)
+const SELF_INSPECTION_EXCLUDE: readonly string[] = [
+  '.env',
+  'secrets',
+  'var',
+  'workspace/memory',
+  '.git',
+  'node_modules',
+] as const;
+
 export interface Config {
   nodeEnv: string;
   port: number;
@@ -39,6 +49,10 @@ export interface Config {
   projectRoot?: string;
   allowedRoots: readonly string[];
   deniedPaths: readonly string[];
+
+  // Self-inspection: allows SCOUT to read Devai's own source (read-only, secrets excluded)
+  selfInspectionRoot: string;
+  selfInspectionExclude: string[];
 
   // Skills
   skillsDir: string;
@@ -72,6 +86,22 @@ export interface Config {
   looperMinValidationConfidence: number;
   looperSelfValidationEnabled: boolean;
 
+  // Memory retrieval tuning
+  memoryRetrievalThresholds: number[];
+  memoryMinHitsBeforeStop: number;
+  memoryIncludePersonalScope: boolean;
+
+}
+
+export interface EnvValidationIssue {
+  key: string;
+  reason: string;
+}
+
+export interface EnvValidationResult {
+  ok: boolean;
+  errors: EnvValidationIssue[];
+  warnings: EnvValidationIssue[];
 }
 
 export function loadConfig(): Config {
@@ -102,6 +132,9 @@ export function loadConfig(): Config {
     allowedRoots,
     deniedPaths: HARDCODED_DENIED_PATHS,
 
+    selfInspectionRoot: '/opt/Devai',
+    selfInspectionExclude: [...SELF_INSPECTION_EXCLUDE],
+
     skillsDir: process.env.SKILLS_DIR || resolve(process.cwd(), "../../skills"),
 
     toolTimeoutMs: parseInt(process.env.TOOL_TIMEOUT_MS || "15000", 10),
@@ -128,11 +161,85 @@ export function loadConfig(): Config {
     looperMaxToolRetries: parseInt(process.env.LOOPER_MAX_TOOL_RETRIES || "3", 10),
     looperMinValidationConfidence: parseFloat(process.env.LOOPER_MIN_VALIDATION_CONFIDENCE || "0.7"),
     looperSelfValidationEnabled: process.env.LOOPER_SELF_VALIDATION !== "false",
+    memoryRetrievalThresholds: parseNumberList(
+      process.env.MEMORY_RETRIEVAL_THRESHOLDS,
+      [0.5, 0.35, 0.2],
+      { min: 0, max: 1, sortDesc: true },
+    ),
+    memoryMinHitsBeforeStop: Math.max(1, parseInt(process.env.MEMORY_MIN_HITS_BEFORE_STOP || "3", 10)),
+    memoryIncludePersonalScope: process.env.MEMORY_INCLUDE_PERSONAL_SCOPE !== "false",
 
   };
 }
 
 export const config = loadConfig();
+
+export function validateRequiredEnv(currentConfig: Config = config): EnvValidationResult {
+  const errors: EnvValidationIssue[] = [];
+  const warnings: EnvValidationIssue[] = [];
+
+  const hasAnyLlmProvider = Boolean(
+    currentConfig.zaiApiKey ||
+    currentConfig.anthropicApiKey ||
+    currentConfig.openaiApiKey ||
+    currentConfig.geminiApiKey,
+  );
+
+  if (!currentConfig.supabaseUrl) {
+    errors.push({
+      key: 'DEVAI_SUPABASE_URL | SUPABASE_URL',
+      reason: 'Supabase project URL is required for sessions, auth, scheduler, and memory.',
+    });
+  }
+
+  if (!currentConfig.supabaseServiceKey) {
+    errors.push({
+      key: 'DEVAI_SUPABASE_SERVICE_ROLE_KEY | SUPABASE_SERVICE_ROLE_KEY | SUPABASE_SERVICE_KEY',
+      reason: 'Supabase service key is required for backend data access.',
+    });
+  }
+
+  if (!process.env.DEVAI_JWT_SECRET) {
+    errors.push({
+      key: 'DEVAI_JWT_SECRET',
+      reason: 'JWT signing secret is required for authentication routes.',
+    });
+  }
+
+  if (!hasAnyLlmProvider) {
+    errors.push({
+      key: 'ZAI_API_KEY | ANTHROPIC_API_KEY | OPENAI_API_KEY | GEMINI_API_KEY',
+      reason: 'At least one LLM provider key must be configured.',
+    });
+  }
+
+  if (!currentConfig.telegramBotToken) {
+    warnings.push({
+      key: 'TELEGRAM_BOT_TOKEN',
+      reason: 'Telegram notifications are disabled.',
+    });
+  }
+
+  if (!currentConfig.telegramAllowedChatId) {
+    warnings.push({
+      key: 'TELEGRAM_ALLOWED_CHAT_ID',
+      reason: 'Telegram inbound webhooks will reject all chats until allowed IDs are set.',
+    });
+  }
+
+  if (!currentConfig.taskforgeApiKey) {
+    warnings.push({
+      key: 'DEVAI_TASKBOARD_API_KEY',
+      reason: 'TaskForge integration is disabled.',
+    });
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+  };
+}
 
 function parseExtensions(value?: string): string[] {
   if (!value) {
@@ -159,4 +266,28 @@ function parseExtensions(value?: string): string[] {
     .map((ext) => ext.trim())
     .filter(Boolean)
     .map((ext) => (ext.startsWith(".") ? ext : `.${ext}`));
+}
+
+function parseNumberList(
+  value: string | undefined,
+  fallback: number[],
+  options: { min?: number; max?: number; sortDesc?: boolean } = {},
+): number[] {
+  const source = (value || '')
+    .split(/[;,]/)
+    .map((entry) => Number(entry.trim()))
+    .filter((entry) => Number.isFinite(entry));
+
+  const raw = source.length > 0 ? source : fallback;
+  const filtered = raw.filter((entry) => {
+    if (options.min !== undefined && entry < options.min) return false;
+    if (options.max !== undefined && entry > options.max) return false;
+    return true;
+  });
+
+  const unique = Array.from(new Set(filtered));
+  if (options.sortDesc) {
+    unique.sort((a, b) => b - a);
+  }
+  return unique.length > 0 ? unique : fallback;
 }

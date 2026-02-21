@@ -7,6 +7,7 @@ import {
   updateScheduledJob,
   deleteScheduledJob,
   getScheduledJob,
+  getDefaultNotificationChannel,
 } from '../db/schedulerQueries.js';
 import { schedulerService } from '../scheduler/schedulerService.js';
 import type { ToolExecutionResult } from './executor.js';
@@ -152,6 +153,7 @@ export async function schedulerDelete(id: string): Promise<ToolExecutionResult> 
 export async function reminderCreate(
   message: string,
   datetime: string,
+  notificationChannel?: string,
 ): Promise<ToolExecutionResult> {
   try {
     // Convert datetime to cron expression for a one-shot trigger
@@ -166,11 +168,22 @@ export async function reminderCreate(
 
     // Use ISO 8601 format — croner treats this as a one-time execution at the exact datetime
     const cronExpression = date.toISOString();
+    const explicitChannel = notificationChannel?.trim();
+    let resolvedChannel = explicitChannel || undefined;
+    let deliveryPlatform = explicitChannel ? 'custom' : 'default';
+    if (!resolvedChannel) {
+      const defaultChannel = await getDefaultNotificationChannel();
+      if (defaultChannel?.external_chat_id) {
+        resolvedChannel = defaultChannel.external_chat_id;
+        deliveryPlatform = defaultChannel.platform || 'default';
+      }
+    }
 
     const job = await createScheduledJob({
       name: `Reminder: ${message.substring(0, 50)}`,
       cronExpression,
       instruction: message,
+      notificationChannel: resolvedChannel,
       oneShot: true,
     });
 
@@ -182,6 +195,11 @@ export async function reminderCreate(
         id: job.id,
         message: `Reminder set for ${date.toISOString()}: "${message}"`,
         scheduledFor: date.toISOString(),
+        notificationChannel: resolvedChannel || 'default',
+        deliveryPlatform,
+        deliveryNote: deliveryPlatform === 'telegram'
+          ? 'Reminder will be sent via Telegram.'
+          : undefined,
       },
     };
   } catch (err) {

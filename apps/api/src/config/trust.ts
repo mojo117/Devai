@@ -40,9 +40,9 @@ export interface TrustConfig {
   // Future: could add per-tool overrides, time limits, etc.
 }
 
-// Sandbox default: run in trusted mode so risky-action approvals are bypassed.
-// Set this to 'default' to restore explicit confirmations by default.
-export const DEFAULT_TRUST_MODE: TrustMode = 'trusted';
+// Default: require explicit confirmations for destructive tools.
+// Set to 'trusted' per-session to bypass confirmations.
+export const DEFAULT_TRUST_MODE: TrustMode = 'default';
 
 /**
  * Check if a file path is blocked from modification

@@ -12,10 +12,13 @@ import * as memoryTools from './memory.js';
 import * as schedulerTools from './scheduler.js';
 import * as taskforgeTools from './taskforge.js';
 import * as emailTools from './email.js';
+import * as telegramTools from './telegram.js';
 import { config } from '../config.js';
 import { mcpManager } from '../mcp/index.js';
 import { join } from 'path';
-import { stat } from 'fs/promises';
+import { stat, writeFile as fsWriteFile, readFile as fsReadFile, mkdir, rm, access } from 'fs/promises';
+import { executeSkill } from '../skills/runner.js';
+import { refreshSkills, getSkillSummaries, getSkillById, getSkillLoadState } from '../skills/registry.js';
 import { toRuntimePath } from '../utils/pathMapping.js';
 
 export interface ToolExecutionResult {
@@ -30,6 +33,101 @@ type ToolArgs = Record<string, unknown>;
 export interface ToolExecutionOptions {
   // Internal escape hatch used only after explicit user approval (e.g. approved action queue).
   bypassConfirmation?: boolean;
+  // The agent requesting this tool — used for self-inspection access control.
+  agentName?: string;
+}
+
+async function skillCreate(args: ToolArgs): Promise<unknown> {
+  const id = args.id as string;
+  const name = args.name as string;
+  const description = args.description as string;
+  const code = args.code as string;
+  const parameters = args.parameters as Record<string, unknown> | undefined;
+  const tags = args.tags ? (args.tags as string).split(',').map((t) => t.trim()).filter(Boolean) : undefined;
+
+  const skillDir = join(config.skillsDir, id);
+
+  // Check if skill already exists
+  try {
+    await access(skillDir);
+    throw new Error(`Skill "${id}" already exists. Use skill_update to modify it.`);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+  }
+
+  const manifest = {
+    id,
+    name,
+    description,
+    version: '1.0.0',
+    ...(parameters ? { parameters } : {}),
+    createdBy: 'devo',
+    ...(tags ? { tags } : {}),
+  };
+
+  await mkdir(skillDir, { recursive: true });
+  await fsWriteFile(join(skillDir, 'skill.json'), JSON.stringify(manifest, null, 2), 'utf-8');
+  await fsWriteFile(join(skillDir, 'execute.ts'), code, 'utf-8');
+
+  // Reload to register the new skill as a tool
+  const loadResult = await refreshSkills();
+  const toolName = `skill_${id.replace(/-/g, '_')}`;
+
+  return {
+    created: true,
+    skillId: id,
+    toolName,
+    skillsLoaded: loadResult.count,
+    errors: loadResult.errors,
+  };
+}
+
+async function skillUpdate(args: ToolArgs): Promise<unknown> {
+  const id = args.id as string;
+  const skillDir = join(config.skillsDir, id);
+
+  // Verify skill exists
+  const existing = getSkillById(id);
+  if (!existing) {
+    throw new Error(`Skill "${id}" not found`);
+  }
+
+  // Update code if provided
+  if (args.code) {
+    await fsWriteFile(join(skillDir, 'execute.ts'), args.code as string, 'utf-8');
+  }
+
+  // Update manifest fields if provided
+  if (args.description || args.parameters) {
+    const manifestPath = join(skillDir, 'skill.json');
+    const raw = await fsReadFile(manifestPath, 'utf-8');
+    const manifest = JSON.parse(raw);
+
+    if (args.description) manifest.description = args.description;
+    if (args.parameters) manifest.parameters = args.parameters;
+
+    await fsWriteFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+  }
+
+  // Reload to re-register
+  await refreshSkills();
+
+  return { updated: true, skillId: id };
+}
+
+async function skillDelete(args: ToolArgs): Promise<unknown> {
+  const id = args.id as string;
+  const skillDir = join(config.skillsDir, id);
+
+  const existing = getSkillById(id);
+  if (!existing) {
+    throw new Error(`Skill "${id}" not found`);
+  }
+
+  await rm(skillDir, { recursive: true, force: true });
+  await refreshSkills();
+
+  return { deleted: true, skillId: id };
 }
 
 export async function executeTool(
@@ -72,13 +170,17 @@ export async function executeTool(
     };
 
     const execution = (async () => {
+      // Self-inspection: only SCOUT gets read access to Devai's own codebase
+      const fsOpts: import('./fs.js').FsOptions | undefined =
+        options?.agentName === 'scout' ? { selfInspection: true } : undefined;
+
       switch (normalizedToolName) {
         // File System Tools
         case 'fs_listFiles':
-          return fsTools.listFiles(args.path as string);
+          return fsTools.listFiles(args.path as string, fsOpts);
 
         case 'fs_readFile':
-          return fsTools.readFile(args.path as string);
+          return fsTools.readFile(args.path as string, fsOpts);
 
         case 'fs_writeFile':
           return fsTools.writeFile(
@@ -89,14 +191,18 @@ export async function executeTool(
         case 'fs_glob':
           return fsTools.globFiles(
             args.pattern as string,
-            args.path as string | undefined
+            args.path as string | undefined,
+            undefined, // ignore
+            fsOpts
           );
 
         case 'fs_grep':
           return fsTools.grepFiles(
             args.pattern as string,
             args.path as string,
-            args.glob as string | undefined
+            args.glob as string | undefined,
+            undefined, // ignore
+            fsOpts
           );
 
         case 'fs_edit':
@@ -304,6 +410,7 @@ export async function executeTool(
           return schedulerTools.reminderCreate(
             args.message as string,
             args.datetime as string,
+            args.notificationChannel as string | undefined,
           );
 
         case 'notify_user':
@@ -353,7 +460,45 @@ export async function executeTool(
             args.replyTo as string | undefined,
           );
 
+        // Telegram Tools (CAIO agent)
+        case 'telegram_send_document':
+          return telegramTools.telegramSendDocument(
+            args.source as 'filesystem' | 'supabase' | 'url',
+            args.path as string,
+            args.caption as string | undefined,
+            args.filename as string | undefined,
+          );
+
+        // Skill Management Tools
+        case 'skill_create':
+          return skillCreate(args);
+
+        case 'skill_update':
+          return skillUpdate(args);
+
+        case 'skill_delete':
+          return skillDelete(args);
+
+        case 'skill_reload':
+          return refreshSkills();
+
+        case 'skill_list':
+          return {
+            skills: getSkillSummaries(),
+            ...getSkillLoadState(),
+          };
+
         default:
+          // Route dynamic skill tools (skill_<id>) to the skill runner
+          if (normalizedToolName.startsWith('skill_')) {
+            // Extract skill ID: skill_generate_image -> generate-image
+            const skillId = normalizedToolName.slice(6).replace(/_/g, '-');
+            const skill = getSkillById(skillId);
+            if (skill) {
+              return executeSkill(skillId, args);
+            }
+          }
+
           // Route MCP tools to the MCP manager
           if (mcpManager.isMcpTool(normalizedToolName)) {
             const mcpResult = await mcpManager.executeTool(normalizedToolName, args);
@@ -427,6 +572,8 @@ const READ_ONLY_TOOLS = new Set([
   'memory_search',
   'memory_readToday',
   'scheduler_list',
+  'skill_list',
+  'skill_reload',
 ]);
 
 /**

@@ -186,11 +186,14 @@ ssh root@10.0.0.5 "pm2 status"
 
 DevAI uses a three-agent system orchestrated by the CHAPO Decision Loop:
 
-| Agent | Role | Model | Access |
+| Agent | Role | Model (Primary → Fallback) | Access |
 |-------|------|-------|--------|
-| **CHAPO** | Coordinator + Assistant | Opus 4.5 (fallback: Sonnet 4) | Read-only + delegation + memory |
-| **DEVO** | Developer & DevOps | Sonnet 4 | Full read/write + bash + SSH + git + PM2 |
-| **SCOUT** | Exploration Specialist | Sonnet 4 (fallback: Haiku 3.5) | Read-only + web search |
+| **CHAPO** | Coordinator + Assistant | ZAI GLM-5 → Anthropic Opus | Read-only + delegation + memory |
+| **DEVO** | Developer & DevOps | ZAI GLM-4.7 → Anthropic Sonnet | Full read/write + bash + SSH + git + PM2 |
+| **CAIO** | Communications & Admin | ZAI GLM-4.7 → Anthropic Sonnet | Email, notifications, TaskForge |
+| **SCOUT** | Exploration Specialist | ZAI GLM-4.7-Flash (free) | Read-only + web search |
+
+> **Note (2026-02-20):** Anthropic API credits are currently exhausted. ZAI (z.ai) is the active primary LLM provider. Only free-tier ZAI models (GLM-4.7-Flash, GLM-4.5-Flash) are confirmed working. Paid ZAI models (GLM-5, GLM-4.7) require GLM Max subscription balance — check z.ai dashboard if they fail.
 
 **Decision flow:** No separate decision engine — the LLM's `tool_calls` ARE the decisions:
 - No tool calls → **ANSWER** (self-validate, respond)

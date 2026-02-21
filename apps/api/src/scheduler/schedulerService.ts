@@ -122,7 +122,16 @@ class SchedulerService {
     console.log(`[Scheduler] Executing job "${job.name}" (${jobId})`);
 
     try {
-      const result = await this.executor(job.instruction, jobId);
+      // One-shot reminders are deterministic notifications.
+      // Do not run them through the AI execution loop to avoid reinterpretation.
+      const reminderText = job.instruction.trim();
+      const reminderMessage = `Erinnerung: ${reminderText || job.name}`;
+      const result = job.one_shot
+        ? reminderMessage
+        : await this.executor(job.instruction, jobId);
+      const outboundMessage = job.one_shot
+        ? reminderMessage
+        : `[${job.name}] ${result}`;
 
       // Success — reset failure counter
       await updateScheduledJob(jobId, {
@@ -138,10 +147,10 @@ class SchedulerService {
         console.log(`[Scheduler] One-shot job "${job.name}" completed and disabled`);
       }
 
-      // Send result to notification channel if configured
-      if (this.notifier && job.notification_channel) {
+      // Send result notification (uses job channel or falls back to default)
+      if (this.notifier) {
         await this.notifier(
-          `[${job.name}] ${result}`,
+          outboundMessage,
           job.notification_channel,
         ).catch((err) => {
           console.error(`[Scheduler] Failed to send notification for "${job.name}":`, err);
