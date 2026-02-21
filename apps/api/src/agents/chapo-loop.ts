@@ -25,6 +25,7 @@ import { SessionLogger } from '../audit/sessionLogger.js';
 import { getAgent, getToolsForAgent, spawnScout } from './router.js';
 import { getToolsForLLM } from '../tools/registry.js';
 import * as stateManager from './stateManager.js';
+import { SubAgentRunner } from './sub-agent-runner.js';
 import type {
   AgentStreamEvent,
   ModelSelection,
@@ -40,7 +41,7 @@ import type {
   ToolEvidence,
   ScoutFindings,
 } from './types.js';
-import type { LLMMessage, LLMProvider, ContentBlock } from '../llm/types.js';
+import type { LLMProvider, ContentBlock } from '../llm/types.js';
 import { getTextContent } from '../llm/types.js';
 
 export type SendEventFn = (event: AgentStreamEvent) => void;
@@ -86,6 +87,13 @@ interface CaioEvidence {
   timestamp: string;
 }
 
+interface DecisionPathInsights {
+  path: 'answer' | 'delegate_devo' | 'delegate_caio' | 'delegate_scout' | 'tool';
+  reason: string;
+  confidence: number;
+  unresolvedAssumptions: string[];
+}
+
 const EXTERNAL_ACTION_TOOLS = new Set([
   'send_email',
   'taskforge_create_task',
@@ -103,6 +111,7 @@ export class ChapoLoop {
   private validator: SelfValidator;
   private conversation: ConversationManager;
   private sessionLogger?: SessionLogger;
+  private subAgentRunner = new SubAgentRunner();
   private iteration = 0;
   private successfulExternalTools = new Set<string>();
   private toolDirectiveRegex: RegExp | null = null;
@@ -173,10 +182,12 @@ export class ChapoLoop {
 
     const failures = evidence.filter((e) => !e.success && !e.pendingApproval);
     const successes = evidence.filter((e) => e.success);
+    const pending = evidence.filter((e) => e.pendingApproval);
 
     if (failures.length === 0 && successes.length > 0) return 'success';
     if (successes.length > 0 && failures.length > 0) return 'partial';
     if (failures.length > 0 && successes.length === 0) return 'failed';
+    if (pending.length > 0 && successes.length === 0 && failures.length === 0) return 'partial';
     return 'success';
   }
 
@@ -217,6 +228,36 @@ export class ChapoLoop {
 
     lines.push(`\nAgent Response:\n${result.summary}`);
     return lines.join('\n');
+  }
+
+  private emitDecisionPath(insights: DecisionPathInsights): void {
+    this.sendEvent({
+      type: 'tool_result',
+      agent: 'chapo',
+      toolName: 'decision_path',
+      result: insights,
+      success: true,
+    });
+  }
+
+  private extractAssumptionsFromAnswer(answer: string, validation?: ValidationResult): string[] {
+    const assumptions = new Set<string>();
+    const text = answer.toLowerCase();
+
+    if (validation) {
+      for (const issue of validation.issues.slice(0, 3)) {
+        if (issue.trim().length > 0) assumptions.add(issue.trim());
+      }
+    }
+
+    if (/(vorausgesetzt|assuming|assume|falls|if )/.test(text)) {
+      assumptions.add('Antwort enthaelt bedingte Annahmen.');
+    }
+    if (/(nicht verifiziert|unverified|unsicher|unclear)/.test(text)) {
+      assumptions.add('Teile der Antwort sind nicht final verifiziert.');
+    }
+
+    return Array.from(assumptions).slice(0, 3);
   }
 
   async run(userMessage: string | ContentBlock[], conversationHistory: Array<{ role: string; content: string }>): Promise<ChapoLoopResult> {
@@ -354,6 +395,12 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
         // ACTION: DELEGATE to DEVO
         if (toolCall.name === 'delegateToKoda' || toolCall.name === 'delegateToDevo') {
           const delegation = this.buildDelegation('devo', toolCall.arguments);
+          this.emitDecisionPath({
+            path: 'delegate_devo',
+            reason: `Aufgabe erfordert Entwicklungs-/DevOps-Ausfuehrung in Domaene "${delegation.domain}".`,
+            confidence: 0.82,
+            unresolvedAssumptions: delegation.constraints.slice(0, 2),
+          });
 
           this.sendEvent({
             type: 'agent_thinking',
@@ -393,6 +440,12 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
         // ACTION: DELEGATE to CAIO
         if (toolCall.name === 'delegateToCaio') {
           const delegation = this.buildDelegation('caio', toolCall.arguments);
+          this.emitDecisionPath({
+            path: 'delegate_caio',
+            reason: `Aufgabe ist kommunikativ/administrativ und passt zu CAIO (${delegation.domain}).`,
+            confidence: 0.82,
+            unresolvedAssumptions: delegation.constraints.slice(0, 2),
+          });
 
           this.sendEvent({
             type: 'agent_thinking',
@@ -440,6 +493,12 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
             });
             continue;
           }
+          this.emitDecisionPath({
+            path: 'tool',
+            reason: `Unabhaengige Teilaufgaben werden parallel delegiert (${delegations.length}).`,
+            confidence: 0.8,
+            unresolvedAssumptions: [],
+          });
 
           this.sendEvent({
             type: 'agent_thinking',
@@ -479,6 +538,12 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
         if (toolCall.name === 'delegateToScout') {
           const delegation = this.buildDelegation('scout', toolCall.arguments);
           const scope = delegation.scope || 'both';
+          this.emitDecisionPath({
+            path: 'delegate_scout',
+            reason: `Recherchemodus aktiviert (${scope}) fuer zusaetzliche Evidenz.`,
+            confidence: 0.78,
+            unresolvedAssumptions: delegation.constraints.slice(0, 2),
+          });
 
           this.sendEvent({
             type: 'agent_thinking',
@@ -555,6 +620,12 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
         }
 
         // ACTION: TOOL — execute any regular tool
+        this.emitDecisionPath({
+          path: 'tool',
+          reason: `Direkter Tool-Aufruf (${toolCall.name}) fuer verifizierbare Zwischenergebnisse.`,
+          confidence: 0.76,
+          unresolvedAssumptions: [],
+        });
         this.sendEvent({
           type: 'tool_call',
           agent: 'chapo',
@@ -690,6 +761,7 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
 
   private async handleAnswer(userMessage: string, answer: string): Promise<ChapoLoopResult> {
     let finalAnswer = answer;
+    let validationResult: ValidationResult | undefined;
 
     if (this.config.selfValidationEnabled && answer.length > 20) {
       const [validation] = await this.errorHandler.safe('validation', () =>
@@ -697,6 +769,7 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
       );
 
       if (validation) {
+        validationResult = validation;
         this.sessionLogger?.logAgentEvent({
           type: 'validation',
           confidence: validation.confidence,
@@ -724,6 +797,14 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
     }
 
     finalAnswer = this.normalizeEmailDeliveryClaims(finalAnswer);
+    const confidence = validationResult?.confidence ?? 0.8;
+    const unresolvedAssumptions = this.extractAssumptionsFromAnswer(finalAnswer, validationResult);
+    this.emitDecisionPath({
+      path: 'answer',
+      reason: 'Keine weiteren Tool-Calls notwendig; Antwort wurde direkt geliefert.',
+      confidence,
+      unresolvedAssumptions,
+    });
 
     return {
       answer: finalAnswer,
@@ -927,68 +1008,29 @@ ${delegationContext ? `\nDELEGATIONSKONTEXT VON CHAPO:\n${delegationContext}` : 
 AUFGABE: ${delegation.objective}
 
 Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
-
-    const messages: LLMMessage[] = [
-      { role: 'user', content: delegation.objective },
-    ];
-
-    let turn = 0;
-    const MAX_TURNS = 10;
-    let finalContent = '';
-
-    while (turn < MAX_TURNS) {
-      turn++;
-      this.sendEvent({ type: 'agent_thinking', agent: 'devo', status: `Turn ${turn}...` });
-
-      const response = await llmRouter.generateWithFallback(provider, {
-        model: devo.model,
-        messages,
-        systemPrompt,
-        tools,
-        toolsEnabled: true,
-      });
-
-      if (response.content) {
-        finalContent = response.content;
-      }
-
-      if (!response.toolCalls || response.toolCalls.length === 0) {
-        break;
-      }
-
-      messages.push({
-        role: 'assistant',
-        content: response.content || '',
-        toolCalls: response.toolCalls,
-      });
-
-      const toolResults: { toolUseId: string; result: string; isError: boolean }[] = [];
-
-      for (const toolCall of response.toolCalls) {
-        // Handle escalation back to CHAPO
+    const runResult = await this.subAgentRunner.run({
+      sessionId: this.sessionId,
+      agent: 'devo',
+      provider,
+      model: devo.model,
+      objective: delegation.objective,
+      systemPrompt,
+      tools,
+      errorHandler: this.errorHandler,
+      sendEvent: this.sendEvent,
+      handleToolCall: async ({ toolCall, turn }) => {
         if (toolCall.name === 'escalateToChapo') {
           const desc = (toolCall.arguments.description as string) || 'Unknown issue';
-          toolResults.push({
-            toolUseId: toolCall.id,
-            result: `Eskalation wird von CHAPO verarbeitet: ${desc}`,
-            isError: false,
-          });
-          this.sendEvent({
-            type: 'agent_switch',
-            from: 'devo',
-            to: 'chapo',
-            reason: 'DEVO eskaliert an CHAPO',
-          });
-          this.sendEvent({ type: 'agent_complete', agent: 'devo', result: `DEVO eskaliert: ${desc}` });
           return {
-            status: 'escalated',
-            summary: `DEVO eskaliert: ${desc}\n\nBisheriges Ergebnis:\n${finalContent}`,
-            toolEvidence,
-            escalation: desc,
+            toolResult: {
+              toolUseId: toolCall.id,
+              result: `Eskalation wird von CHAPO verarbeitet: ${desc}`,
+              isError: false,
+            },
+            escalated: desc,
           };
         }
 
-        // Handle scout delegation from DEVO
         if (toolCall.name === 'delegateToScout') {
           const query = toolCall.arguments.query as string;
           const scope = (toolCall.arguments.scope as ScoutScope) || 'both';
@@ -1005,11 +1047,13 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
               success: true,
               summary: `SCOUT: ${(query || '').slice(0, 80)}`,
             });
-            toolResults.push({
-              toolUseId: toolCall.id,
-              result: JSON.stringify(scoutResult, null, 2),
-              isError: false,
-            });
+            return {
+              toolResult: {
+                toolUseId: toolCall.id,
+                result: JSON.stringify(scoutResult, null, 2),
+                isError: false,
+              },
+            };
           } catch (error) {
             const errMsg = error instanceof Error ? error.message : 'SCOUT spawn failed';
             toolEvidence.push({
@@ -1017,13 +1061,14 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
               success: false,
               summary: errMsg,
             });
-            toolResults.push({
-              toolUseId: toolCall.id,
-              result: `Error: ${errMsg}`,
-              isError: true,
-            });
+            return {
+              toolResult: {
+                toolUseId: toolCall.id,
+                result: `Error: ${errMsg}`,
+                isError: true,
+              },
+            };
           }
-          continue;
         }
 
         this.sendEvent({
@@ -1065,56 +1110,84 @@ Führe die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
             success: false,
             summary: toolErr.message,
           });
-          toolResults.push({
-            toolUseId: toolCall.id,
-            result: `Error: ${toolErr.message}`,
-            isError: true,
-          });
-        } else {
-          this.sendEvent({
-            type: 'tool_result',
-            agent: 'devo',
-            toolName: toolCall.name,
-            result: result.result,
-            success: result.success,
-          });
-          toolEvidence.push({
-            tool: toolCall.name,
-            success: result.success,
-            summary: result.success
-              ? `${toolCall.name} OK (${duration}ms)`
-              : (result.error || `${toolCall.name} failed`),
-          });
+          return {
+            toolResult: {
+              toolUseId: toolCall.id,
+              result: `Error: ${toolErr.message}`,
+              isError: true,
+            },
+          };
+        }
 
-          const content = this.buildToolResultContent(result);
-          toolResults.push({
+        const pendingApproval = (result as { pendingApproval?: boolean }).pendingApproval === true;
+        this.sendEvent({
+          type: 'tool_result',
+          agent: 'devo',
+          toolName: toolCall.name,
+          result: result.result,
+          success: result.success,
+        });
+        toolEvidence.push({
+          tool: toolCall.name,
+          success: result.success,
+          pendingApproval: pendingApproval ? true : undefined,
+          summary: pendingApproval
+            ? 'Aktion wartet auf Freigabe.'
+            : (result.success
+              ? `${toolCall.name} OK (${duration}ms)`
+              : (result.error || `${toolCall.name} failed`)),
+        });
+
+        const content = this.buildToolResultContent(result);
+        return {
+          toolResult: {
             toolUseId: toolCall.id,
             result: content.content,
             isError: content.isError,
-          });
-        }
-      }
+          },
+        };
+      },
+    });
 
-      messages.push({
-        role: 'user',
-        content: '',
-        toolResults,
-      });
-    }
+    const finalContent = runResult.finalContent;
 
-    // Switch back to CHAPO — StateProjection handles setActiveAgent
     this.sendEvent({
       type: 'agent_switch',
       from: 'devo',
       to: 'chapo',
-      reason: 'DEVO Delegation abgeschlossen',
+      reason: runResult.exit === 'escalated' ? 'DEVO eskaliert an CHAPO' : 'DEVO Delegation abgeschlossen',
     });
-    this.sendEvent({ type: 'agent_complete', agent: 'devo', result: finalContent });
+    this.sendEvent({
+      type: 'agent_complete',
+      agent: 'devo',
+      result: runResult.exit === 'escalated'
+        ? `DEVO eskaliert: ${runResult.escalationDescription || 'unknown issue'}`
+        : finalContent,
+    });
 
-    const status = this.deriveDelegationStatus(toolEvidence, false, finalContent.length > 0);
+    if (runResult.exit === 'escalated') {
+      const desc = runResult.escalationDescription || 'Unknown issue';
+      return {
+        status: 'escalated',
+        summary: `DEVO eskaliert: ${desc}\n\nBisheriges Ergebnis:\n${finalContent}`,
+        toolEvidence,
+        escalation: desc,
+      };
+    }
+
+    if (runResult.exit === 'llm_error' && runResult.llmError) {
+      toolEvidence.push({
+        tool: 'devo_llm',
+        success: false,
+        summary: runResult.llmError,
+      });
+    }
+
+    const baseStatus = this.deriveDelegationStatus(toolEvidence, false, finalContent.length > 0);
+    const status = runResult.exit === 'max_turns' && baseStatus === 'success' ? 'partial' : baseStatus;
     return {
       status,
-      summary: finalContent,
+      summary: finalContent || (runResult.llmError ? `DEVO Sub-loop LLM Fehler: ${runResult.llmError}` : ''),
       toolEvidence,
     };
   }
@@ -1154,77 +1227,27 @@ ${delegationContext ? `\nDELEGATIONSKONTEXT VON CHAPO:\n${delegationContext}` : 
 AUFGABE: ${delegation.objective}
 
 Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
-
-    const messages: LLMMessage[] = [
-      { role: 'user', content: delegation.objective },
-    ];
-
-    let turn = 0;
-    const MAX_TURNS = 10;
-    let finalContent = '';
     const evidenceLog: CaioEvidence[] = [];
-
-    while (turn < MAX_TURNS) {
-      turn++;
-      this.sendEvent({ type: 'agent_thinking', agent: 'caio', status: `Turn ${turn}...` });
-
-      const response = await llmRouter.generateWithFallback(provider, {
-        model: caio.model,
-        messages,
-        systemPrompt,
-        tools,
-        toolsEnabled: true,
-      });
-
-      if (response.content) {
-        finalContent = response.content;
-      }
-
-      if (!response.toolCalls || response.toolCalls.length === 0) {
-        break;
-      }
-
-      console.info('[caio-loop] Tool calls received', {
-        turn,
-        names: response.toolCalls.map((t) => t.name),
-        sessionId: this.sessionId,
-      });
-
-      messages.push({
-        role: 'assistant',
-        content: response.content || '',
-        toolCalls: response.toolCalls,
-      });
-
-      const toolResults: { toolUseId: string; result: string; isError: boolean }[] = [];
-
-      for (const toolCall of response.toolCalls) {
+    const runResult = await this.subAgentRunner.run({
+      sessionId: this.sessionId,
+      agent: 'caio',
+      provider,
+      model: caio.model,
+      objective: delegation.objective,
+      systemPrompt,
+      tools,
+      errorHandler: this.errorHandler,
+      sendEvent: this.sendEvent,
+      handleToolCall: async ({ toolCall, turn }) => {
         if (toolCall.name === 'escalateToChapo') {
           const desc = (toolCall.arguments.description as string) || 'Unknown issue';
-          toolResults.push({
-            toolUseId: toolCall.id,
-            result: `Eskalation wird von CHAPO verarbeitet: ${desc}`,
-            isError: false,
-          });
-          this.sendEvent({
-            type: 'agent_switch',
-            from: 'caio',
-            to: 'chapo',
-            reason: 'CAIO eskaliert an CHAPO',
-          });
-          this.sendEvent({ type: 'agent_complete', agent: 'caio', result: `CAIO eskaliert: ${desc}` });
           return {
-            status: 'escalated',
-            summary: `CAIO eskaliert: ${desc}\n\nBisheriges Ergebnis:\n${finalContent}`,
-            toolEvidence: evidenceLog.map((e) => ({
-              tool: e.tool,
-              success: e.success,
-              summary: e.summary,
-              pendingApproval: e.pendingApproval,
-              externalId: e.externalId,
-              nextStep: e.nextStep,
-            })),
-            escalation: desc,
+            toolResult: {
+              toolUseId: toolCall.id,
+              result: `Eskalation wird von CHAPO verarbeitet: ${desc}`,
+              isError: false,
+            },
+            escalated: desc,
           };
         }
 
@@ -1239,20 +1262,38 @@ Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
               context: scoutContext,
               sendEvent: this.sendEvent,
             });
-            toolResults.push({
-              toolUseId: toolCall.id,
-              result: JSON.stringify(scoutResult, null, 2),
-              isError: false,
+            const evidence = this.buildCaioEvidence('delegateToScout', {
+              success: true,
+              pendingApproval: false,
+              data: {
+                summary: `SCOUT: ${(query || '').slice(0, 80)}`,
+                confidence: scoutResult.confidence,
+              },
             });
+            evidenceLog.push(evidence);
+            return {
+              toolResult: {
+                toolUseId: toolCall.id,
+                result: JSON.stringify(scoutResult, null, 2),
+                isError: false,
+              },
+            };
           } catch (error) {
             const errMsg = error instanceof Error ? error.message : 'SCOUT spawn failed';
-            toolResults.push({
-              toolUseId: toolCall.id,
-              result: `Error: ${errMsg}`,
-              isError: true,
+            const evidence = this.buildCaioEvidence('delegateToScout', {
+              success: false,
+              pendingApproval: false,
+              error: errMsg,
             });
+            evidenceLog.push(evidence);
+            return {
+              toolResult: {
+                toolUseId: toolCall.id,
+                result: `Error: ${errMsg}`,
+                isError: true,
+              },
+            };
           }
-          continue;
         }
 
         const preflight = this.preflightCaioToolCall(toolCall.name, toolCall.arguments);
@@ -1271,12 +1312,13 @@ Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
             result: evidence,
             success: false,
           });
-          toolResults.push({
-            toolUseId: toolCall.id,
-            result: JSON.stringify(evidence),
-            isError: true,
-          });
-          continue;
+          return {
+            toolResult: {
+              toolUseId: toolCall.id,
+              result: JSON.stringify(evidence),
+              isError: true,
+            },
+          };
         }
 
         this.sendEvent({
@@ -1318,47 +1360,60 @@ Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
             result: evidence,
             success: false,
           });
-          toolResults.push({
-            toolUseId: toolCall.id,
-            result: JSON.stringify(evidence),
-            isError: true,
-          });
-        } else {
-          const normalized = this.normalizeToolOutcome(result);
-          const evidence = this.buildCaioEvidence(toolCall.name, normalized);
-          evidenceLog.push(evidence);
+          return {
+            toolResult: {
+              toolUseId: toolCall.id,
+              result: JSON.stringify(evidence),
+              isError: true,
+            },
+          };
+        }
 
-          this.sendEvent({
-            type: 'tool_result',
-            agent: 'caio',
-            toolName: toolCall.name,
-            result: evidence,
-            success: normalized.success,
-          });
-          this.markExternalActionToolSuccess(toolCall.name, normalized.success);
+        const normalized = this.normalizeToolOutcome(result);
+        const evidence = this.buildCaioEvidence(toolCall.name, normalized);
+        evidenceLog.push(evidence);
 
-          toolResults.push({
+        this.sendEvent({
+          type: 'tool_result',
+          agent: 'caio',
+          toolName: toolCall.name,
+          result: evidence,
+          success: normalized.success,
+        });
+        this.markExternalActionToolSuccess(toolCall.name, normalized.success);
+
+        return {
+          toolResult: {
             toolUseId: toolCall.id,
             result: JSON.stringify(evidence),
             isError: !normalized.success,
-          });
-        }
-      }
+          },
+        };
+      },
+    });
 
-      messages.push({
-        role: 'user',
-        content: '',
-        toolResults,
-      });
+    if (runResult.exit === 'llm_error' && runResult.llmError) {
+      evidenceLog.push(this.buildCaioEvidence('caio_llm', {
+        success: false,
+        pendingApproval: false,
+        error: runResult.llmError,
+      }));
     }
 
+    const finalContent = this.applyCaioEvidenceSummary(runResult.finalContent, evidenceLog);
     this.sendEvent({
       type: 'agent_switch',
       from: 'caio',
       to: 'chapo',
-      reason: 'CAIO Delegation abgeschlossen',
+      reason: runResult.exit === 'escalated' ? 'CAIO eskaliert an CHAPO' : 'CAIO Delegation abgeschlossen',
     });
-    this.sendEvent({ type: 'agent_complete', agent: 'caio', result: finalContent });
+    this.sendEvent({
+      type: 'agent_complete',
+      agent: 'caio',
+      result: runResult.exit === 'escalated'
+        ? `CAIO eskaliert: ${runResult.escalationDescription || 'unknown issue'}`
+        : finalContent,
+    });
 
     const mappedEvidence: ToolEvidence[] = evidenceLog.map((e) => ({
       tool: e.tool,
@@ -1368,10 +1423,22 @@ Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
       externalId: e.externalId,
       nextStep: e.nextStep,
     }));
-    const status = this.deriveDelegationStatus(mappedEvidence, false, finalContent.length > 0);
+
+    if (runResult.exit === 'escalated') {
+      const desc = runResult.escalationDescription || 'Unknown issue';
+      return {
+        status: 'escalated',
+        summary: `CAIO eskaliert: ${desc}\n\nBisheriges Ergebnis:\n${finalContent}`,
+        toolEvidence: mappedEvidence,
+        escalation: desc,
+      };
+    }
+
+    const baseStatus = this.deriveDelegationStatus(mappedEvidence, false, finalContent.length > 0);
+    const status = runResult.exit === 'max_turns' && baseStatus === 'success' ? 'partial' : baseStatus;
     return {
       status,
-      summary: finalContent,
+      summary: finalContent || (runResult.llmError ? `CAIO Sub-loop LLM Fehler: ${runResult.llmError}` : ''),
       toolEvidence: mappedEvidence,
     };
   }

@@ -39,6 +39,36 @@ interface MessageListProps {
   onNewChat: () => void;
 }
 
+interface DecisionPathPayload {
+  path?: string;
+  reason?: string;
+  confidence?: number;
+  unresolvedAssumptions?: string[];
+}
+
+function readDecisionPayload(event: ToolEvent): DecisionPathPayload | null {
+  if (event.type !== 'tool_result' || event.name !== 'decision_path') return null;
+  if (!event.result || typeof event.result !== 'object' || Array.isArray(event.result)) return null;
+  return event.result as DecisionPathPayload;
+}
+
+function formatDecisionPath(path?: string): string {
+  switch (path) {
+    case 'answer':
+      return 'Direct Answer';
+    case 'delegate_devo':
+      return 'Delegate to DEVO';
+    case 'delegate_caio':
+      return 'Delegate to CAIO';
+    case 'delegate_scout':
+      return 'Delegate to SCOUT';
+    case 'tool':
+      return 'Direct Tool Use';
+    default:
+      return 'Decision';
+  }
+}
+
 export function MessageList({
   messages,
   toolEvents,
@@ -297,8 +327,13 @@ function InlineSystemEvent({
   onToggle: () => void;
   isLoading: boolean;
 }) {
+  const decision = readDecisionPayload(event);
+
   const getEventLabel = () => {
     const agentPrefix = event.agent ? `${event.agent.toUpperCase()}: ` : '';
+    if (decision) {
+      return `${agentPrefix}${formatDecisionPath(decision.path)}`;
+    }
     if (event.type === 'thinking') {
       const countSuffix = mergedCount && mergedCount > 1 ? ` (${mergedCount}x)` : '';
       return `${agentPrefix}Thinking${countSuffix}`;
@@ -310,6 +345,7 @@ function InlineSystemEvent({
   };
 
   const getEventColor = () => {
+    if (decision) return 'border-amber-500/30 bg-amber-500/5 text-amber-300';
     if (event.type === 'thinking') return 'border-cyan-500/30 bg-cyan-500/5 text-cyan-400';
     if (event.type === 'tool_call') return 'border-devai-accent/30 bg-devai-accent/5 text-devai-accent';
     if (event.type === 'tool_result') return 'border-emerald-500/30 bg-emerald-500/5 text-emerald-400';
@@ -317,6 +353,17 @@ function InlineSystemEvent({
   };
 
   const getInlineDetail = (): string => {
+    if (decision) {
+      const confidence = typeof decision.confidence === 'number'
+        ? `confidence ${(decision.confidence * 100).toFixed(0)}%`
+        : 'confidence n/a';
+      const reason = decision.reason || 'no explicit reason';
+      const assumptions = Array.isArray(decision.unresolvedAssumptions) && decision.unresolvedAssumptions.length > 0
+        ? `assumptions: ${decision.unresolvedAssumptions.join(' | ')}`
+        : 'assumptions: none';
+      const text = `${confidence} _ ${reason} _ ${assumptions}`;
+      return text.length > 220 ? `${text.slice(0, 220)}...` : text;
+    }
     const payload = event.type === 'tool_call' ? event.arguments : event.result;
     if (!payload) return '';
     const text = typeof payload === 'string' ? payload : JSON.stringify(payload);

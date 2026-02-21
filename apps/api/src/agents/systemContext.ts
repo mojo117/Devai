@@ -6,7 +6,7 @@ import { loadWorkspaceMdContext, formatWorkspaceMdBlock, type WorkspaceLoadMode 
 import { getSetting } from '../db/queries.js';
 import { MEMORY_BEHAVIOR_BLOCK } from '../prompts/context.js';
 import { getSchedulerErrors } from '../scheduler/schedulerService.js';
-import { retrieveRelevantMemories } from '../memory/service.js';
+import { formatMemoryQualityBlock, retrieveRelevantMemories } from '../memory/service.js';
 
 const GLOBAL_CONTEXT_MAX_CHARS = 4000;
 
@@ -138,10 +138,13 @@ export async function warmMemoryBlockForSession(sessionId: string, userMessage: 
   }
 
   try {
-    const { block } = await retrieveRelevantMemories(userMessage, projectName);
+    const { block, quality } = await retrieveRelevantMemories(userMessage, projectName);
+    const qualityBlock = formatMemoryQualityBlock(quality);
     stateManager.setGatheredInfo(sessionId, 'memoryBlock', block);
+    stateManager.setGatheredInfo(sessionId, 'memoryQualityBlock', qualityBlock);
     return block;
   } catch {
+    stateManager.setGatheredInfo(sessionId, 'memoryQualityBlock', '');
     return '';
   }
 }
@@ -170,6 +173,7 @@ export function getCombinedSystemContextBlock(sessionId: string): string {
     (info.claudeMdBlock as string) || '',
     (info.workspaceMdBlock as string) || '',
     (info.globalContextBlock as string) || '',
+    (info.memoryQualityBlock as string) || '',
     (info.memoryBlock as string) || '',
     schedulerErrorBlock,
     platformBlock,
