@@ -3,6 +3,12 @@ import { join, resolve, relative, dirname, basename } from 'path';
 import fg from 'fast-glob';
 import { config } from '../config.js';
 
+/** Options for path validation — controls self-inspection bypass */
+export interface FsOptions {
+  /** When true, allows read access to the self-inspection root (Devai's own codebase), bypassing the denied-paths check for that root only. Sensitive paths within the root are still blocked via selfInspectionExclude. */
+  selfInspection?: boolean;
+}
+
 // Path mapping for cross-server compatibility (empty — DevAI runs directly on Clawd)
 const PATH_MAPPINGS: Array<{ canonical: string; mounted: string }> = [];
 
@@ -106,7 +112,7 @@ async function validateRealPath(filePath: string, allowedRoots: string[]): Promi
 
 // Validate that the path is within allowed roots (config.allowedRoots)
 // Handles path translation for cross-server compatibility
-async function validatePath(path: string): Promise<string> {
+async function validatePath(path: string, options?: FsOptions): Promise<string> {
   // Handle empty or root path requests - default to first allowed root
   if (!path || path === '/' || path === '.' || path === './') {
     const defaultRoot = config.allowedRoots[0];
@@ -137,6 +143,23 @@ async function validatePath(path: string): Promise<string> {
   for (const denied of config.deniedPaths) {
     const absoluteDenied = resolve(denied);
     if (normalizedPath.startsWith(absoluteDenied + '/') || normalizedPath === absoluteDenied) {
+      // Self-inspection bypass: SCOUT may read its own codebase (minus excluded paths)
+      const selfRoot = resolve(config.selfInspectionRoot);
+      if (options?.selfInspection && absoluteDenied === selfRoot) {
+        // Check exclusion patterns within the self-inspection root
+        const relativeToSelf = normalizedPath.slice(selfRoot.length + 1); // path relative to /opt/Devai
+        const isExcluded = config.selfInspectionExclude.some((exclude) => {
+          return relativeToSelf === exclude ||
+                 relativeToSelf.startsWith(exclude + '/') ||
+                 relativeToSelf.endsWith('/' + exclude) ||
+                 relativeToSelf.includes('/' + exclude + '/');
+        });
+        if (isExcluded) {
+          throw new Error(`Access denied: "${path}" is excluded from self-inspection`);
+        }
+        // Allowed — skip this denied-path entry
+        continue;
+      }
       throw new Error(`Access denied: "${path}" is in a restricted area`);
     }
   }
@@ -216,8 +239,8 @@ export interface ListFilesResult {
   truncated?: boolean;
 }
 
-export async function listFiles(path: string): Promise<ListFilesResult> {
-  const absolutePath = await validatePath(path);
+export async function listFiles(path: string, options?: FsOptions): Promise<ListFilesResult> {
+  const absolutePath = await validatePath(path, options);
 
   const entries = await readdir(absolutePath, { withFileTypes: true });
 
@@ -263,8 +286,8 @@ export interface ReadFileResult {
   size: number;
 }
 
-export async function readFile(path: string): Promise<ReadFileResult> {
-  const absolutePath = await validatePath(path);
+export async function readFile(path: string, options?: FsOptions): Promise<ReadFileResult> {
+  const absolutePath = await validatePath(path, options);
   if (!isAllowedExtension(path)) {
     throw new Error('Read denied: file extension is not allowed');
   }
@@ -326,12 +349,13 @@ export interface GlobResult {
 export async function globFiles(
   pattern: string,
   basePath?: string,
-  ignore?: string[]
+  ignore?: string[],
+  options?: FsOptions
 ): Promise<GlobResult> {
   // Validate basePath is within allowed roots, or use first allowed root (translated)
   let searchPath: string;
   if (basePath) {
-    searchPath = await validatePath(basePath);
+    searchPath = await validatePath(basePath, options);
   } else {
     const defaultRoot = config.allowedRoots[0];
     const translated = translatePath(defaultRoot);
@@ -376,9 +400,10 @@ export async function grepFiles(
   pattern: string,
   searchPath: string,
   fileGlob?: string,
-  ignore?: string[]
+  ignore?: string[],
+  options?: FsOptions
 ): Promise<GrepResult> {
-  const validatedPath = await validatePath(searchPath);
+  const validatedPath = await validatePath(searchPath, options);
   const regex = new RegExp(pattern, 'gi');
 
   // Get files to search
