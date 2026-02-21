@@ -201,6 +201,7 @@ export class ZAIProvider implements LLMProviderAdapter {
       'glm-4.7',
       'glm-4.7-flash',
       'glm-4.5-flash',
+      'glm-4.5-air',
       'glm-4.7-flashx',
     ];
   }
