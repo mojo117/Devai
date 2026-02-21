@@ -159,6 +159,12 @@ export function getCombinedSystemContextBlock(sessionId: string): string {
     ].join('\n')
     : '';
 
+  // Inject communication platform so CHAPO knows which channel the user is on
+  const platform = (info.platform as string) || '';
+  const platformBlock = platform
+    ? `## Kommunikationskanal\nDer Benutzer kommuniziert gerade über: **${platform === 'telegram' ? 'Telegram' : 'Web-UI'}**.\nDateien an den Benutzer ${platform === 'telegram' ? 'via Telegram senden (telegram_send_document)' : 'im Web-UI zum Download bereitstellen (deliver_document)'}.`
+    : '';
+
   const blocks = [
     (info.devaiMdBlock as string) || '',
     (info.claudeMdBlock as string) || '',
@@ -166,6 +172,7 @@ export function getCombinedSystemContextBlock(sessionId: string): string {
     (info.globalContextBlock as string) || '',
     (info.memoryBlock as string) || '',
     schedulerErrorBlock,
+    platformBlock,
   ]
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);

@@ -86,6 +86,7 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
             sessionId: externalSession.session_id,
             requestId: nanoid(),
             message: text,
+            metadata: { platform: 'telegram' },
             pinnedUserfileIds: await getPinnedUserfileIds(externalSession.id),
           } as WorkflowCommand, { joinSession: () => {} });
           return;
@@ -112,6 +113,7 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
               sessionId: externalSession.session_id,
               requestId: nanoid(),
               message: extracted.caption,
+              metadata: { platform: 'telegram' },
               pinnedUserfileIds: await getPinnedUserfileIds(externalSession.id),
             } as WorkflowCommand, { joinSession: () => {} });
           } else {
@@ -141,6 +143,7 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
               sessionId: externalSession.session_id,
               requestId: nanoid(),
               message: extracted.caption,
+              metadata: { platform: 'telegram' },
               pinnedUserfileIds: await getPinnedUserfileIds(externalSession.id),
             } as WorkflowCommand, { joinSession: () => {} });
           } else {
@@ -187,6 +190,7 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
             sessionId: externalSession.session_id,
             requestId: nanoid(),
             message: messageText,
+            metadata: { platform: 'telegram' },
             pinnedUserfileIds,
           } as WorkflowCommand;
         }

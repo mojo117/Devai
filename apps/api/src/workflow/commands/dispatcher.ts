@@ -321,6 +321,10 @@ export class CommandDispatcher {
         const value = normalizeWorkspaceSessionMode(metadata[key]);
         if (value) setGatheredInfo(activeSessionId, key, value);
       }
+      // Store communication platform for channel-aware routing
+      if (typeof metadata.platform === 'string') {
+        setGatheredInfo(activeSessionId, 'platform', metadata.platform);
+      }
     }
 
     // Re-bind logger to actual session ID
@@ -616,15 +620,16 @@ export function mapWsMessageToCommand(
   const msgType = msg?.type;
 
   if (msgType === 'request') {
+    const userMeta = (msg.metadata && typeof msg.metadata === 'object' && !Array.isArray(msg.metadata))
+      ? msg.metadata as Record<string, unknown>
+      : {};
     return {
       type: 'user_request',
       sessionId: (typeof msg.sessionId === 'string' ? msg.sessionId : currentSessionId) || '',
       requestId,
       message: typeof msg.message === 'string' ? msg.message : '',
       projectRoot: typeof msg.projectRoot === 'string' ? msg.projectRoot : undefined,
-      metadata: (msg.metadata && typeof msg.metadata === 'object' && !Array.isArray(msg.metadata))
-        ? msg.metadata as Record<string, unknown>
-        : undefined,
+      metadata: { platform: 'web', ...userMeta },
       pinnedUserfileIds: Array.isArray(msg.pinnedUserfileIds)
         ? (msg.pinnedUserfileIds as unknown[]).filter((id): id is string => typeof id === 'string')
         : undefined,
