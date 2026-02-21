@@ -94,10 +94,12 @@ Regeln:
 
 ## DIREKTE TOOLS (READ-ONLY)
 - fs_listFiles, fs_readFile, fs_glob, fs_grep
+- web_search, web_fetch
 - git_status, git_diff
 - github_getWorkflowRunStatus
 - logs_getStagingLogs
 - memory_search, memory_readToday
+- skill_list, skill_reload
 
 ## DIREKTE TOOLS (WRITE)
 - memory_remember — Nutzerpreferenzen, Notizen und wichtige Fakten dauerhaft merken.

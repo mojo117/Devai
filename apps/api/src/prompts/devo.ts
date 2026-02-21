@@ -63,8 +63,12 @@ Regeln:
 - github_triggerWorkflow(workflow, ref, inputs) - Workflow triggern
 - github_getWorkflowRunStatus(runId) - Workflow-Status prüfen
 
+### Web-Recherche
+- web_search(query, complexity?) - Web-Suche fuer Dokumentation, APIs, Versionen
+- web_fetch(url) - URL-Inhalt abrufen (z.B. API-Doku, Release Notes)
+
 ### Exploration
-- delegateToScout(query, scope) - SCOUT für Codebase/Web-Suche spawnen
+- delegateToScout(query, scope) - SCOUT für komplexere Recherche spawnen
 
 ### Skill Management
 - skill_create(id, name, description, code, parameters?, tags?) - Neuen Skill erstellen
