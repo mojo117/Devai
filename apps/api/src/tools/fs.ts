@@ -1,4 +1,4 @@
-import { readdir, readFile as fsReadFile, writeFile as fsWriteFile, stat, access, mkdir as fsMkdir, rename, unlink, rmdir, rm } from 'fs/promises';
+import { readdir, readFile as fsReadFile, writeFile as fsWriteFile, stat, access, mkdir as fsMkdir, rename, unlink, rmdir, rm, realpath as fsRealpath } from 'fs/promises';
 import { join, resolve, relative, dirname, basename } from 'path';
 import fg from 'fast-glob';
 import { config } from '../config.js';
@@ -74,6 +74,36 @@ async function resolvePathCaseInsensitive(basePath: string, relativePath: string
   return currentPath;
 }
 
+// Resolve symlinks and verify the real path is still within allowed roots
+async function validateRealPath(filePath: string, allowedRoots: string[]): Promise<string> {
+  try {
+    const realPath = await fsRealpath(filePath);
+    // Check the real path is still within allowed roots
+    for (const root of allowedRoots) {
+      const absoluteRoot = resolve(root);
+      const translatedRoot = translatePath(absoluteRoot);
+      if (realPath.startsWith(translatedRoot + '/') || realPath === translatedRoot ||
+          realPath.startsWith(absoluteRoot + '/') || realPath === absoluteRoot) {
+        return realPath;
+      }
+    }
+    // Check denied paths on real path
+    for (const denied of config.deniedPaths) {
+      const absoluteDenied = resolve(denied);
+      if (realPath.startsWith(absoluteDenied + '/') || realPath === absoluteDenied) {
+        throw new Error(`Access denied: symlink target "${realPath}" is in a restricted area`);
+      }
+    }
+    throw new Error(`Access denied: symlink target "${realPath}" is outside allowed roots`);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      // File doesn't exist yet (new file creation) — original path validation is sufficient
+      return filePath;
+    }
+    throw err;
+  }
+}
+
 // Validate that the path is within allowed roots (config.allowedRoots)
 // Handles path translation for cross-server compatibility
 async function validatePath(path: string): Promise<string> {
@@ -83,9 +113,9 @@ async function validatePath(path: string): Promise<string> {
     // Return the translated path (actual filesystem location)
     const translated = translatePath(defaultRoot);
     if (await pathExists(translated)) {
-      return translated;
+      return await validateRealPath(translated, config.allowedRoots);
     }
-    return defaultRoot;
+    return await validateRealPath(defaultRoot, config.allowedRoots);
   }
 
   const segments = path.split(/[\\/]/).filter(Boolean);
@@ -122,9 +152,9 @@ async function validatePath(path: string): Promise<string> {
       const relativePart = relative(absoluteRoot, normalizedPath);
       if (relativePart) {
         const resolved = await resolvePathCaseInsensitive(translatedRoot, relativePart);
-        return resolved;
+        return await validateRealPath(resolved, allowedRoots);
       }
-      return translatedPath;
+      return await validateRealPath(translatedPath, allowedRoots);
     }
   }
 
@@ -139,9 +169,9 @@ async function validatePath(path: string): Promise<string> {
     if (segments.length === 1 && segments[0].toLowerCase() === rootBasename.toLowerCase()) {
       // Return translated path if it exists
       if (await pathExists(translatedRoot)) {
-        return translatedRoot;
+        return await validateRealPath(translatedRoot, allowedRoots);
       }
-      return absoluteRoot;
+      return await validateRealPath(absoluteRoot, allowedRoots);
     }
 
     // If the path starts with the root's basename, strip it to avoid duplication
@@ -158,7 +188,7 @@ async function validatePath(path: string): Promise<string> {
     if (!relativePath.startsWith('..') && !relativePath.startsWith('/')) {
       // Verify the path exists before returning
       if (await pathExists(resolvedPath)) {
-        return resolvedPath;
+        return await validateRealPath(resolvedPath, allowedRoots);
       }
     }
   }
