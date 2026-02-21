@@ -2,13 +2,20 @@ import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
 import { commandDispatcher } from '../workflow/commands/dispatcher.js';
 import { ensureStateLoaded, getState } from '../agents/stateManager.js';
-import { getOrCreateExternalSession, updateExternalSessionSessionId, addPinnedUserfile, getPinnedUserfileIds } from '../db/schedulerQueries.js';
+import {
+  getOrCreateExternalSession,
+  updateExternalSessionSessionId,
+  addPinnedUserfile,
+  getPinnedUserfileIds,
+  clearPinnedUserfiles,
+} from '../db/schedulerQueries.js';
 import type { WorkflowCommand } from '../workflow/commands/types.js';
 import type { TelegramUpdate } from '../external/telegram.js';
 import { isAllowedChat, sendTelegramMessage, extractTelegramMessage, downloadTelegramFile } from '../external/telegram.js';
 import { createSession } from '../db/queries.js';
 import { transcribeBuffer } from '../services/transcriptionService.js';
 import { uploadUserfileFromBuffer, isUploadError } from '../services/userfileService.js';
+import { shouldAttachPinnedContext } from '../external/pinnedContextPolicy.js';
 
 function parseYesNoDecision(text: string): boolean | null {
   const normalized = text.trim().toLowerCase().replace(/[.!?,;:]+$/g, '');
@@ -54,9 +61,10 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
         if (normalizedCommand === '/restart' || normalizedCommand === '/reset') {
           const nextSession = await createSession('Telegram Session');
           await updateExternalSessionSessionId(externalSession.id, nextSession.id);
+          await clearPinnedUserfiles(externalSession.id);
           await sendTelegramMessage(
             extracted.chatId,
-            'Neue Konversation gestartet. Wir arbeiten jetzt in einer frischen Session.'
+            'Neue Konversation gestartet. Wir arbeiten jetzt in einer frischen Session ohne alte Datei-Kontexte.'
           );
           return;
         }
@@ -171,12 +179,15 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
             answer: messageText,
           };
         } else {
+          const pinnedUserfileIds = shouldAttachPinnedContext(messageText)
+            ? await getPinnedUserfileIds(externalSession.id)
+            : [];
           command = {
             type: 'user_request',
             sessionId: externalSession.session_id,
             requestId: nanoid(),
             message: messageText,
-            pinnedUserfileIds: await getPinnedUserfileIds(externalSession.id),
+            pinnedUserfileIds,
           } as WorkflowCommand;
         }
 

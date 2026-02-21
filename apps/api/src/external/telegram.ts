@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 
 const TELEGRAM_MESSAGE_MAX = 4000;
+const TELEGRAM_CHAT_ACTIONS = new Set(['typing', 'upload_photo', 'record_video', 'upload_video', 'record_voice', 'upload_voice', 'upload_document']);
 
 export interface TelegramVoice {
   file_id: string;
@@ -91,10 +92,42 @@ export async function sendTelegramMessage(chatId: string | number, text: string)
   }
 }
 
+export async function sendTelegramChatAction(
+  chatId: string | number,
+  action: string = 'typing'
+): Promise<void> {
+  const token = config.telegramBotToken;
+  if (!token) return;
+
+  const normalizedAction = TELEGRAM_CHAT_ACTIONS.has(action) ? action : 'typing';
+  const url = `https://api.telegram.org/bot${token}/sendChatAction`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: String(chatId),
+      action: normalizedAction,
+    }),
+  });
+
+  if (!response.ok) {
+    const responseText = await response.text().catch(() => '');
+    console.error('[Telegram] Failed to send chat action:', responseText);
+  }
+}
+
+function parseAllowedChatIds(raw: string): string[] {
+  return raw
+    .split(/[,\s;]+/)
+    .map((item) => item.trim().replace(/^['"]|['"]$/g, ''))
+    .filter(Boolean);
+}
+
 export function isAllowedChat(chatId: string | number): boolean {
-  const allowed = config.telegramAllowedChatId;
-  if (!allowed) return false;
-  return String(chatId) === String(allowed);
+  const allowed = parseAllowedChatIds(config.telegramAllowedChatId || '');
+  if (allowed.length === 0) return false;
+  if (allowed.includes('*')) return true;
+  return allowed.includes(String(chatId));
 }
 
 interface TelegramFileResponse {

@@ -230,7 +230,7 @@ export async function processRequest(
   }
 
   // Lightweight small-talk response (avoid forcing project clarification on greetings).
-  if (isSmallTalk(getTextContent(userMessage)) && history.length <= 1) {
+  if (isSmallTalk(getTextContent(userMessage))) {
     return 'Hey. Womit soll ich dir helfen: Code aendern, Bug fixen, oder etwas nachschlagen?';
   }
 
