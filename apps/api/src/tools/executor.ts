@@ -304,6 +304,7 @@ export async function executeTool(
           return schedulerTools.reminderCreate(
             args.message as string,
             args.datetime as string,
+            args.notificationChannel as string | undefined,
           );
 
         case 'notify_user':

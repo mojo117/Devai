@@ -247,9 +247,9 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
 
     // 3. Load conversation history
     for (const msg of conversationHistory) {
-      if (msg.role === 'user' || msg.role === 'assistant') {
+      if (msg.role === 'user' || msg.role === 'assistant' || msg.role === 'system') {
         this.conversation.addMessage({
-          role: msg.role as 'user' | 'assistant',
+          role: msg.role as 'user' | 'assistant' | 'system',
           content: msg.content,
         });
       }

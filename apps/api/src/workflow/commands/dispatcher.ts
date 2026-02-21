@@ -60,6 +60,7 @@ import { config } from '../../config.js';
 import type { ChatMessage } from '@devai/shared';
 import { buildUserfileContext } from '../../services/userfileContext.js';
 import type { ContentBlock, TextContentBlock } from '../../llm/types.js';
+import { buildConversationHistoryContext } from '../../agents/conversationHistory.js';
 
 /** Result returned after dispatching a command. */
 export interface DispatchResult {
@@ -104,6 +105,16 @@ function buildSessionTitle(message: string): string | null {
   const trimmed = message.trim();
   if (!trimmed) return null;
   return trimmed.length > 60 ? trimmed.slice(0, 57) + '...' : trimmed;
+}
+
+function buildApprovalDecisionText(command: UserApprovalDecidedCommand): string {
+  return `/approval ${command.approved ? 'yes' : 'no'} (${command.approvalId})`;
+}
+
+function buildPlanApprovalDecisionText(command: UserPlanApprovalDecidedCommand): string {
+  const base = `/plan_approval ${command.approved ? 'yes' : 'no'} (${command.planId})`;
+  const reason = typeof command.reason === 'string' ? command.reason.trim() : '';
+  return reason ? `${base} reason: ${reason}` : base;
 }
 
 /**
@@ -296,7 +307,7 @@ export class CommandDispatcher {
     }
 
     const historyMessages = await getMessages(activeSessionId);
-    const recentHistory = historyMessages.slice(-30).map((m) => ({ role: m.role, content: m.content }));
+    const recentHistory = buildConversationHistoryContext(historyMessages);
 
     const state = getOrCreateState(activeSessionId);
     if (validatedProjectRoot) {
@@ -406,12 +417,27 @@ export class CommandDispatcher {
       const pendingActions = await getPendingActions();
       const errorContent = `Error: ${err instanceof Error ? err.message : 'Unknown error'}`;
 
+      const userMessage: ChatMessage = {
+        id: nanoid(),
+        role: 'user',
+        content: message,
+        timestamp: new Date().toISOString(),
+      };
+
       const responseMessage: ChatMessage = {
         id: nanoid(),
         role: 'assistant',
         content: errorContent,
         timestamp: new Date().toISOString(),
       };
+
+      await saveMessage(activeSessionId, userMessage);
+      await saveMessage(activeSessionId, responseMessage, collectedToolEvents.length > 0 ? collectedToolEvents : undefined);
+
+      const title = buildSessionTitle(message);
+      if (title) {
+        await updateSessionTitleIfEmpty(activeSessionId, title);
+      }
 
       await emitTerminalResponse(
         ctx, activeSessionId, responseMessage, pendingActions,
@@ -454,16 +480,14 @@ export class CommandDispatcher {
     };
 
     const state = getState(command.sessionId);
-    if (state) {
-      const userMsg: ChatMessage = {
-        id: nanoid(),
-        role: 'user',
-        content: command.answer,
-        timestamp: new Date().toISOString(),
-      };
-      await saveMessage(command.sessionId, userMsg);
-      await saveMessage(command.sessionId, responseMessage, collectedToolEvents.length > 0 ? collectedToolEvents : undefined);
-    }
+    const userMsg: ChatMessage = {
+      id: nanoid(),
+      role: 'user',
+      content: command.answer,
+      timestamp: new Date().toISOString(),
+    };
+    await saveMessage(command.sessionId, userMsg);
+    await saveMessage(command.sessionId, responseMessage, collectedToolEvents.length > 0 ? collectedToolEvents : undefined);
 
     const pendingActions = await getPendingActions();
     await emitTerminalResponse(
@@ -504,10 +528,16 @@ export class CommandDispatcher {
       timestamp: new Date().toISOString(),
     };
 
+    const userMsg: ChatMessage = {
+      id: nanoid(),
+      role: 'user',
+      content: buildApprovalDecisionText(command),
+      timestamp: new Date().toISOString(),
+    };
+
     const state = getState(command.sessionId);
-    if (state) {
-      await saveMessage(command.sessionId, responseMessage, collectedToolEvents.length > 0 ? collectedToolEvents : undefined);
-    }
+    await saveMessage(command.sessionId, userMsg);
+    await saveMessage(command.sessionId, responseMessage, collectedToolEvents.length > 0 ? collectedToolEvents : undefined);
 
     const pendingActions = await getPendingActions();
     await emitTerminalResponse(
@@ -550,10 +580,16 @@ export class CommandDispatcher {
       timestamp: new Date().toISOString(),
     };
 
+    const userMsg: ChatMessage = {
+      id: nanoid(),
+      role: 'user',
+      content: buildPlanApprovalDecisionText(command),
+      timestamp: new Date().toISOString(),
+    };
+
     const state = getState(command.sessionId);
-    if (state) {
-      await saveMessage(command.sessionId, responseMessage, collectedToolEvents.length > 0 ? collectedToolEvents : undefined);
-    }
+    await saveMessage(command.sessionId, userMsg);
+    await saveMessage(command.sessionId, responseMessage, collectedToolEvents.length > 0 ? collectedToolEvents : undefined);
 
     const pendingActions = await getPendingActions();
     await emitTerminalResponse(

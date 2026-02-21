@@ -980,6 +980,10 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
           type: 'string',
           description: 'ISO 8601 datetime for when to fire (e.g. "2026-02-20T09:00:00")',
         },
+        notificationChannel: {
+          type: 'string',
+          description: 'Optional channel override (Telegram chat ID). If omitted, default notification channel is used.',
+        },
       },
       required: ['message', 'datetime'],
     },

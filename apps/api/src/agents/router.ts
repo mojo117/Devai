@@ -41,6 +41,7 @@ import { CAIO_AGENT } from './caio.js';
 import { getMessages, getTrustMode } from '../db/queries.js';
 import { rememberNote } from '../memory/workspaceMemory.js';
 import { getCombinedSystemContextBlock, warmSystemContextForSession } from './systemContext.js';
+import { buildConversationHistoryContext } from './conversationHistory.js';
 import {
   classifyTaskComplexity,
   selectModel,
@@ -126,7 +127,7 @@ function extractExplicitRememberNote(text: string): { note: string; promoteToLon
 
 async function loadRecentConversationHistory(sessionId: string): Promise<Array<{ role: string; content: string }>> {
   const messages = await getMessages(sessionId);
-  return messages.slice(-30).map((m) => ({ role: m.role, content: m.content }));
+  return buildConversationHistoryContext(messages);
 }
 
 function getProjectRootFromState(sessionId: string): string | null {
