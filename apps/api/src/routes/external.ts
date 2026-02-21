@@ -2,11 +2,13 @@ import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
 import { commandDispatcher } from '../workflow/commands/dispatcher.js';
 import { ensureStateLoaded, getState } from '../agents/stateManager.js';
-import { getOrCreateExternalSession, updateExternalSessionSessionId } from '../db/schedulerQueries.js';
+import { getOrCreateExternalSession, updateExternalSessionSessionId, addPinnedUserfile, getPinnedUserfileIds } from '../db/schedulerQueries.js';
 import type { WorkflowCommand } from '../workflow/commands/types.js';
 import type { TelegramUpdate } from '../external/telegram.js';
-import { isAllowedChat, sendTelegramMessage } from '../external/telegram.js';
+import { isAllowedChat, sendTelegramMessage, extractTelegramMessage, downloadTelegramFile } from '../external/telegram.js';
 import { createSession } from '../db/queries.js';
+import { transcribeBuffer } from '../services/transcriptionService.js';
+import { uploadUserfileFromBuffer, isUploadError } from '../services/userfileService.js';
 
 function parseYesNoDecision(text: string): boolean | null {
   const normalized = text.trim().toLowerCase().replace(/[.!?,;:]+$/g, '');
@@ -24,19 +26,6 @@ function parseYesNoDecision(text: string): boolean | null {
   if (yes.has(normalized)) return true;
   if (no.has(normalized)) return false;
   return null;
-}
-
-function extractTelegramMessage(update: TelegramUpdate): {
-  text: string;
-  chatId: string;
-  userId: string;
-} | null {
-  const text = update.message?.text?.trim();
-  const chatId = update.message?.chat?.id;
-  const userId = update.message?.from?.id;
-
-  if (!text || chatId === undefined || userId === undefined) return null;
-  return { text, chatId: String(chatId), userId: String(userId) };
 }
 
 export const externalRoutes: FastifyPluginAsync = async (app) => {
@@ -58,7 +47,10 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
       try {
         const externalSession = await getOrCreateExternalSession('telegram', extracted.userId, extracted.chatId);
 
-        const normalizedCommand = extracted.text.trim().toLowerCase();
+        // Determine the text content (text or caption)
+        const messageText = extracted.text || extracted.caption || '';
+
+        const normalizedCommand = messageText.trim().toLowerCase();
         if (normalizedCommand === '/restart' || normalizedCommand === '/reset') {
           const nextSession = await createSession('Telegram Session');
           await updateExternalSessionSessionId(externalSession.id, nextSession.id);
@@ -69,12 +61,95 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
           return;
         }
 
+        // --- Voice message: transcribe and process as text ---
+        if (extracted.voice) {
+          const { buffer } = await downloadTelegramFile(extracted.voice.file_id);
+          const text = await transcribeBuffer(buffer, 'voice.ogg');
+
+          if (!text.trim()) {
+            await sendTelegramMessage(extracted.chatId, 'Konnte keine Sprache erkennen.');
+            return;
+          }
+
+          await sendTelegramMessage(extracted.chatId, `🎤 ${text}`);
+
+          await commandDispatcher.dispatch({
+            type: 'user_request',
+            sessionId: externalSession.session_id,
+            requestId: nanoid(),
+            message: text,
+            pinnedUserfileIds: await getPinnedUserfileIds(externalSession.id),
+          } as WorkflowCommand, { joinSession: () => {} });
+          return;
+        }
+
+        // --- Document upload ---
+        if (extracted.document) {
+          const { buffer } = await downloadTelegramFile(extracted.document.file_id);
+          const filename = extracted.document.file_name || `document_${Date.now()}`;
+          const mimeType = extracted.document.mime_type || 'application/octet-stream';
+
+          const result = await uploadUserfileFromBuffer(buffer, filename, mimeType);
+          if (isUploadError(result)) {
+            await sendTelegramMessage(extracted.chatId, `Upload fehlgeschlagen: ${result.error}`);
+            return;
+          }
+
+          await addPinnedUserfile(externalSession.id, result.file.id);
+
+          if (extracted.caption) {
+            await sendTelegramMessage(extracted.chatId, `📎 ${filename} hochgeladen`);
+            await commandDispatcher.dispatch({
+              type: 'user_request',
+              sessionId: externalSession.session_id,
+              requestId: nanoid(),
+              message: extracted.caption,
+              pinnedUserfileIds: await getPinnedUserfileIds(externalSession.id),
+            } as WorkflowCommand, { joinSession: () => {} });
+          } else {
+            await sendTelegramMessage(extracted.chatId, `📎 ${filename} hochgeladen und gepinnt`);
+          }
+          return;
+        }
+
+        // --- Photo upload ---
+        if (extracted.photo && extracted.photo.length > 0) {
+          const largest = extracted.photo[extracted.photo.length - 1];
+          const { buffer } = await downloadTelegramFile(largest.file_id);
+          const filename = `photo_${Date.now()}.jpg`;
+
+          const result = await uploadUserfileFromBuffer(buffer, filename, 'image/jpeg');
+          if (isUploadError(result)) {
+            await sendTelegramMessage(extracted.chatId, `Upload fehlgeschlagen: ${result.error}`);
+            return;
+          }
+
+          await addPinnedUserfile(externalSession.id, result.file.id);
+
+          if (extracted.caption) {
+            await sendTelegramMessage(extracted.chatId, `📷 Foto hochgeladen`);
+            await commandDispatcher.dispatch({
+              type: 'user_request',
+              sessionId: externalSession.session_id,
+              requestId: nanoid(),
+              message: extracted.caption,
+              pinnedUserfileIds: await getPinnedUserfileIds(externalSession.id),
+            } as WorkflowCommand, { joinSession: () => {} });
+          } else {
+            await sendTelegramMessage(extracted.chatId, `📷 Foto hochgeladen und gepinnt`);
+          }
+          return;
+        }
+
+        // --- Text message (existing flow) ---
+        if (!messageText) return;
+
         await ensureStateLoaded(externalSession.session_id);
 
         const state = getState(externalSession.session_id);
         const pendingApprovals = state?.pendingApprovals ?? [];
         const pendingQuestions = state?.pendingQuestions ?? [];
-        const decision = parseYesNoDecision(extracted.text);
+        const decision = parseYesNoDecision(messageText);
 
         let command: WorkflowCommand;
         if (decision !== null && pendingApprovals.length > 0) {
@@ -93,15 +168,16 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
             sessionId: externalSession.session_id,
             requestId: nanoid(),
             questionId: latestQuestion.questionId,
-            answer: extracted.text,
+            answer: messageText,
           };
         } else {
           command = {
             type: 'user_request',
             sessionId: externalSession.session_id,
             requestId: nanoid(),
-            message: extracted.text,
-          };
+            message: messageText,
+            pinnedUserfileIds: await getPinnedUserfileIds(externalSession.id),
+          } as WorkflowCommand;
         }
 
         await commandDispatcher.dispatch(command, {

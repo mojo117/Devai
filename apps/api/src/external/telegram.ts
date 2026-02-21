@@ -2,11 +2,39 @@ import { config } from '../config.js';
 
 const TELEGRAM_MESSAGE_MAX = 4000;
 
+export interface TelegramVoice {
+  file_id: string;
+  file_unique_id: string;
+  duration: number;
+  mime_type?: string;
+  file_size?: number;
+}
+
+export interface TelegramDocument {
+  file_id: string;
+  file_unique_id: string;
+  file_name?: string;
+  mime_type?: string;
+  file_size?: number;
+}
+
+export interface TelegramPhotoSize {
+  file_id: string;
+  file_unique_id: string;
+  width: number;
+  height: number;
+  file_size?: number;
+}
+
 export interface TelegramUpdate {
   update_id?: number;
   message?: {
     message_id?: number;
     text?: string;
+    caption?: string;
+    voice?: TelegramVoice;
+    document?: TelegramDocument;
+    photo?: TelegramPhotoSize[];
     chat?: {
       id: number | string;
       type?: string;
@@ -67,4 +95,74 @@ export function isAllowedChat(chatId: string | number): boolean {
   const allowed = config.telegramAllowedChatId;
   if (!allowed) return false;
   return String(chatId) === String(allowed);
+}
+
+interface TelegramFileResponse {
+  ok: boolean;
+  result?: { file_id: string; file_path?: string; file_size?: number };
+}
+
+/**
+ * Download a file from Telegram servers by its file_id.
+ * Uses the Bot API getFile + file download endpoint.
+ */
+export async function downloadTelegramFile(fileId: string): Promise<{
+  buffer: Buffer;
+  filePath: string;
+}> {
+  const token = config.telegramBotToken;
+  if (!token) throw new Error('Telegram bot token not configured');
+
+  const infoRes = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
+  if (!infoRes.ok) throw new Error(`Telegram getFile failed: ${infoRes.status}`);
+
+  const fileInfo = (await infoRes.json()) as TelegramFileResponse;
+  if (!fileInfo.ok || !fileInfo.result?.file_path) {
+    throw new Error('Telegram getFile returned no file_path');
+  }
+
+  const fileUrl = `https://api.telegram.org/file/bot${token}/${fileInfo.result.file_path}`;
+  const downloadRes = await fetch(fileUrl);
+  if (!downloadRes.ok) throw new Error(`Telegram file download failed: ${downloadRes.status}`);
+
+  const buffer = Buffer.from(await downloadRes.arrayBuffer());
+  return { buffer, filePath: fileInfo.result.file_path };
+}
+
+export interface ExtractedTelegramMessage {
+  chatId: string;
+  userId: string;
+  text?: string;
+  caption?: string;
+  voice?: TelegramVoice;
+  document?: TelegramDocument;
+  photo?: TelegramPhotoSize[];
+}
+
+/**
+ * Extract message data from a Telegram update.
+ * Returns null if the message has no usable content (no text, voice, document, or photo).
+ */
+export function extractTelegramMessage(update: TelegramUpdate): ExtractedTelegramMessage | null {
+  const msg = update.message;
+  if (!msg) return null;
+
+  const chatId = msg.chat?.id;
+  const userId = msg.from?.id;
+  if (chatId === undefined || userId === undefined) return null;
+
+  const text = msg.text?.trim();
+  const caption = msg.caption?.trim();
+  const hasContent = text || caption || msg.voice || msg.document || (msg.photo && msg.photo.length > 0);
+  if (!hasContent) return null;
+
+  return {
+    chatId: String(chatId),
+    userId: String(userId),
+    text: text || undefined,
+    caption: caption || undefined,
+    voice: msg.voice,
+    document: msg.document,
+    photo: msg.photo && msg.photo.length > 0 ? msg.photo : undefined,
+  };
 }
