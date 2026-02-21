@@ -26,6 +26,7 @@ import { getAgent, getToolsForAgent, spawnScout } from './router.js';
 import { getToolsForLLM } from '../tools/registry.js';
 import * as stateManager from './stateManager.js';
 import { SubAgentRunner } from './sub-agent-runner.js';
+import { drainInbox, onInboxMessage, offInboxMessage } from './inbox.js';
 import type {
   AgentStreamEvent,
   ModelSelection,
@@ -40,6 +41,7 @@ import type {
   LoopDelegationStatus,
   ToolEvidence,
   ScoutFindings,
+  InboxMessage,
 } from './types.js';
 import type { LLMProvider, ContentBlock } from '../llm/types.js';
 import { getTextContent } from '../llm/types.js';
@@ -116,6 +118,8 @@ export class ChapoLoop {
   private successfulExternalTools = new Set<string>();
   private toolDirectiveRegex: RegExp | null = null;
   private originalUserMessage = '';
+  private hasInboxMessages = false;
+  private inboxHandler: ((msg: InboxMessage) => void) | null = null;
 
   constructor(
     private sessionId: string,
@@ -128,6 +132,51 @@ export class ChapoLoop {
     this.validator = new SelfValidator(modelSelection.provider as LLMProvider);
     this.conversation = new ConversationManager(180_000);
     this.sessionLogger = SessionLogger.getActive(sessionId);
+
+    // Subscribe to inbox events for reactive awareness
+    this.inboxHandler = (msg: InboxMessage) => {
+      this.hasInboxMessages = true;
+      this.sendEvent({
+        type: 'message_queued',
+        messageId: msg.id,
+        preview: 'Got it — I\'ll handle that too',
+      });
+    };
+    onInboxMessage(this.sessionId, this.inboxHandler);
+  }
+
+  dispose(): void {
+    if (this.inboxHandler) {
+      offInboxMessage(this.sessionId, this.inboxHandler);
+      this.inboxHandler = null;
+    }
+  }
+
+  private checkInbox(): void {
+    if (!this.hasInboxMessages) return;
+    this.hasInboxMessages = false;
+
+    const messages = drainInbox(this.sessionId);
+    if (messages.length === 0) return;
+
+    const inboxBlock = messages
+      .map(
+        (m, i) => `[New message #${i + 1} from user while you were working]: "${m.content}"`,
+      )
+      .join('\n');
+
+    this.conversation.addMessage({
+      role: 'system',
+      content:
+        `${inboxBlock}\n\n` +
+        `Classify each new message:\n` +
+        `- PARALLEL: Independent task -> use delegateParallel or handle after current task\n` +
+        `- AMENDMENT: Replaces/changes current task -> decide: abort (if early) or finish-then-pivot\n` +
+        `- EXPANSION: Adds to current task scope -> integrate into current plan\n` +
+        `Acknowledge each message to the user in your response.`,
+    });
+
+    this.sendEvent({ type: 'inbox_processing', count: messages.length });
   }
 
   private async checkAndCompact(): Promise<void> {
@@ -302,8 +351,15 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
     // 5. Emit start event — StateProjection handles setPhase + setActiveAgent
     this.sendEvent({ type: 'agent_start', agent: 'chapo', phase: 'execution' });
 
-    // 6. Enter runLoop
-    const result = await this.runLoop(userMessage);
+    // 6. Enter runLoop with inbox lifecycle
+    stateManager.setLoopRunning(this.sessionId, true);
+    let result: ChapoLoopResult;
+    try {
+      result = await this.runLoop(userMessage);
+    } finally {
+      stateManager.setLoopRunning(this.sessionId, false);
+      this.dispose();
+    }
 
     // 7. Emit completion
     this.sendEvent({ type: 'agent_complete', agent: 'chapo', result: result.answer });
@@ -702,12 +758,23 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
         content: '',
         toolResults,
       });
+
+      // Check inbox for new messages between iterations
+      this.checkInbox();
     }
 
-    // Loop exhaustion — ask user
+    // Loop exhaustion — check for unprocessed inbox messages
+    const remaining = drainInbox(this.sessionId);
+    if (remaining.length > 0) {
+      const extras = remaining.map((m) => m.content).join('; ');
+      return this.queueQuestion(
+        `Ich habe mein Iterationslimit erreicht. Du hattest auch noch gefragt: "${extras}" — soll ich damit weitermachen?`,
+        this.iteration,
+      );
+    }
     return this.queueQuestion(
       'Die Anfrage hat mehr Schritte benoetigt als erlaubt. Soll ich weitermachen?',
-      this.iteration
+      this.iteration,
     );
   }
 
