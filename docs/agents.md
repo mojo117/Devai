@@ -171,6 +171,7 @@ delegateToScout, escalateToChapo
 ```
 fs_listFiles, fs_readFile, fs_glob, fs_grep
 git_status, git_diff
+github_getWorkflowRunStatus
 web_search, web_fetch
 memory_remember, memory_search, memory_readToday
 escalateToChapo
@@ -254,7 +255,7 @@ delegateToScout, escalateToChapo
 | `npm_install` | | x | | |
 | `npm_run` | | x | | |
 | `github_triggerWorkflow` | | x | | |
-| `github_getWorkflowRunStatus` | x | x | | |
+| `github_getWorkflowRunStatus` | x | x | x | |
 | `web_search` | x | x | x | |
 | `web_fetch` | x | x | x | |
 | `taskforge_*` | | | | x |
