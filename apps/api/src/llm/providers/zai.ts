@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { config } from '../../config.js';
-import type { LLMProviderAdapter, GenerateRequest, GenerateResponse, ToolDefinition, LLMMessage } from '../types.js';
+import type { LLMProviderAdapter, GenerateRequest, GenerateResponse, ToolDefinition, LLMMessage, ContentBlock } from '../types.js';
 import { getTextContent } from '../types.js';
 
 export class ZAIProvider implements LLMProviderAdapter {
@@ -58,8 +58,16 @@ export class ZAIProvider implements LLMProviderAdapter {
         })
       : undefined;
 
+    // Auto-switch to vision model when images are present
+    const hasImages = request.messages.some((m) =>
+      Array.isArray(m.content) && m.content.some((b) => b.type === 'image_url')
+    );
+    const model = hasImages
+      ? (request.model?.includes('4.6v') ? request.model : 'glm-4.6v-flash')
+      : (request.model || 'glm-4.7');
+
     const response = await client.chat.completions.create({
-      model: request.model || 'glm-4.7',
+      model,
       max_tokens: request.maxTokens || 4096,
       messages,
       tools,
@@ -189,11 +197,24 @@ export class ZAIProvider implements LLMProviderAdapter {
       return;
     }
 
-    // Simple text message
-    messages.push({
-      role: message.role as 'user' | 'assistant',
-      content: getTextContent(message.content),
-    });
+    // Simple text/multimodal message
+    if (Array.isArray(message.content)) {
+      // Multimodal: pass ContentBlock[] through as OpenAI-compatible format
+      messages.push({
+        role: message.role as 'user' | 'assistant',
+        content: message.content.map((block) => {
+          if (block.type === 'image_url') {
+            return { type: 'image_url' as const, image_url: block.image_url };
+          }
+          return { type: 'text' as const, text: block.text };
+        }),
+      });
+    } else {
+      messages.push({
+        role: message.role as 'user' | 'assistant',
+        content: message.content,
+      });
+    }
   }
 
   listModels(): string[] {
@@ -204,6 +225,9 @@ export class ZAIProvider implements LLMProviderAdapter {
       'glm-4.5-flash',
       'glm-4.5-air',
       'glm-4.7-flashx',
+      'glm-4.6v',
+      'glm-4.6v-flash',
+      'glm-4.6v-flashx',
     ];
   }
 }
