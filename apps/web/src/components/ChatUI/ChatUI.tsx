@@ -247,14 +247,54 @@ export function ChatUI({
         }
         break;
       }
+      case 'message_queued': {
+        setToolEvents((prev) => [
+          ...prev,
+          {
+            id: String(event.messageId || crypto.randomUUID()),
+            type: 'status',
+            name: 'inbox',
+            result: String(event.preview || 'Message received'),
+            completed: true,
+            agent: 'chapo' as AgentName,
+          },
+        ]);
+        break;
+      }
+      case 'inbox_processing': {
+        setToolEvents((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            type: 'status',
+            name: 'inbox',
+            result: `Processing ${event.count} follow-up message(s)...`,
+            completed: false,
+            agent: 'chapo' as AgentName,
+          },
+        ]);
+        break;
+      }
+      case 'inbox_classified': {
+        setToolEvents((prev) => [
+          ...prev,
+          {
+            id: String(event.messageId || crypto.randomUUID()),
+            type: 'status',
+            name: 'inbox',
+            result: `${String(event.classification)}: ${String(event.summary)}`,
+            completed: true,
+            agent: 'chapo' as AgentName,
+          },
+        ]);
+        break;
+      }
     }
   };
 
   // --- Message sending ---
 
   const sendChatMessage = async (content: string) => {
-    if (isLoadingInternal) return;
-
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'user',
@@ -321,7 +361,7 @@ export function ChatUI({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoadingInternal) return;
+    if (!input.trim()) return;
     const content = input.trim();
     setInput('');
     await sendChatMessage(content);
