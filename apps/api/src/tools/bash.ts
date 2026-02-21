@@ -213,6 +213,12 @@ export async function npmInstall(
   packageName?: string,
   cwd?: string
 ): Promise<BashResult> {
+  // Validate package name: @scope/name@version or name@version
+  const NPM_PACKAGE_RE = /^(@[a-z0-9\-~][a-z0-9\-._~]*\/)?[a-z0-9\-~][a-z0-9\-._~]*(@[^\s;|&$`'"]+)?$/;
+  if (packageName && !NPM_PACKAGE_RE.test(packageName)) {
+    throw new Error(`Invalid npm package name: "${packageName}". Rejected for safety.`);
+  }
+
   const command = packageName ? `npm install ${packageName}` : 'npm install';
   return executeBash(command, { cwd, timeout: 120000 }); // 2 min timeout for install
 }
