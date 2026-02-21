@@ -35,6 +35,10 @@ import type {
   ApprovalRequest,
   RiskLevel,
   ValidationResult,
+  LoopDelegationResult,
+  LoopDelegationStatus,
+  ToolEvidence,
+  ScoutFindings,
 } from './types.js';
 import type { LLMMessage, LLMProvider } from '../llm/types.js';
 
@@ -101,6 +105,7 @@ export class ChapoLoop {
   private iteration = 0;
   private successfulExternalTools = new Set<string>();
   private toolDirectiveRegex: RegExp | null = null;
+  private originalUserMessage = '';
 
   constructor(
     private sessionId: string,
@@ -137,6 +142,15 @@ export class ChapoLoop {
       role: 'system',
       content: `[Context compacted — ${result.droppedTokens} tokens summarized]\n\n${result.summary}`,
     });
+
+    // Pin original user request so CHAPO never loses the goal (Ralph spec pinning)
+    if (this.originalUserMessage) {
+      this.conversation.addMessage({
+        role: 'system',
+        content: `[ORIGINAL REQUEST — pinned]\n${this.originalUserMessage}`,
+      });
+    }
+
     for (const msg of toKeep) {
       this.conversation.addMessage(msg);
     }
@@ -148,7 +162,65 @@ export class ChapoLoop {
     });
   }
 
+  private deriveDelegationStatus(
+    evidence: ToolEvidence[],
+    escalated: boolean,
+    hasContent: boolean,
+  ): LoopDelegationStatus {
+    if (escalated) return 'escalated';
+    if (evidence.length === 0 && !hasContent) return 'failed';
+
+    const failures = evidence.filter((e) => !e.success && !e.pendingApproval);
+    const successes = evidence.filter((e) => e.success);
+
+    if (failures.length === 0 && successes.length > 0) return 'success';
+    if (successes.length > 0 && failures.length > 0) return 'partial';
+    if (failures.length > 0 && successes.length === 0) return 'failed';
+    return 'success';
+  }
+
+  private buildVerificationEnvelope(
+    delegation: ParallelDelegation,
+    result: LoopDelegationResult,
+  ): string {
+    const lines: string[] = [
+      `[DELEGATION RESULT — ${delegation.target.toUpperCase()}]`,
+      `Objective: ${delegation.objective}`,
+    ];
+
+    if (delegation.expectedOutcome) {
+      lines.push(`Expected Outcome: ${delegation.expectedOutcome}`);
+    }
+
+    lines.push('');
+    lines.push(`Status: ${result.status.toUpperCase()}`);
+
+    if (result.toolEvidence.length > 0) {
+      lines.push('Evidence:');
+      for (const ev of result.toolEvidence.slice(-12)) {
+        const icon = ev.success ? 'OK' : (ev.pendingApproval ? 'PENDING' : 'ERROR');
+        const extra = ev.externalId ? ` id=${ev.externalId}` : '';
+        lines.push(`  - [${icon}] ${ev.tool}${extra}: ${ev.summary}`);
+      }
+    }
+
+    if (result.escalation) {
+      lines.push(`\nEscalation: ${result.escalation}`);
+    }
+
+    if (result.findings) {
+      if (result.findings.recommendations.length > 0) {
+        lines.push(`\nRecommendations: ${result.findings.recommendations.join('; ')}`);
+      }
+    }
+
+    lines.push(`\nAgent Response:\n${result.summary}`);
+    return lines.join('\n');
+  }
+
   async run(userMessage: string, conversationHistory: Array<{ role: string; content: string }>): Promise<ChapoLoopResult> {
+    this.originalUserMessage = userMessage;
+
     // 1. Warm system context
     await warmSystemContextForSession(this.sessionId, this.projectRoot, userMessage);
     const systemContextBlock = getCombinedSystemContextBlock(this.sessionId);
