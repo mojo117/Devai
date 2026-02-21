@@ -130,6 +130,203 @@ async function skillDelete(args: ToolArgs): Promise<unknown> {
   return { deleted: true, skillId: id };
 }
 
+interface ToolExecutionContext {
+  fsOptions?: import('./fs.js').FsOptions;
+  pickContextRoot: () => Promise<string>;
+}
+
+type ToolHandler = (args: ToolArgs, context: ToolExecutionContext) => Promise<unknown>;
+
+const TOOL_HANDLERS: Record<string, ToolHandler> = {
+  // File System Tools
+  fs_listFiles: async (args, context) => fsTools.listFiles(args.path as string, context.fsOptions),
+  fs_readFile: async (args, context) => fsTools.readFile(args.path as string, context.fsOptions),
+  fs_writeFile: async (args) => fsTools.writeFile(args.path as string, args.content as string),
+  fs_glob: async (args, context) => fsTools.globFiles(
+    args.pattern as string,
+    args.path as string | undefined,
+    undefined, // ignore
+    context.fsOptions,
+  ),
+  fs_grep: async (args, context) => fsTools.grepFiles(
+    args.pattern as string,
+    args.path as string,
+    args.glob as string | undefined,
+    undefined, // ignore
+    context.fsOptions,
+  ),
+  fs_edit: async (args) => fsTools.editFile(
+    args.path as string,
+    args.old_string as string,
+    args.new_string as string,
+    args.replace_all as boolean | undefined,
+  ),
+  fs_mkdir: async (args) => fsTools.makeDirectory(args.path as string),
+  fs_move: async (args) => fsTools.moveFile(args.source as string, args.destination as string),
+  fs_delete: async (args) => fsTools.deleteFile(args.path as string, args.recursive as boolean | undefined),
+
+  // Git Tools
+  git_status: async () => gitTools.gitStatus(),
+  git_diff: async (args) => gitTools.gitDiff(args.staged as boolean | undefined),
+  git_commit: async (args) => gitTools.gitCommit(args.message as string),
+  git_push: async (args) => gitTools.gitPush(args.remote as string | undefined, args.branch as string | undefined),
+  git_pull: async (args) => gitTools.gitPull(args.remote as string | undefined, args.branch as string | undefined),
+  git_add: async (args) => gitTools.gitAdd(args.files as string[] | undefined),
+
+  // GitHub Tools
+  github_triggerWorkflow: async (args) => githubTools.triggerWorkflow(
+    args.workflow as string,
+    args.ref as string,
+    args.inputs as Record<string, string> | undefined,
+  ),
+  github_getWorkflowRunStatus: async (args) => githubTools.getWorkflowRunStatus(args.runId as number),
+
+  // Logs Tools
+  logs_getStagingLogs: async (args) => logsTools.getStagingLogs(args.lines as number | undefined),
+
+  // Web Tools
+  web_search: async (args) => {
+    const result = await webTools.webSearch(args.query as string, {
+      complexity: args.complexity as 'simple' | 'detailed' | 'deep' | undefined,
+      recency: args.recency as 'day' | 'week' | 'month' | 'year' | undefined,
+    });
+    return webTools.formatWebSearchResult(result);
+  },
+  web_fetch: async (args) => webTools.webFetch(args.url as string, {
+    timeout: args.timeout as number | undefined,
+  }),
+
+  // DevOps Tools
+  bash_execute: async (args) => bashTools.executeBash(args.command as string, {
+    cwd: args.cwd as string | undefined,
+    timeout: args.timeout as number | undefined,
+  }),
+  ssh_execute: async (args) => sshTools.executeSSH(
+    args.host as string,
+    args.command as string,
+    { timeout: args.timeout as number | undefined },
+  ),
+  pm2_status: async (args) => pm2Tools.pm2Status(args.host as string | undefined),
+  pm2_restart: async (args) => pm2Tools.pm2Restart(args.processName as string, args.host as string | undefined),
+  pm2_stop: async (args) => pm2Tools.pm2Stop(args.processName as string, args.host as string | undefined),
+  pm2_start: async (args) => pm2Tools.pm2Start(args.processName as string, args.host as string | undefined),
+  pm2_logs: async (args) => pm2Tools.pm2Logs(
+    args.processName as string,
+    args.lines as number | undefined,
+    args.host as string | undefined,
+  ),
+  pm2_reloadAll: async (args) => pm2Tools.pm2ReloadAll(args.host as string | undefined),
+  pm2_save: async (args) => pm2Tools.pm2Save(args.host as string | undefined),
+  npm_install: async (args) => bashTools.npmInstall(
+    args.packageName as string | undefined,
+    args.cwd as string | undefined,
+  ),
+  npm_run: async (args) => bashTools.npmRun(args.script as string, args.cwd as string | undefined),
+
+  // Context Tools
+  context_listDocuments: async (_args, context) => contextTools.listDocuments(await context.pickContextRoot()),
+  context_readDocument: async (args, context) => contextTools.readDocument(
+    await context.pickContextRoot(),
+    args.path as string,
+  ),
+  context_searchDocuments: async (args, context) => contextTools.searchDocuments(
+    await context.pickContextRoot(),
+    args.query as string,
+  ),
+
+  // Workspace Memory Tools
+  memory_remember: async (args) => memoryTools.memoryRemember(args.content as string, {
+    promoteToLongTerm: args.promoteToLongTerm as boolean | undefined,
+    sessionId: args.sessionId as string | undefined,
+    source: 'tool.memory_remember',
+  }),
+  memory_search: async (args) => memoryTools.memorySearch(args.query as string, {
+    limit: args.limit as number | undefined,
+    includeLongTerm: args.includeLongTerm as boolean | undefined,
+  }),
+  memory_readToday: async () => memoryTools.memoryReadToday(),
+
+  // Scheduler Tools
+  scheduler_create: async (args) => schedulerTools.schedulerCreate(
+    args.name as string,
+    args.cronExpression as string,
+    args.instruction as string,
+    args.notificationChannel as string | undefined,
+  ),
+  scheduler_list: async () => schedulerTools.schedulerList(),
+  scheduler_update: async (args) => schedulerTools.schedulerUpdate(
+    args.id as string,
+    {
+      name: args.name as string | undefined,
+      cronExpression: args.cronExpression as string | undefined,
+      instruction: args.instruction as string | undefined,
+      notificationChannel: args.notificationChannel as string | null | undefined,
+      enabled: args.enabled as boolean | undefined,
+    },
+  ),
+  scheduler_delete: async (args) => schedulerTools.schedulerDelete(args.id as string),
+  reminder_create: async (args) => schedulerTools.reminderCreate(
+    args.message as string,
+    args.datetime as string,
+    args.notificationChannel as string | undefined,
+  ),
+  notify_user: async (args) => schedulerTools.notifyUser(
+    args.message as string,
+    args.channel as string | undefined,
+  ),
+
+  // TaskForge Tools
+  taskforge_list_tasks: async (args) => taskforgeTools.taskforgeListTasks(
+    args.project as string | undefined,
+    args.status as string | undefined,
+  ),
+  taskforge_get_task: async (args) => taskforgeTools.taskforgeGetTask(args.taskId as string),
+  taskforge_create_task: async (args) => taskforgeTools.taskforgeCreateTask(
+    args.title as string,
+    args.description as string,
+    args.status as string | undefined,
+  ),
+  taskforge_move_task: async (args) => taskforgeTools.taskforgeMoveTask(
+    args.taskId as string,
+    args.newStatus as string,
+  ),
+  taskforge_add_comment: async (args) => taskforgeTools.taskforgeAddComment(
+    args.taskId as string,
+    args.comment as string,
+  ),
+  taskforge_search: async (args) => taskforgeTools.taskforgeSearch(args.query as string),
+
+  // Communication Tools
+  send_email: async (args) => emailTools.sendEmail(
+    args.to as string,
+    args.subject as string,
+    args.body as string,
+    args.replyTo as string | undefined,
+  ),
+  telegram_send_document: async (args) => telegramTools.telegramSendDocument(
+    args.source as 'filesystem' | 'supabase' | 'url',
+    args.path as string,
+    args.caption as string | undefined,
+    args.filename as string | undefined,
+  ),
+  deliver_document: async (args) => telegramTools.deliverDocument(
+    args.source as 'filesystem' | 'supabase' | 'url',
+    args.path as string,
+    args.description as string | undefined,
+    args.filename as string | undefined,
+  ),
+
+  // Skill Management Tools
+  skill_create: async (args) => skillCreate(args),
+  skill_update: async (args) => skillUpdate(args),
+  skill_delete: async (args) => skillDelete(args),
+  skill_reload: async () => refreshSkills(),
+  skill_list: async () => ({
+    skills: getSkillSummaries(),
+    ...getSkillLoadState(),
+  }),
+};
+
 export async function executeTool(
   toolName: string,
   args: ToolArgs,
@@ -169,355 +366,37 @@ export async function executeTool(
       return await toRuntimePath(config.allowedRoots[0]);
     };
 
+    const executionContext: ToolExecutionContext = {
+      // Self-inspection: only SCOUT gets read access to Devai's own codebase.
+      fsOptions: options?.agentName === 'scout' ? { selfInspection: true } : undefined,
+      pickContextRoot,
+    };
+
     const execution = (async () => {
-      // Self-inspection: only SCOUT gets read access to Devai's own codebase
-      const fsOpts: import('./fs.js').FsOptions | undefined =
-        options?.agentName === 'scout' ? { selfInspection: true } : undefined;
-
-      switch (normalizedToolName) {
-        // File System Tools
-        case 'fs_listFiles':
-          return fsTools.listFiles(args.path as string, fsOpts);
-
-        case 'fs_readFile':
-          return fsTools.readFile(args.path as string, fsOpts);
-
-        case 'fs_writeFile':
-          return fsTools.writeFile(
-            args.path as string,
-            args.content as string
-          );
-
-        case 'fs_glob':
-          return fsTools.globFiles(
-            args.pattern as string,
-            args.path as string | undefined,
-            undefined, // ignore
-            fsOpts
-          );
-
-        case 'fs_grep':
-          return fsTools.grepFiles(
-            args.pattern as string,
-            args.path as string,
-            args.glob as string | undefined,
-            undefined, // ignore
-            fsOpts
-          );
-
-        case 'fs_edit':
-          return fsTools.editFile(
-            args.path as string,
-            args.old_string as string,
-            args.new_string as string,
-            args.replace_all as boolean | undefined
-          );
-
-        case 'fs_mkdir':
-          return fsTools.makeDirectory(args.path as string);
-
-        case 'fs_move':
-          return fsTools.moveFile(
-            args.source as string,
-            args.destination as string
-          );
-
-        case 'fs_delete':
-          return fsTools.deleteFile(
-            args.path as string,
-            args.recursive as boolean | undefined
-          );
-
-        // Git Tools
-        case 'git_status':
-          return gitTools.gitStatus();
-
-        case 'git_diff':
-          return gitTools.gitDiff(args.staged as boolean | undefined);
-
-        case 'git_commit':
-          return gitTools.gitCommit(args.message as string);
-
-        case 'git_push':
-          return gitTools.gitPush(
-            args.remote as string | undefined,
-            args.branch as string | undefined
-          );
-
-        case 'git_pull':
-          return gitTools.gitPull(
-            args.remote as string | undefined,
-            args.branch as string | undefined
-          );
-
-        case 'git_add':
-          return gitTools.gitAdd(args.files as string[] | undefined);
-
-        // GitHub Tools
-        case 'github_triggerWorkflow':
-          return githubTools.triggerWorkflow(
-            args.workflow as string,
-            args.ref as string,
-            args.inputs as Record<string, string> | undefined
-          );
-
-        case 'github_getWorkflowRunStatus':
-          return githubTools.getWorkflowRunStatus(args.runId as number);
-
-        // Logs Tools
-        case 'logs_getStagingLogs':
-          return logsTools.getStagingLogs(args.lines as number | undefined);
-
-        // Web Tools (SCOUT agent)
-        case 'web_search': {
-          const result = await webTools.webSearch(args.query as string, {
-            complexity: args.complexity as 'simple' | 'detailed' | 'deep' | undefined,
-            recency: args.recency as 'day' | 'week' | 'month' | 'year' | undefined,
-          });
-          // Format the result with citations for display
-          return webTools.formatWebSearchResult(result);
-        }
-
-        case 'web_fetch':
-          return webTools.webFetch(args.url as string, {
-            timeout: args.timeout as number | undefined,
-          });
-
-        // DevOps Tools - Bash
-        case 'bash_execute':
-          return bashTools.executeBash(args.command as string, {
-            cwd: args.cwd as string | undefined,
-            timeout: args.timeout as number | undefined,
-          });
-
-        // DevOps Tools - SSH
-        case 'ssh_execute':
-          return sshTools.executeSSH(
-            args.host as string,
-            args.command as string,
-            { timeout: args.timeout as number | undefined }
-          );
-
-        // DevOps Tools - PM2
-        case 'pm2_status':
-          return pm2Tools.pm2Status(args.host as string | undefined);
-
-        case 'pm2_restart':
-          return pm2Tools.pm2Restart(
-            args.processName as string,
-            args.host as string | undefined
-          );
-
-        case 'pm2_stop':
-          return pm2Tools.pm2Stop(
-            args.processName as string,
-            args.host as string | undefined
-          );
-
-        case 'pm2_start':
-          return pm2Tools.pm2Start(
-            args.processName as string,
-            args.host as string | undefined
-          );
-
-        case 'pm2_logs':
-          return pm2Tools.pm2Logs(
-            args.processName as string,
-            args.lines as number | undefined,
-            args.host as string | undefined
-          );
-
-        case 'pm2_reloadAll':
-          return pm2Tools.pm2ReloadAll(args.host as string | undefined);
-
-        case 'pm2_save':
-          return pm2Tools.pm2Save(args.host as string | undefined);
-
-        // DevOps Tools - NPM
-        case 'npm_install':
-          return bashTools.npmInstall(
-            args.packageName as string | undefined,
-            args.cwd as string | undefined
-          );
-
-        case 'npm_run':
-          return bashTools.npmRun(
-            args.script as string,
-            args.cwd as string | undefined
-          );
-
-        // Context Tools (read-only document access)
-        case 'context_listDocuments':
-          return contextTools.listDocuments(await pickContextRoot());
-
-        case 'context_readDocument':
-          return contextTools.readDocument(
-            await pickContextRoot(),
-            args.path as string
-          );
-
-        case 'context_searchDocuments':
-          return contextTools.searchDocuments(
-            await pickContextRoot(),
-            args.query as string
-          );
-
-        // Workspace Memory Tools
-        case 'memory_remember':
-          return memoryTools.memoryRemember(args.content as string, {
-            promoteToLongTerm: args.promoteToLongTerm as boolean | undefined,
-            sessionId: args.sessionId as string | undefined,
-            source: 'tool.memory_remember',
-          });
-
-        case 'memory_search':
-          return memoryTools.memorySearch(args.query as string, {
-            limit: args.limit as number | undefined,
-            includeLongTerm: args.includeLongTerm as boolean | undefined,
-          });
-
-        case 'memory_readToday':
-          return memoryTools.memoryReadToday();
-
-        // Scheduler Tools (DEVO agent)
-        case 'scheduler_create':
-          return schedulerTools.schedulerCreate(
-            args.name as string,
-            args.cronExpression as string,
-            args.instruction as string,
-            args.notificationChannel as string | undefined,
-          );
-
-        case 'scheduler_list':
-          return schedulerTools.schedulerList();
-
-        case 'scheduler_update':
-          return schedulerTools.schedulerUpdate(
-            args.id as string,
-            {
-              name: args.name as string | undefined,
-              cronExpression: args.cronExpression as string | undefined,
-              instruction: args.instruction as string | undefined,
-              notificationChannel: args.notificationChannel as string | null | undefined,
-              enabled: args.enabled as boolean | undefined,
-            },
-          );
-
-        case 'scheduler_delete':
-          return schedulerTools.schedulerDelete(args.id as string);
-
-        case 'reminder_create':
-          return schedulerTools.reminderCreate(
-            args.message as string,
-            args.datetime as string,
-            args.notificationChannel as string | undefined,
-          );
-
-        case 'notify_user':
-          return schedulerTools.notifyUser(
-            args.message as string,
-            args.channel as string | undefined,
-          );
-
-        // TaskForge Tools (CAIO agent)
-        case 'taskforge_list_tasks':
-          return taskforgeTools.taskforgeListTasks(
-            args.project as string | undefined,
-            args.status as string | undefined,
-          );
-
-        case 'taskforge_get_task':
-          return taskforgeTools.taskforgeGetTask(args.taskId as string);
-
-        case 'taskforge_create_task':
-          return taskforgeTools.taskforgeCreateTask(
-            args.title as string,
-            args.description as string,
-            args.status as string | undefined,
-          );
-
-        case 'taskforge_move_task':
-          return taskforgeTools.taskforgeMoveTask(
-            args.taskId as string,
-            args.newStatus as string,
-          );
-
-        case 'taskforge_add_comment':
-          return taskforgeTools.taskforgeAddComment(
-            args.taskId as string,
-            args.comment as string,
-          );
-
-        case 'taskforge_search':
-          return taskforgeTools.taskforgeSearch(args.query as string);
-
-        // Email Tool (CAIO agent)
-        case 'send_email':
-          return emailTools.sendEmail(
-            args.to as string,
-            args.subject as string,
-            args.body as string,
-            args.replyTo as string | undefined,
-          );
-
-        // Telegram Tools (CAIO agent)
-        case 'telegram_send_document':
-          return telegramTools.telegramSendDocument(
-            args.source as 'filesystem' | 'supabase' | 'url',
-            args.path as string,
-            args.caption as string | undefined,
-            args.filename as string | undefined,
-          );
-
-        // Web Document Delivery (CAIO agent)
-        case 'deliver_document':
-          return telegramTools.deliverDocument(
-            args.source as 'filesystem' | 'supabase' | 'url',
-            args.path as string,
-            args.description as string | undefined,
-            args.filename as string | undefined,
-          );
-
-        // Skill Management Tools
-        case 'skill_create':
-          return skillCreate(args);
-
-        case 'skill_update':
-          return skillUpdate(args);
-
-        case 'skill_delete':
-          return skillDelete(args);
-
-        case 'skill_reload':
-          return refreshSkills();
-
-        case 'skill_list':
-          return {
-            skills: getSkillSummaries(),
-            ...getSkillLoadState(),
-          };
-
-        default:
-          // Route dynamic skill tools (skill_<id>) to the skill runner
-          if (normalizedToolName.startsWith('skill_')) {
-            // Extract skill ID: skill_generate_image -> generate-image
-            const skillId = normalizedToolName.slice(6).replace(/_/g, '-');
-            const skill = getSkillById(skillId);
-            if (skill) {
-              return executeSkill(skillId, args);
-            }
-          }
-
-          // Route MCP tools to the MCP manager
-          if (mcpManager.isMcpTool(normalizedToolName)) {
-            const mcpResult = await mcpManager.executeTool(normalizedToolName, args);
-            if (!mcpResult.success) {
-              throw new Error(`MCP tool "${normalizedToolName}" failed: ${mcpResult.error}`);
-            }
-            return mcpResult.result;
-          }
-          throw new Error(`Unknown tool: ${normalizedToolName}`);
+      const handler = TOOL_HANDLERS[normalizedToolName];
+      if (handler) {
+        return handler(args, executionContext);
       }
+
+      // Route dynamic skill tools (skill_<id>) to the skill runner
+      if (normalizedToolName.startsWith('skill_')) {
+        // Extract skill ID: skill_generate_image -> generate-image
+        const skillId = normalizedToolName.slice(6).replace(/_/g, '-');
+        const skill = getSkillById(skillId);
+        if (skill) {
+          return executeSkill(skillId, args);
+        }
+      }
+
+      // Route MCP tools to the MCP manager
+      if (mcpManager.isMcpTool(normalizedToolName)) {
+        const mcpResult = await mcpManager.executeTool(normalizedToolName, args);
+        if (!mcpResult.success) {
+          throw new Error(`MCP tool "${normalizedToolName}" failed: ${mcpResult.error}`);
+        }
+        return mcpResult.result;
+      }
+      throw new Error(`Unknown tool: ${normalizedToolName}`);
     })();
 
     const result = await withTimeout(execution, config.toolTimeoutMs, normalizedToolName);
