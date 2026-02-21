@@ -5,6 +5,7 @@
 // ──────────────────────────────────────────────
 
 import type { LLMMessage } from '../llm/types.js';
+import { getTextContent } from '../llm/types.js';
 
 /**
  * Very rough token estimation: ~4 characters per token.
@@ -62,7 +63,7 @@ export class ConversationManager {
   getTokenUsage(): number {
     let total = estimateTokens(this.systemPrompt);
     for (const msg of this.messages) {
-      total += estimateTokens(msg.content);
+      total += estimateTokens(getTextContent(msg.content));
     }
     return total;
   }
@@ -124,7 +125,7 @@ export class ConversationManager {
       this.messages.splice(idxToRemove, 1);
 
       // If we dropped a lot of content, insert a one-liner summary
-      if (estimateTokens(dropped.content) > 500) {
+      if (estimateTokens(getTextContent(dropped.content)) > 500) {
         const summary: LLMMessage = {
           role: 'system',
           content: `[Earlier ${dropped.role} message was trimmed to stay within token budget]`,

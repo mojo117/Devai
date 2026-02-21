@@ -40,7 +40,8 @@ import type {
   ToolEvidence,
   ScoutFindings,
 } from './types.js';
-import type { LLMMessage, LLMProvider } from '../llm/types.js';
+import type { LLMMessage, LLMProvider, ContentBlock } from '../llm/types.js';
+import { getTextContent } from '../llm/types.js';
 
 export type SendEventFn = (event: AgentStreamEvent) => void;
 
@@ -218,11 +219,11 @@ export class ChapoLoop {
     return lines.join('\n');
   }
 
-  async run(userMessage: string, conversationHistory: Array<{ role: string; content: string }>): Promise<ChapoLoopResult> {
-    this.originalUserMessage = userMessage;
+  async run(userMessage: string | ContentBlock[], conversationHistory: Array<{ role: string; content: string }>): Promise<ChapoLoopResult> {
+    this.originalUserMessage = getTextContent(userMessage);
 
     // 1. Warm system context
-    await warmSystemContextForSession(this.sessionId, this.projectRoot, userMessage);
+    await warmSystemContextForSession(this.sessionId, this.projectRoot, getTextContent(userMessage));
     const systemContextBlock = getCombinedSystemContextBlock(this.sessionId);
 
     // 2. Set system prompt on conversation manager
@@ -273,7 +274,7 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
     return result;
   }
 
-  private async runLoop(userMessage: string): Promise<ChapoLoopResult> {
+  private async runLoop(userMessage: string | ContentBlock[]): Promise<ChapoLoopResult> {
     const chapo = getAgent('chapo');
     const chapoToolNames = getToolsForAgent('chapo');
     const tools = getToolsForLLM().filter((t) => chapoToolNames.includes(t.name));
@@ -323,13 +324,13 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
       // No tool calls → ACTION: ANSWER
       if (!response.toolCalls || response.toolCalls.length === 0) {
         const answer = response.content || '';
-        if (this.shouldConvertInlineClarificationToAsk(userMessage, answer)) {
+        if (this.shouldConvertInlineClarificationToAsk(getTextContent(userMessage), answer)) {
           return this.queueQuestion(
             this.extractClarificationQuestion(answer),
             this.iteration + 1,
           );
         }
-        return this.handleAnswer(userMessage, answer);
+        return this.handleAnswer(getTextContent(userMessage), answer);
       }
 
       // Add assistant message with tool calls to conversation

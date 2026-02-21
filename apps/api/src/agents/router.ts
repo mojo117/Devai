@@ -30,7 +30,8 @@ import { llmRouter } from '../llm/router.js';
 import { getToolsForLLM, toolRegistry } from '../tools/registry.js';
 import { mcpManager } from '../mcp/index.js';
 import { executeToolWithApprovalBridge } from '../actions/approvalBridge.js';
-import type { LLMMessage } from '../llm/types.js';
+import type { LLMMessage, ContentBlock } from '../llm/types.js';
+import { getTextContent } from '../llm/types.js';
 
 // Agent definitions
 import { CHAPO_AGENT } from './chapo.js';
@@ -188,7 +189,7 @@ export function canAgentUseTool(agent: AgentName, toolName: string): boolean {
  */
 export async function processRequest(
   sessionId: string,
-  userMessage: string,
+  userMessage: string | ContentBlock[],
   conversationHistory: Array<{ role: string; content: string }> | undefined,
   projectRoot: string | null,
   sendEvent: SendEventFn
@@ -199,7 +200,7 @@ export async function processRequest(
 
   // If the user typed a simple yes/no while we're waiting on an approval, treat it as the approval decision.
   // This prevents "yes is too vague" when the new router asks "Should I continue?".
-  const decision = parseYesNo(userMessage);
+  const decision = parseYesNo(getTextContent(userMessage));
   const gateState = stateManager.getOrCreateState(sessionId);
   const pendingApprovals = gateState.pendingApprovals ?? [];
   if (decision !== null && pendingApprovals.length > 0) {
@@ -211,7 +212,7 @@ export async function processRequest(
   const pendingQuestions = gateState.pendingQuestions ?? [];
   if (gateState.currentPhase === 'waiting_user' && pendingQuestions.length > 0) {
     const latestQ = pendingQuestions[pendingQuestions.length - 1];
-    return handleUserResponse(sessionId, latestQ.questionId, userMessage, sendEvent);
+    return handleUserResponse(sessionId, latestQ.questionId, getTextContent(userMessage), sendEvent);
   }
 
   // Fallback: if state was lost (restart) but the last assistant prompt was a "continue?" gate,
@@ -228,11 +229,11 @@ export async function processRequest(
   }
 
   // Lightweight small-talk response (avoid forcing project clarification on greetings).
-  if (isSmallTalk(userMessage) && history.length <= 1) {
+  if (isSmallTalk(getTextContent(userMessage)) && history.length <= 1) {
     return 'Hey. Womit soll ich dir helfen: Code aendern, Bug fixen, oder etwas nachschlagen?';
   }
 
-  const explicitRemember = extractExplicitRememberNote(userMessage);
+  const explicitRemember = extractExplicitRememberNote(getTextContent(userMessage));
   if (explicitRemember) {
     try {
       const saved = await rememberNote(explicitRemember.note, {
@@ -249,24 +250,24 @@ export async function processRequest(
   }
 
   // Keep the last actual request for approval/resume flows.
-  stateManager.setOriginalRequest(sessionId, userMessage);
+  stateManager.setOriginalRequest(sessionId, getTextContent(userMessage));
   await warmSystemContextForSession(sessionId, projectRoot || getProjectRootFromState(sessionId));
 
   // FAST PATH: Early task classification (no LLM call!)
-  const taskComplexity = classifyTaskComplexity(userMessage);
+  const taskComplexity = classifyTaskComplexity(getTextContent(userMessage));
   const modelSelection = selectModel(taskComplexity);
 
   console.info('[agents] processRequest start', {
     sessionId,
     projectRoot: projectRoot || null,
-    messageLength: userMessage.length,
+    messageLength: getTextContent(userMessage).length,
     taskComplexity,
     selectedModel: `${modelSelection.provider}/${modelSelection.model}`,
   });
 
   // Initialize or get state
   const state = stateManager.getOrCreateState(sessionId);
-  stateManager.setOriginalRequest(sessionId, userMessage);
+  stateManager.setOriginalRequest(sessionId, getTextContent(userMessage));
   stateManager.setGatheredInfo(sessionId, 'taskComplexity', taskComplexity);
   stateManager.setGatheredInfo(sessionId, 'modelSelection', modelSelection);
   const trustMode = await getTrustMode();
@@ -280,7 +281,7 @@ export async function processRequest(
       stateManager.setActiveAgent(sessionId, 'chapo');
       sendEvent({ type: 'agent_start', agent: 'chapo', phase: 'qualification' });
 
-      const qualification = buildPlanQualificationForComplexTask(userMessage);
+      const qualification = buildPlanQualificationForComplexTask(getTextContent(userMessage));
 
       stateManager.setQualificationResult(sessionId, qualification);
 
@@ -294,7 +295,7 @@ export async function processRequest(
 
         const plan = await runPlanMode(
           sessionId,
-          userMessage,
+          getTextContent(userMessage),
           qualification,
           sendEvent
         );

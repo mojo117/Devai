@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { config } from '../../config.js';
 import type { LLMProviderAdapter, GenerateRequest, GenerateResponse, ToolDefinition, LLMMessage } from '../types.js';
+import { getTextContent } from '../types.js';
 
 export class ZAIProvider implements LLMProviderAdapter {
   readonly name = 'zai' as const;
@@ -170,7 +171,7 @@ export class ZAIProvider implements LLMProviderAdapter {
       }));
       messages.push({
         role: 'assistant',
-        content: message.content || null,
+        content: getTextContent(message.content) || null,
         tool_calls: toolCalls,
       });
       return;
@@ -191,7 +192,7 @@ export class ZAIProvider implements LLMProviderAdapter {
     // Simple text message
     messages.push({
       role: message.role as 'user' | 'assistant',
-      content: message.content,
+      content: getTextContent(message.content),
     });
   }
 
