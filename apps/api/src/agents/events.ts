@@ -34,6 +34,7 @@ export type EventCategory =
   | 'task'
   | 'scout'
   | 'user'
+  | 'inbox'
   | 'system';
 
 export interface BaseStreamEvent {
@@ -445,6 +446,36 @@ export const ParallelEvents = {
 };
 
 // ============================================
+// INBOX EVENTS
+// ============================================
+
+export const InboxEvents = {
+  /** User message queued while loop is running */
+  messageQueued: (sessionId: string, messageId: string, preview: string) => ({
+    ...createBaseEvent('inbox', sessionId),
+    type: 'message_queued' as const,
+    messageId,
+    preview,
+  }),
+
+  /** Inbox messages being processed by CHAPO */
+  processing: (sessionId: string, count: number) => ({
+    ...createBaseEvent('inbox', sessionId),
+    type: 'inbox_processing' as const,
+    count,
+  }),
+
+  /** CHAPO classified an inbox message */
+  classified: (sessionId: string, messageId: string, classification: 'parallel' | 'amendment' | 'expansion', summary: string) => ({
+    ...createBaseEvent('inbox', sessionId),
+    type: 'inbox_classified' as const,
+    messageId,
+    classification,
+    summary,
+  }),
+};
+
+// ============================================
 // SYSTEM EVENTS
 // ============================================
 
@@ -489,6 +520,7 @@ export type StreamEvent =
   | ReturnType<(typeof ScoutEvents)[keyof typeof ScoutEvents]>
   | ReturnType<(typeof UserEvents)[keyof typeof UserEvents]>
   | ReturnType<(typeof ParallelEvents)[keyof typeof ParallelEvents]>
+  | ReturnType<(typeof InboxEvents)[keyof typeof InboxEvents]>
   | ReturnType<(typeof SystemEvents)[keyof typeof SystemEvents]>;
 
 // ============================================
