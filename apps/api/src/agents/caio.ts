@@ -2,7 +2,7 @@
  * CAIO - Communications & Administration Officer Agent
  *
  * Role: Handles TaskForge ticket management, email, scheduling, reminders,
- * and notifications. No filesystem, bash, SSH, or git access.
+ * and notifications. Read-only filesystem access for context gathering.
  * Can delegate research to SCOUT and escalate to CHAPO.
  */
 
@@ -17,6 +17,7 @@ export const CAIO_AGENT: AgentDefinition = {
   fallbackModel: 'claude-sonnet-4-20250514',
 
   capabilities: {
+    readOnly: true,
     canManageScheduler: true,
     canSendNotifications: true,
     canSendEmail: true,
@@ -26,6 +27,10 @@ export const CAIO_AGENT: AgentDefinition = {
   },
 
   tools: [
+    // Read-only file system (context gathering)
+    'fs_readFile',
+    'fs_listFiles',
+    'fs_glob',
     // TaskForge tools
     'taskforge_list_tasks',
     'taskforge_get_task',

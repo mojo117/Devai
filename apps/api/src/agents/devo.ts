@@ -42,6 +42,9 @@ export const DEVO_AGENT: AgentDefinition = {
     'fs_delete',
     'fs_glob',
     'fs_grep',
+    // Web tools (documentation lookup)
+    'web_search',
+    'web_fetch',
     // DevOps tools
     'bash_execute',
     'ssh_execute',

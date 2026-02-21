@@ -30,6 +30,9 @@ export const CHAPO_AGENT: AgentDefinition = {
     'fs_readFile',
     'fs_glob',
     'fs_grep',
+    // Web tools (read-only research)
+    'web_search',
+    'web_fetch',
     // Git status (read-only)
     'git_status',
     'git_diff',
