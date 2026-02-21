@@ -42,6 +42,8 @@ export const CAIO_AGENT: AgentDefinition = {
     // Notification & Email
     'notify_user',
     'send_email',
+    // Telegram document sending
+    'telegram_send_document',
     // Workspace memory
     'memory_remember',
     'memory_search',
