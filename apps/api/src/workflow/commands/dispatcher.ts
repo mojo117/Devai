@@ -39,7 +39,8 @@ import {
   handleUserResponse,
   handlePlanApproval,
 } from '../../agents/router.js';
-import type { AgentStreamEvent } from '../../agents/types.js';
+import type { AgentStreamEvent, InboxMessage } from '../../agents/types.js';
+import { pushToInbox } from '../../agents/inbox.js';
 import { SessionLogger } from '../../audit/sessionLogger.js';
 import {
   createSession,
@@ -53,6 +54,7 @@ import {
   getOrCreateState,
   setGatheredInfo,
   setPhase,
+  isLoopActive,
 } from '../../agents/stateManager.js';
 import { getPendingActions } from '../../actions/manager.js';
 import { emitChatEvent } from '../../websocket/chatGateway.js';
@@ -63,10 +65,10 @@ import type { ContentBlock, TextContentBlock } from '../../llm/types.js';
 import { buildConversationHistoryContext } from '../../agents/conversationHistory.js';
 
 /** Result returned after dispatching a command. */
-export interface DispatchResult {
-  sessionId: string;
-  responseMessage: ChatMessage;
-}
+export type DispatchResult =
+  | { type: 'success'; sessionId: string; responseMessage: ChatMessage }
+  | { type: 'queued'; sessionId: string }
+  | { type: 'error'; sessionId: string; responseMessage: ChatMessage };
 
 /** Lightweight tool event collected during a request for DB persistence. */
 interface CollectedToolEvent {
@@ -115,6 +117,15 @@ function buildPlanApprovalDecisionText(command: UserPlanApprovalDecidedCommand):
   const base = `/plan_approval ${command.approved ? 'yes' : 'no'} (${command.planId})`;
   const reason = typeof command.reason === 'string' ? command.reason.trim() : '';
   return reason ? `${base} reason: ${reason}` : base;
+}
+
+function createChatMessage(role: ChatMessage['role'], content: string): ChatMessage {
+  return {
+    id: nanoid(),
+    role,
+    content,
+    timestamp: new Date().toISOString(),
+  };
 }
 
 /**
@@ -250,6 +261,42 @@ async function emitTerminalResponse(
   }));
 }
 
+async function persistAndEmitTerminalResponse(params: {
+  ctx: EventContext;
+  sessionId: string;
+  userMessage: ChatMessage;
+  responseMessage: ChatMessage;
+  collectedToolEvents: CollectedToolEvent[];
+  isError: boolean;
+}): Promise<void> {
+  const {
+    ctx,
+    sessionId,
+    userMessage,
+    responseMessage,
+    collectedToolEvents,
+    isError,
+  } = params;
+
+  await saveMessage(sessionId, userMessage);
+  await saveMessage(
+    sessionId,
+    responseMessage,
+    collectedToolEvents.length > 0 ? collectedToolEvents : undefined,
+  );
+
+  const pendingActions = await getPendingActions();
+  const agentHistory = getState(sessionId)?.agentHistory || [];
+  await emitTerminalResponse(
+    ctx,
+    sessionId,
+    responseMessage,
+    pendingActions,
+    agentHistory,
+    isError,
+  );
+}
+
 export class CommandDispatcher {
   async dispatch(command: WorkflowCommand, opts: DispatchOptions): Promise<DispatchResult> {
     const ctx = createRequestContext(command.sessionId, command.requestId);
@@ -298,6 +345,22 @@ export class CommandDispatcher {
     const activeSessionId = command.sessionId || (await createSession()).id;
     opts.joinSession(activeSessionId);
     await ensureStateLoaded(activeSessionId);
+
+    // Multi-message: if a loop is already running, queue instead of starting a new one
+    if (isLoopActive(activeSessionId)) {
+      const inboxMsg: InboxMessage = {
+        id: nanoid(),
+        content: typeof command.message === 'string' ? command.message : '[multimodal content]',
+        receivedAt: new Date(),
+        acknowledged: false,
+        source: (command.metadata?.platform === 'telegram') ? 'telegram' : 'websocket',
+      };
+      pushToInbox(activeSessionId, inboxMsg);
+      return {
+        type: 'queued',
+        sessionId: activeSessionId,
+      };
+    }
 
     // An explicit 'request' is always a new user request, NOT an answer to a pending question.
     const preState = getState(activeSessionId);
@@ -385,71 +448,46 @@ export class CommandDispatcher {
         sendEvent as (event: AgentStreamEvent) => void,
       );
 
-      const responseMessage: ChatMessage = {
-        id: nanoid(),
-        role: 'assistant',
-        content: result,
-        timestamp: new Date().toISOString(),
-      };
+      const responseMessage = createChatMessage('assistant', result);
+      const userMessage = createChatMessage('user', message);
 
-      const userMessage: ChatMessage = {
-        id: nanoid(),
-        role: 'user',
-        content: message,
-        timestamp: new Date().toISOString(),
-      };
-
-      await saveMessage(activeSessionId, userMessage);
-      await saveMessage(activeSessionId, responseMessage, collectedToolEvents.length > 0 ? collectedToolEvents : undefined);
+      await persistAndEmitTerminalResponse({
+        ctx,
+        sessionId: activeSessionId,
+        userMessage,
+        responseMessage,
+        collectedToolEvents,
+        isError: false,
+      });
 
       const title = buildSessionTitle(message);
       if (title) {
         await updateSessionTitleIfEmpty(activeSessionId, title);
       }
-
-      const finalState = getState(activeSessionId);
-      const pendingActions = await getPendingActions();
-
-      await emitTerminalResponse(
-        ctx, activeSessionId, responseMessage, pendingActions,
-        finalState?.agentHistory || [], false,
-      );
       sessionLogger.finalize('completed');
 
-      return { sessionId: activeSessionId, responseMessage };
+      return { type: 'success', sessionId: activeSessionId, responseMessage };
     } catch (err) {
-      const pendingActions = await getPendingActions();
       const errorContent = `Error: ${err instanceof Error ? err.message : 'Unknown error'}`;
+      const userMessage = createChatMessage('user', message);
+      const responseMessage = createChatMessage('assistant', errorContent);
 
-      const userMessage: ChatMessage = {
-        id: nanoid(),
-        role: 'user',
-        content: message,
-        timestamp: new Date().toISOString(),
-      };
-
-      const responseMessage: ChatMessage = {
-        id: nanoid(),
-        role: 'assistant',
-        content: errorContent,
-        timestamp: new Date().toISOString(),
-      };
-
-      await saveMessage(activeSessionId, userMessage);
-      await saveMessage(activeSessionId, responseMessage, collectedToolEvents.length > 0 ? collectedToolEvents : undefined);
+      await persistAndEmitTerminalResponse({
+        ctx,
+        sessionId: activeSessionId,
+        userMessage,
+        responseMessage,
+        collectedToolEvents,
+        isError: true,
+      });
 
       const title = buildSessionTitle(message);
       if (title) {
         await updateSessionTitleIfEmpty(activeSessionId, title);
       }
-
-      await emitTerminalResponse(
-        ctx, activeSessionId, responseMessage, pendingActions,
-        getState(activeSessionId)?.agentHistory || [], true,
-      );
       sessionLogger.finalize('error');
 
-      return { sessionId: activeSessionId, responseMessage };
+      return { type: 'error', sessionId: activeSessionId, responseMessage };
     }
   }
 
@@ -476,30 +514,19 @@ export class CommandDispatcher {
       sendEvent as (event: AgentStreamEvent) => void,
     );
 
-    const responseMessage: ChatMessage = {
-      id: nanoid(),
-      role: 'assistant',
-      content: result,
-      timestamp: new Date().toISOString(),
-    };
+    const responseMessage = createChatMessage('assistant', result);
+    const userMessage = createChatMessage('user', command.answer);
 
-    const state = getState(command.sessionId);
-    const userMsg: ChatMessage = {
-      id: nanoid(),
-      role: 'user',
-      content: command.answer,
-      timestamp: new Date().toISOString(),
-    };
-    await saveMessage(command.sessionId, userMsg);
-    await saveMessage(command.sessionId, responseMessage, collectedToolEvents.length > 0 ? collectedToolEvents : undefined);
+    await persistAndEmitTerminalResponse({
+      ctx,
+      sessionId: command.sessionId,
+      userMessage,
+      responseMessage,
+      collectedToolEvents,
+      isError: false,
+    });
 
-    const pendingActions = await getPendingActions();
-    await emitTerminalResponse(
-      ctx, command.sessionId, responseMessage, pendingActions,
-      state?.agentHistory || [], false,
-    );
-
-    return { sessionId: command.sessionId, responseMessage };
+    return { type: 'success', sessionId: command.sessionId, responseMessage };
   }
 
   private async handleApproval(
@@ -525,31 +552,19 @@ export class CommandDispatcher {
       sendEvent as (event: AgentStreamEvent) => void,
     );
 
-    const responseMessage: ChatMessage = {
-      id: nanoid(),
-      role: 'assistant',
-      content: result,
-      timestamp: new Date().toISOString(),
-    };
+    const responseMessage = createChatMessage('assistant', result);
+    const userMessage = createChatMessage('user', buildApprovalDecisionText(command));
 
-    const userMsg: ChatMessage = {
-      id: nanoid(),
-      role: 'user',
-      content: buildApprovalDecisionText(command),
-      timestamp: new Date().toISOString(),
-    };
+    await persistAndEmitTerminalResponse({
+      ctx,
+      sessionId: command.sessionId,
+      userMessage,
+      responseMessage,
+      collectedToolEvents,
+      isError: false,
+    });
 
-    const state = getState(command.sessionId);
-    await saveMessage(command.sessionId, userMsg);
-    await saveMessage(command.sessionId, responseMessage, collectedToolEvents.length > 0 ? collectedToolEvents : undefined);
-
-    const pendingActions = await getPendingActions();
-    await emitTerminalResponse(
-      ctx, command.sessionId, responseMessage, pendingActions,
-      state?.agentHistory || [], false,
-    );
-
-    return { sessionId: command.sessionId, responseMessage };
+    return { type: 'success', sessionId: command.sessionId, responseMessage };
   }
 
   private async handlePlanApproval(
@@ -577,31 +592,19 @@ export class CommandDispatcher {
       sendEvent as (event: AgentStreamEvent) => void,
     );
 
-    const responseMessage: ChatMessage = {
-      id: nanoid(),
-      role: 'assistant',
-      content: result,
-      timestamp: new Date().toISOString(),
-    };
+    const responseMessage = createChatMessage('assistant', result);
+    const userMessage = createChatMessage('user', buildPlanApprovalDecisionText(command));
 
-    const userMsg: ChatMessage = {
-      id: nanoid(),
-      role: 'user',
-      content: buildPlanApprovalDecisionText(command),
-      timestamp: new Date().toISOString(),
-    };
+    await persistAndEmitTerminalResponse({
+      ctx,
+      sessionId: command.sessionId,
+      userMessage,
+      responseMessage,
+      collectedToolEvents,
+      isError: false,
+    });
 
-    const state = getState(command.sessionId);
-    await saveMessage(command.sessionId, userMsg);
-    await saveMessage(command.sessionId, responseMessage, collectedToolEvents.length > 0 ? collectedToolEvents : undefined);
-
-    const pendingActions = await getPendingActions();
-    await emitTerminalResponse(
-      ctx, command.sessionId, responseMessage, pendingActions,
-      state?.agentHistory || [], false,
-    );
-
-    return { sessionId: command.sessionId, responseMessage };
+    return { type: 'success', sessionId: command.sessionId, responseMessage };
   }
 }
 
