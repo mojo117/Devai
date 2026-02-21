@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeEach } from 'vitest';
 import { mapWsMessageToCommand } from './dispatcher.js';
+import { pushToInbox, drainInbox, clearInbox } from '../../agents/inbox.js';
+import { getOrCreateState, setLoopRunning, isLoopActive } from '../../agents/stateManager.js';
 
 describe('mapWsMessageToCommand', () => {
   const currentSessionId = 'existing-session';
@@ -23,7 +25,8 @@ describe('mapWsMessageToCommand', () => {
       requestId: 'req-123',
       message: 'Fix the bug',
       projectRoot: '/opt/project',
-      metadata: undefined,
+      metadata: { platform: 'web' },
+      pinnedUserfileIds: undefined,
     });
   });
 
@@ -46,7 +49,7 @@ describe('mapWsMessageToCommand', () => {
     const cmd = mapWsMessageToCommand(msg, currentSessionId, requestId);
 
     if (cmd?.type === 'user_request') {
-      expect(cmd.metadata).toEqual({ chatMode: 'shared' });
+      expect(cmd.metadata).toEqual({ platform: 'web', chatMode: 'shared' });
     }
   });
 
@@ -179,5 +182,60 @@ describe('mapWsMessageToCommand', () => {
     if (cmd?.type === 'user_approval_decided') {
       expect(cmd.approved).toBe(false);
     }
+  });
+});
+
+// ── Inbox gating integration tests ──────────────────────────────────
+
+describe('inbox gating logic', () => {
+  const sessionId = 'gate-test-session';
+
+  beforeEach(() => {
+    clearInbox(sessionId);
+  });
+
+  it('isLoopActive returns false by default', () => {
+    getOrCreateState(sessionId);
+    expect(isLoopActive(sessionId)).toBe(false);
+  });
+
+  it('setLoopRunning makes isLoopActive return true', () => {
+    getOrCreateState(sessionId);
+    setLoopRunning(sessionId, true);
+    expect(isLoopActive(sessionId)).toBe(true);
+  });
+
+  it('messages queue when loop is running', () => {
+    getOrCreateState(sessionId);
+    setLoopRunning(sessionId, true);
+
+    pushToInbox(sessionId, {
+      id: 'test-msg-1',
+      content: 'follow-up question',
+      receivedAt: new Date(),
+      acknowledged: false,
+      source: 'websocket',
+    });
+
+    const queued = drainInbox(sessionId);
+    expect(queued).toHaveLength(1);
+    expect(queued[0].content).toBe('follow-up question');
+  });
+
+  it('setLoopRunning(false) clears the flag', () => {
+    getOrCreateState(sessionId);
+    setLoopRunning(sessionId, true);
+    setLoopRunning(sessionId, false);
+    expect(isLoopActive(sessionId)).toBe(false);
+  });
+
+  it('different sessions are independent', () => {
+    const s1 = 'session-a';
+    const s2 = 'session-b';
+    getOrCreateState(s1);
+    getOrCreateState(s2);
+    setLoopRunning(s1, true);
+    expect(isLoopActive(s1)).toBe(true);
+    expect(isLoopActive(s2)).toBe(false);
   });
 });
