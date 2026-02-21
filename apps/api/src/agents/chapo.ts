@@ -41,6 +41,9 @@ export const CHAPO_AGENT: AgentDefinition = {
     'memory_remember',
     'memory_search',
     'memory_readToday',
+    // Skill tools (read-only management)
+    'skill_list',
+    'skill_reload',
     // Meta-tools for coordination
     'delegateToDevo',
     'delegateToCaio',

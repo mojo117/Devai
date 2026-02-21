@@ -68,6 +68,12 @@ export const DEVO_AGENT: AgentDefinition = {
     'memory_remember',
     'memory_search',
     'memory_readToday',
+    // Skill management
+    'skill_create',
+    'skill_update',
+    'skill_delete',
+    'skill_reload',
+    'skill_list',
     // Exploration (spawn SCOUT for searches)
     'delegateToScout',
     // Escalation
