@@ -70,7 +70,8 @@ export interface Config {
   supabaseServiceKey: string;
 
   // CAIO — TaskForge, Email, Telegram
-  taskforgeApiKey: string;
+  taskforgeApiKeys: Record<string, string>;
+  taskforgeDefaultProject: string;
   resendApiKey: string;
   resendFromAddress: string;
   telegramBotToken: string;
@@ -122,7 +123,8 @@ export function loadConfig(): Config {
     githubOwner: process.env.GITHUB_OWNER,
     githubRepo: process.env.GITHUB_REPO,
 
-    taskforgeApiKey: process.env.DEVAI_TASKBOARD_API_KEY || '',
+    taskforgeApiKeys: buildTaskForgeKeyMap(),
+    taskforgeDefaultProject: 'devai',
     resendApiKey: process.env.RESEND_API_KEY || '',
     resendFromAddress: process.env.RESEND_FROM_ADDRESS || '',
     telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
@@ -227,10 +229,10 @@ export function validateRequiredEnv(currentConfig: Config = config): EnvValidati
     });
   }
 
-  if (!currentConfig.taskforgeApiKey) {
+  if (Object.keys(currentConfig.taskforgeApiKeys).length === 0) {
     warnings.push({
-      key: 'DEVAI_TASKBOARD_API_KEY',
-      reason: 'TaskForge integration is disabled.',
+      key: 'TASKFORGE_KEY_* | DEVAI_TASKBOARD_API_KEY',
+      reason: 'TaskForge integration is disabled (no API keys configured).',
     });
   }
 
@@ -239,6 +241,22 @@ export function validateRequiredEnv(currentConfig: Config = config): EnvValidati
     errors,
     warnings,
   };
+}
+
+function buildTaskForgeKeyMap(): Record<string, string> {
+  const map: Record<string, string> = {};
+  // Support both new per-project keys and legacy single key
+  const prefixed = Object.entries(process.env)
+    .filter(([k]) => k.startsWith('TASKFORGE_KEY_'))
+    .map(([k, v]) => [k.replace('TASKFORGE_KEY_', '').toLowerCase().replace(/_/g, '-'), v || ''] as const);
+  for (const [name, key] of prefixed) {
+    if (key) map[name] = key;
+  }
+  // Legacy fallback: DEVAI_TASKBOARD_API_KEY → 'devai'
+  if (!map.devai && process.env.DEVAI_TASKBOARD_API_KEY) {
+    map.devai = process.env.DEVAI_TASKBOARD_API_KEY;
+  }
+  return map;
 }
 
 function parseExtensions(value?: string): string[] {

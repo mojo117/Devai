@@ -794,11 +794,11 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
   // TaskForge Tools (CAIO agent)
   {
     name: 'taskforge_list_tasks',
-    description: 'Liste Tasks aus TaskForge auf. Optional nach Projekt und Status filtern.',
+    description: 'Liste Tasks aus TaskForge auf. Verfuegbare Projekte: devai, founders-forge, taskflow, dieda, clawd. Default: devai.',
     parameters: {
       type: 'object',
       properties: {
-        project: { type: 'string', description: 'Projektname (optional)' },
+        project: { type: 'string', description: 'Projektname: devai, founders-forge, taskflow, dieda, clawd (default: devai)' },
         status: { type: 'string', description: 'Status-Filter: initiierung, planung, umsetzung, review, done (optional)' },
       },
     },
@@ -810,7 +810,8 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        taskId: { type: 'string', description: 'Die Task-ID' },
+        taskId: { type: 'string', description: 'Die Task-ID oder Display-ID (z.B. Devai:abc1234)' },
+        project: { type: 'string', description: 'Projektname (default: devai). Nur noetig wenn taskId keine Display-ID ist.' },
       },
       required: ['taskId'],
     },
@@ -818,13 +819,14 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
   },
   {
     name: 'taskforge_create_task',
-    description: 'Erstelle einen neuen Task in TaskForge.',
+    description: 'Erstelle einen neuen Task in TaskForge. Verfuegbare Projekte: devai, founders-forge, taskflow, dieda, clawd.',
     parameters: {
       type: 'object',
       properties: {
         title: { type: 'string', description: 'Task-Titel (imperativ)' },
         description: { type: 'string', description: 'Detaillierte Beschreibung mit Akzeptanzkriterien' },
         status: { type: 'string', description: 'Initialer Status (default: initiierung)', enum: ['initiierung', 'planung', 'umsetzung', 'review'] },
+        project: { type: 'string', description: 'Projektname (default: devai)' },
       },
       required: ['title', 'description'],
     },
@@ -838,6 +840,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
       properties: {
         taskId: { type: 'string', description: 'Die Task-ID' },
         newStatus: { type: 'string', description: 'Neuer Status', enum: ['initiierung', 'planung', 'umsetzung', 'review', 'done'] },
+        project: { type: 'string', description: 'Projektname (default: devai)' },
       },
       required: ['taskId', 'newStatus'],
     },
@@ -851,6 +854,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
       properties: {
         taskId: { type: 'string', description: 'Die Task-ID' },
         comment: { type: 'string', description: 'Der Kommentar-Text' },
+        project: { type: 'string', description: 'Projektname (default: devai)' },
       },
       required: ['taskId', 'comment'],
     },
@@ -858,11 +862,12 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
   },
   {
     name: 'taskforge_search',
-    description: 'Suche nach Tasks in TaskForge.',
+    description: 'Suche nach Tasks in TaskForge. Verfuegbare Projekte: devai, founders-forge, taskflow, dieda, clawd.',
     parameters: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Suchbegriff' },
+        project: { type: 'string', description: 'Projektname (default: devai)' },
       },
       required: ['query'],
     },

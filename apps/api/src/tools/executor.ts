@@ -280,21 +280,30 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
     args.project as string | undefined,
     args.status as string | undefined,
   ),
-  taskforge_get_task: async (args) => taskforgeTools.taskforgeGetTask(args.taskId as string),
+  taskforge_get_task: async (args) => taskforgeTools.taskforgeGetTask(
+    args.taskId as string,
+    args.project as string | undefined,
+  ),
   taskforge_create_task: async (args) => taskforgeTools.taskforgeCreateTask(
     args.title as string,
     args.description as string,
     args.status as string | undefined,
+    args.project as string | undefined,
   ),
   taskforge_move_task: async (args) => taskforgeTools.taskforgeMoveTask(
     args.taskId as string,
     args.newStatus as string,
+    args.project as string | undefined,
   ),
   taskforge_add_comment: async (args) => taskforgeTools.taskforgeAddComment(
     args.taskId as string,
     args.comment as string,
+    args.project as string | undefined,
   ),
-  taskforge_search: async (args) => taskforgeTools.taskforgeSearch(args.query as string),
+  taskforge_search: async (args) => taskforgeTools.taskforgeSearch(
+    args.query as string,
+    args.project as string | undefined,
+  ),
 
   // Communication Tools
   send_email: async (args) => emailTools.sendEmail(
