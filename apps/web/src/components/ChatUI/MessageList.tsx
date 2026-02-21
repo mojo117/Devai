@@ -1,4 +1,4 @@
-import { Fragment, type RefObject } from 'react';
+import { Fragment, useState, type RefObject } from 'react';
 import type { ChatMessage, SessionSummary } from '../../types';
 import type { ToolEvent } from './types';
 import { mergeConsecutiveThinking } from './mergeEvents';
@@ -100,6 +100,7 @@ export function MessageList({
                 fileId={doc.fileId}
                 filename={doc.filename}
                 sizeBytes={doc.sizeBytes}
+                mimeType={doc.mimeType}
                 description={doc.description}
               />
             );
@@ -262,7 +263,7 @@ export function MessageList({
 }
 
 /** Check if a tool_result event represents a document delivery with download info */
-function getDocumentDelivery(event: ToolEvent): { fileId: string; filename: string; sizeBytes: number; downloadUrl: string; description?: string } | null {
+function getDocumentDelivery(event: ToolEvent): { fileId: string; filename: string; sizeBytes: number; downloadUrl: string; mimeType?: string; description?: string } | null {
   if (event.type !== 'tool_result' || event.name !== 'deliver_document') return null;
   const r = event.result as Record<string, unknown> | undefined;
   if (!r || typeof r !== 'object') return null;
@@ -272,8 +273,20 @@ function getDocumentDelivery(event: ToolEvent): { fileId: string; filename: stri
     filename: (r.filename as string) || 'document',
     sizeBytes: (r.sizeBytes as number) || 0,
     downloadUrl: r.downloadUrl as string,
+    mimeType: typeof r.mimeType === 'string' ? r.mimeType : undefined,
     description: r.description as string | undefined,
   };
+}
+
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
+
+function isImageFile(mimeType?: string, filename?: string): boolean {
+  if (mimeType && mimeType.startsWith('image/')) return true;
+  if (filename) {
+    const ext = filename.slice(filename.lastIndexOf('.')).toLowerCase();
+    return IMAGE_EXTENSIONS.has(ext);
+  }
+  return false;
 }
 
 function formatBytes(bytes: number): string {
@@ -282,20 +295,74 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** Document download card — rendered for deliver_document results */
-function DocumentDownloadCard({ fileId, filename, sizeBytes, description }: {
+/** Document download card — rendered for deliver_document results.
+ *  Shows image preview for image files, download card for everything else. */
+function DocumentDownloadCard({ fileId, filename, sizeBytes, mimeType, description }: {
   fileId: string;
   filename: string;
   sizeBytes: number;
+  mimeType?: string;
   description?: string;
 }) {
   const downloadUrl = getUserfileDownloadUrl(fileId);
+  const isImage = isImageFile(mimeType, filename);
+  const [imgError, setImgError] = useState(false);
+
+  const handleDownload = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(downloadUrl, { credentials: 'include' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      // Fallback: open in new tab
+      window.open(downloadUrl, '_blank');
+    }
+  };
+
+  if (isImage && !imgError) {
+    return (
+      <div className="flex justify-start">
+        <div className="rounded-xl border border-devai-border bg-devai-card overflow-hidden max-w-[80%]">
+          <img
+            src={downloadUrl}
+            alt={description || filename}
+            className="max-w-full max-h-[400px] object-contain"
+            onError={() => setImgError(true)}
+          />
+          <div className="flex items-center justify-between px-3 py-2 border-t border-devai-border">
+            <div className="min-w-0 flex-1 mr-3">
+              <p className="text-xs text-devai-text-muted truncate">{filename} · {formatBytes(sizeBytes)}</p>
+              {description && <p className="text-xs text-devai-text-secondary truncate">{description}</p>}
+            </div>
+            <button
+              onClick={handleDownload}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 transition-colors shrink-0"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Download
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex justify-start">
-      <a
-        href={downloadUrl}
-        download={filename}
-        className="inline-flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-2.5 max-w-[80%] hover:bg-emerald-500/10 transition-colors group"
+      <button
+        onClick={handleDownload}
+        className="inline-flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-2.5 max-w-[80%] hover:bg-emerald-500/10 transition-colors group text-left"
       >
         <span className="text-xl shrink-0">{'\u{1F4E5}'}</span>
         <div className="min-w-0 flex-1">
@@ -308,7 +375,7 @@ function DocumentDownloadCard({ fileId, filename, sizeBytes, description }: {
         <svg className="w-4 h-4 text-emerald-400 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
         </svg>
-      </a>
+      </button>
     </div>
   );
 }
