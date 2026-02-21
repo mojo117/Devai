@@ -72,7 +72,10 @@ export async function executeSSH(
     host = knownHost.privateIp || knownHost.host;
     user = options?.user || knownHost.user;
   } else {
-    // Assume it's a direct host address
+    // Validate direct host: must be IP or simple hostname
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9.\-]*$/.test(hostOrAlias) || hostOrAlias.includes(' ')) {
+      throw new Error(`Invalid host: "${hostOrAlias}". Use a known alias (baso, klyde, infrit) or a valid hostname/IP.`);
+    }
     host = hostOrAlias;
     user = options?.user || 'root';
   }
