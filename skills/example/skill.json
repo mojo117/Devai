@@ -1,15 +1,15 @@
 {
   "id": "example",
   "name": "Example Skill",
-  "description": "Demonstrates the skill manifest format.",
+  "description": "Demonstrates the skill manifest format. Returns a greeting.",
   "version": "0.1.0",
-  "systemPrompt": "You are an expert reviewer. Provide concise, structured feedback.",
-  "toolAllowList": [
-    "fs.readFile",
-    "git.status"
-  ],
-  "tags": [
-    "review",
-    "demo"
-  ]
+  "parameters": {
+    "name": {
+      "type": "string",
+      "description": "Name to greet",
+      "required": true
+    }
+  },
+  "createdBy": "manual",
+  "tags": ["demo"]
 }
