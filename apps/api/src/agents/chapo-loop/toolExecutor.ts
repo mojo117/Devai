@@ -23,9 +23,6 @@ import {
   type DelegationRunnerDeps,
 } from './delegationRunner.js';
 import {
-  listOpenInboxItems,
-  preflightAnswer,
-  resolveInboxItem,
   setChapoPlan,
 } from './chapoControlTools.js';
 
@@ -75,35 +72,6 @@ export class ChapoToolExecutor {
 
   async execute(toolCall: ToolCallLike): Promise<ToolCallOutcome> {
     // CHAPO control tools (state-aware meta utilities)
-    if (toolCall.name === 'chapo_inbox_list_open') {
-      const result = listOpenInboxItems(this.deps.sessionId, {
-        scope: toolCall.arguments.scope as 'all' | 'current_task' | undefined,
-        limit: toolCall.arguments.limit as number | undefined,
-      });
-      return {
-        toolResult: {
-          toolUseId: toolCall.id,
-          result: JSON.stringify(result),
-          isError: false,
-        },
-      };
-    }
-
-    if (toolCall.name === 'chapo_inbox_resolve') {
-      const result = resolveInboxItem(this.deps.sessionId, {
-        id: toolCall.arguments.id as string,
-        resolution: toolCall.arguments.resolution as 'done' | 'wont_do' | 'superseded' | 'blocked',
-        note: toolCall.arguments.note as string | undefined,
-      });
-      return {
-        toolResult: {
-          toolUseId: toolCall.id,
-          result: JSON.stringify(result),
-          isError: !result.success,
-        },
-      };
-    }
-
     if (toolCall.name === 'chapo_plan_set') {
       const result = setChapoPlan(this.deps.sessionId, {
         title: toolCall.arguments.title as string,
@@ -119,30 +87,6 @@ export class ChapoToolExecutor {
           toolUseId: toolCall.id,
           result: JSON.stringify(result),
           isError: !result.success,
-        },
-      };
-    }
-
-    if (toolCall.name === 'chapo_answer_preflight') {
-      const result = preflightAnswer(this.deps.sessionId, {
-        draft: toolCall.arguments.draft as string,
-        mustAddress: toolCall.arguments.mustAddress as string[] | undefined,
-        strict: toolCall.arguments.strict as boolean | undefined,
-      });
-      stateManager.setGatheredInfo(this.deps.sessionId, 'chapoAnswerPreflight', {
-        turnId: stateManager.getActiveTurnId(this.deps.sessionId) || undefined,
-        checkedAt: new Date().toISOString(),
-        ok: result.ok,
-        score: result.score,
-        issues: result.issues.slice(0, 8),
-        checkedItems: result.checkedItems.slice(0, 10),
-        strict: toolCall.arguments.strict === true,
-      });
-      return {
-        toolResult: {
-          toolUseId: toolCall.id,
-          result: JSON.stringify(result),
-          isError: false,
         },
       };
     }
@@ -190,31 +134,6 @@ export class ChapoToolExecutor {
         message,
         inReplyTo,
       });
-
-      // Satisfy matching inbox obligations via keyword match
-      const activeTurnId = stateManager.getActiveTurnId(this.deps.sessionId);
-      if (activeTurnId) {
-        const unresolved = stateManager.getUnresolvedObligations(this.deps.sessionId, {
-          turnId: activeTurnId,
-          blockingOnly: true,
-        });
-        const inboxObligations = unresolved.filter((o) => o.origin === 'inbox');
-        const responseLower = message.toLowerCase();
-        for (const obligation of inboxObligations) {
-          const keywords = (obligation.requiredOutcome || obligation.description)
-            .toLowerCase()
-            .split(/\s+/)
-            .filter((w) => w.length > 3);
-          const matchCount = keywords.filter((kw) => responseLower.includes(kw)).length;
-          if (keywords.length > 0 && matchCount >= Math.ceil(keywords.length * 0.3)) {
-            stateManager.satisfyObligation(
-              this.deps.sessionId,
-              obligation.obligationId,
-              `Covered by respondToUser: ${message.slice(0, 200)}`,
-            );
-          }
-        }
-      }
 
       return {
         toolResult: {
@@ -269,17 +188,6 @@ export class ChapoToolExecutor {
         };
       }
 
-      const delegationObligations = delegations.map((delegation) =>
-        stateManager.addOrReuseDelegationObligation(this.deps.sessionId, {
-          target: delegation.target,
-          domain: delegation.domain,
-          objective: delegation.objective,
-          expectedOutcome: delegation.expectedOutcome,
-        }, {
-          turnId: stateManager.getActiveTurnId(this.deps.sessionId) || undefined,
-        })
-      );
-
       this.deps.emitDecisionPath({
         path: 'tool',
         reason: `Unabhaengige Teilaufgaben werden parallel delegiert (${delegations.length}).`,
@@ -303,13 +211,6 @@ export class ChapoToolExecutor {
       );
 
       if (parallelErr) {
-        for (const obligation of delegationObligations) {
-          stateManager.failObligation(
-            this.deps.sessionId,
-            obligation.obligationId,
-            `Parallel delegation failed: ${parallelErr.message}`,
-          );
-        }
         return {
           toolResult: {
             toolUseId: toolCall.id,
@@ -317,27 +218,6 @@ export class ChapoToolExecutor {
             isError: true,
           },
         };
-      }
-
-      for (const [index, obligation] of delegationObligations.entries()) {
-        const result = parallelResult.results[index];
-        if (result?.success) {
-          const evidence = (result.result || result.loopResult?.summary || 'Parallel delegation completed.')
-            .toString()
-            .slice(0, 300);
-          stateManager.satisfyObligation(
-            this.deps.sessionId,
-            obligation.obligationId,
-            evidence,
-          );
-        } else {
-          const evidence = (result?.error || 'Parallel delegation failed').toString().slice(0, 300);
-          stateManager.failObligation(
-            this.deps.sessionId,
-            obligation.obligationId,
-            evidence,
-          );
-        }
       }
 
       const failedCount = parallelResult.results.filter((entry) => !entry.success).length;
@@ -361,14 +241,6 @@ export class ChapoToolExecutor {
     const delegationTarget = resolveDelegationTarget(toolCall.name);
     if (delegationTarget) {
       const delegation = buildDelegation(delegationTarget, toolCall.arguments);
-      const delegationObligation = stateManager.addOrReuseDelegationObligation(this.deps.sessionId, {
-        target: delegation.target,
-        domain: delegation.domain,
-        objective: delegation.objective,
-        expectedOutcome: delegation.expectedOutcome,
-      }, {
-        turnId: stateManager.getActiveTurnId(this.deps.sessionId) || undefined,
-      });
       this.deps.emitDecisionPath(buildDelegationDecisionPath(delegation));
 
       this.deps.sendEvent({
@@ -383,11 +255,6 @@ export class ChapoToolExecutor {
       );
 
       if (delegationErr) {
-        stateManager.failObligation(
-          this.deps.sessionId,
-          delegationObligation.obligationId,
-          `${delegation.target.toUpperCase()} error: ${delegationErr.message}`,
-        );
         return {
           toolResult: {
             toolUseId: toolCall.id,
@@ -395,20 +262,6 @@ export class ChapoToolExecutor {
             isError: true,
           },
         };
-      }
-
-      if (delegationResult.status === 'success' || delegationResult.status === 'partial') {
-        stateManager.satisfyObligation(
-          this.deps.sessionId,
-          delegationObligation.obligationId,
-          delegationResult.summary.slice(0, 300),
-        );
-      } else {
-        stateManager.failObligation(
-          this.deps.sessionId,
-          delegationObligation.obligationId,
-          delegationResult.summary.slice(0, 300),
-        );
       }
 
       const envelope = this.deps.buildVerificationEnvelope(delegation, delegationResult);

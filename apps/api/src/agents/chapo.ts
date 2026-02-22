@@ -48,10 +48,7 @@ export const CHAPO_AGENT: AgentDefinition = {
     'skill_list',
     'skill_reload',
     // CHAPO control tools
-    'chapo_inbox_list_open',
-    'chapo_inbox_resolve',
     'chapo_plan_set',
-    'chapo_answer_preflight',
     // Meta-tools for coordination
     'delegateToDevo',
     'delegateToCaio',
@@ -68,49 +65,6 @@ export const CHAPO_AGENT: AgentDefinition = {
 
 // Tool definitions for CHAPO-specific meta-tools
 export const CHAPO_META_TOOLS = [
-  {
-    name: 'chapo_inbox_list_open',
-    description: 'Liste offene User-Verpflichtungen aus der Inbox bzw. aktuellen Aufgabe.',
-    parameters: {
-      type: 'object',
-      properties: {
-        scope: {
-          type: 'string',
-          enum: ['all', 'current_task'],
-          description: 'all = alle offenen Punkte, current_task = nur aktive Turn-Aufgabe.',
-        },
-        limit: {
-          type: 'number',
-          description: 'Maximale Anzahl Rueckgaben (1-50, default 10).',
-        },
-      },
-    },
-    requiresConfirmation: false,
-  },
-  {
-    name: 'chapo_inbox_resolve',
-    description: 'Markiere eine offene Verpflichtung als erledigt, blockiert oder bewusst verworfen.',
-    parameters: {
-      type: 'object',
-      properties: {
-        id: {
-          type: 'string',
-          description: 'Obligation-ID aus chapo_inbox_list_open.',
-        },
-        resolution: {
-          type: 'string',
-          enum: ['done', 'wont_do', 'superseded', 'blocked'],
-          description: 'done=satisfied, blocked=failed, wont_do/superseded=waived.',
-        },
-        note: {
-          type: 'string',
-          description: 'Kurze Begruendung oder Evidenz (optional).',
-        },
-      },
-      required: ['id', 'resolution'],
-    },
-    requiresConfirmation: false,
-  },
   {
     name: 'chapo_plan_set',
     description: 'Setzt einen kurzen Ausfuehrungsplan mit Schritten, Owner und Status fuer die laufende Aufgabe.',
@@ -151,30 +105,6 @@ export const CHAPO_META_TOOLS = [
         },
       },
       required: ['title', 'steps'],
-    },
-    requiresConfirmation: false,
-  },
-  {
-    name: 'chapo_answer_preflight',
-    description: 'Prueft einen Antwortentwurf auf Coverage, Widersprueche und unbelegte Claims.',
-    parameters: {
-      type: 'object',
-      properties: {
-        draft: {
-          type: 'string',
-          description: 'Antwortentwurf, der geprueft werden soll.',
-        },
-        mustAddress: {
-          type: 'array',
-          description: 'Optionale Liste von Punkten, die die Antwort explizit adressieren muss.',
-          items: { type: 'string' },
-        },
-        strict: {
-          type: 'boolean',
-          description: 'Wenn true, nur ohne Issues als okay markieren.',
-        },
-      },
-      required: ['draft'],
     },
     requiresConfirmation: false,
   },

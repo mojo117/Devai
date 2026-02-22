@@ -37,8 +37,6 @@ import {
   setPhase,
   isLoopActive,
   setLoopRunning,
-  addUserRequestObligations,
-  waiveObligationsExceptTurn,
 } from '../../agents/stateManager.js';
 import { config } from '../../config.js';
 import type { ChatMessage } from '@devai/shared';
@@ -138,15 +136,6 @@ export class CommandHandlers {
 
     // Multi-message: if a loop is already running, queue instead of starting a new one
     if (isLoopActive(activeSessionId)) {
-      const activeTurnId = getActiveTurnId(activeSessionId) || command.requestId;
-      const queuedObligationCount = intake.shouldCreateObligation
-        ? addUserRequestObligations(activeSessionId, message, {
-          turnId: activeTurnId,
-          origin: 'inbox',
-          blocking: true,
-        }).length
-        : 0;
-      setGatheredInfo(activeSessionId, 'queuedObligationCount', queuedObligationCount);
       setGatheredInfo(activeSessionId, 'queuedIntakeKind', intake.kind);
       const inboxMsg: InboxMessage = {
         id: nanoid(),
@@ -169,24 +158,10 @@ export class CommandHandlers {
       setPhase(activeSessionId, 'idle');
     }
 
-    // Fresh explicit request => start a new turn and waive unresolved obligations from older turns.
+    // Fresh explicit request => start a new turn.
     const turnId = command.requestId;
     setActiveTurnId(activeSessionId, turnId);
-    const waivedCount = waiveObligationsExceptTurn(
-      activeSessionId,
-      turnId,
-      `Waived: superseded by explicit request turn ${turnId}.`,
-    );
-    setGatheredInfo(activeSessionId, 'waivedObligationCount', waivedCount);
     setGatheredInfo(activeSessionId, 'activeTurnId', turnId);
-    const seededObligationCount = intake.shouldCreateObligation
-      ? addUserRequestObligations(activeSessionId, message, {
-        turnId,
-        origin: 'primary',
-        blocking: true,
-      }).length
-      : 0;
-    setGatheredInfo(activeSessionId, 'obligationCount', seededObligationCount);
 
     const historyMessages = await getMessages(activeSessionId);
     const recentHistory = buildConversationHistoryContext(historyMessages);

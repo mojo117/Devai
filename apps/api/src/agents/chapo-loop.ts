@@ -50,21 +50,6 @@ interface ChapoLoopConfig {
   maxIterations: number;
 }
 
-interface StoredPreflightIssue {
-  type: string;
-  detail: string;
-}
-
-interface StoredAnswerPreflight {
-  turnId?: string;
-  checkedAt: string;
-  ok: boolean;
-  score?: number;
-  issues: StoredPreflightIssue[];
-}
-
-const PREFLIGHT_MAX_AGE_MS = 30 * 60 * 1000;
-
 export class ChapoLoop {
   private errorHandler: AgentErrorHandler;
   private answerValidator: AnswerValidator;
@@ -166,61 +151,8 @@ export class ChapoLoop {
     });
   }
 
-  private shouldApplyCoverageGuard(userText: string): boolean {
-    return !userText.includes('GENEHMIGTER PLAN-TASK');
-  }
-
   private getActiveTurnId(): string | null {
     return stateManager.getActiveTurnId(this.sessionId);
-  }
-
-  private buildUnresolvedObligationLines(maxItems: number = 4): string {
-    const activeTurnId = this.getActiveTurnId();
-    return stateManager.summarizeUnresolvedObligations(
-      this.sessionId,
-      maxItems,
-      {
-        turnId: activeTurnId || undefined,
-        blockingOnly: true,
-      },
-    );
-  }
-
-  private getLatestAnswerPreflight(): StoredAnswerPreflight | null {
-    const raw = stateManager.getState(this.sessionId)?.taskContext.gatheredInfo.chapoAnswerPreflight;
-    if (!raw || typeof raw !== 'object') return null;
-
-    const value = raw as Record<string, unknown>;
-    if (typeof value.checkedAt !== 'string' || typeof value.ok !== 'boolean') {
-      return null;
-    }
-
-    const issues: StoredPreflightIssue[] = Array.isArray(value.issues)
-      ? value.issues
-        .filter((item): item is StoredPreflightIssue =>
-          Boolean(
-            item
-            && typeof item === 'object'
-            && typeof (item as Record<string, unknown>).type === 'string'
-            && typeof (item as Record<string, unknown>).detail === 'string',
-          ),
-        )
-        .slice(0, 8)
-      : [];
-
-    return {
-      turnId: typeof value.turnId === 'string' ? value.turnId : undefined,
-      checkedAt: value.checkedAt,
-      ok: value.ok,
-      score: typeof value.score === 'number' ? value.score : undefined,
-      issues,
-    };
-  }
-
-  private isPreflightFresh(checkedAt: string): boolean {
-    const parsed = Date.parse(checkedAt);
-    if (!Number.isFinite(parsed)) return false;
-    return (Date.now() - parsed) <= PREFLIGHT_MAX_AGE_MS;
   }
 
   async run(userMessage: string | ContentBlock[], conversationHistory: Array<{ role: string; content: string }>): Promise<ChapoLoopResult> {
@@ -349,114 +281,6 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
 
         const answer = response.content || '';
         const userText = getTextContent(userMessage);
-        const applyCoverageGuard = this.shouldApplyCoverageGuard(userText);
-        const activeTurnId = this.getActiveTurnId();
-        const unresolvedBefore = applyCoverageGuard
-          ? stateManager.getUnresolvedObligations(
-            this.sessionId,
-            {
-              turnId: activeTurnId || undefined,
-              blockingOnly: true,
-            },
-          )
-          : [];
-
-        if (applyCoverageGuard && unresolvedBefore.length > 0) {
-          const coverage = await this.answerValidator.evaluateObligationCoverage(unresolvedBefore, answer);
-          for (const obligationId of coverage.resolvedIds) {
-            stateManager.satisfyObligation(
-              this.sessionId,
-              obligationId,
-              'Covered by final answer draft.',
-            );
-          }
-
-          if (coverage.unresolved.length > 0) {
-            const unresolvedLines = coverage.unresolved
-              .slice(0, 4)
-              .map((obligation) => `- ${obligation.requiredOutcome || obligation.description}`)
-              .join('\n');
-
-            this.sendEvent({
-              type: 'agent_thinking',
-              agent: 'chapo',
-              status: `Coverage Guard: ${coverage.unresolved.length} offene Verpflichtung(en) erkannt.`,
-            });
-
-            const guidance = `[Coverage Guard]
-Die Antwort ist noch nicht vollstaendig. Offene Verpflichtungen:
-${unresolvedLines}
-
-Arbeite diese Punkte zuerst ab (Tool/Delegation/askUser bei echtem Blocker), dann antworte final.`;
-            this.conversation.addMessage({ role: 'system', content: guidance });
-
-            if (this.iteration >= this.config.maxIterations - 1) {
-              return this.queueQuestion(
-                `Ich habe noch offene Teilaufgaben:\n${unresolvedLines}\n\nSoll ich weitermachen, um diese Punkte abzuschliessen?`,
-                this.iteration + 1,
-                {
-                  kind: 'continue',
-                  turnId: activeTurnId || undefined,
-                  fingerprint: `continue:${activeTurnId || 'none'}:${unresolvedLines}`,
-                },
-              );
-            }
-            continue;
-          }
-        }
-
-        if (applyCoverageGuard && unresolvedBefore.length >= 2) {
-          const preflight = this.getLatestAnswerPreflight();
-          const sameTurn = (preflight?.turnId || null) === (activeTurnId || null);
-          const preflightFresh = preflight ? this.isPreflightFresh(preflight.checkedAt) : false;
-          const unresolvedLines = unresolvedBefore
-            .slice(0, 4)
-            .map((obligation) => `- ${obligation.requiredOutcome || obligation.description}`)
-            .join('\n');
-
-          if (!preflight || !sameTurn || !preflightFresh) {
-            this.sendEvent({
-              type: 'agent_thinking',
-              agent: 'chapo',
-              status: 'Preflight Guard: Vor finaler Antwort ist ein aktueller Entwurfscheck erforderlich.',
-            });
-            this.conversation.addMessage({
-              role: 'system',
-              content: `[Preflight Guard]
-Bei mehreren offenen Verpflichtungen ist ein Preflight vor der finalen Antwort Pflicht.
-Fuehre jetzt chapo_answer_preflight auf deinen aktuellen Entwurf aus (strict=true).
-
-Pflichtpunkte:
-${unresolvedLines}`,
-            });
-            continue;
-          }
-
-          if (!preflight.ok) {
-            const issueLines = preflight.issues.length > 0
-              ? preflight.issues
-                .slice(0, 4)
-                .map((issue) => `- ${issue.type}: ${issue.detail}`)
-                .join('\n')
-              : '- Preflight ist nicht ok, aber es wurden keine Details gespeichert.';
-
-            this.sendEvent({
-              type: 'agent_thinking',
-              agent: 'chapo',
-              status: 'Preflight Guard: Letzter Entwurfscheck ist fehlgeschlagen, ueberarbeite die Antwort.',
-            });
-            this.conversation.addMessage({
-              role: 'system',
-              content: `[Preflight Guard]
-Der letzte Preflight fuer diesen Turn ist nicht ok${typeof preflight.score === 'number' ? ` (score=${preflight.score.toFixed(2)})` : ''}.
-Behebe die Punkte, fuehre chapo_answer_preflight erneut aus und antworte erst dann final.
-
-Issues:
-${issueLines}`,
-            });
-            continue;
-          }
-        }
 
         if (this.answerValidator.shouldConvertToAsk(userText, answer)) {
           return this.queueQuestion(
@@ -536,27 +360,26 @@ ${issueLines}`,
 
     // Loop exhaustion — check for unprocessed inbox messages
     const remaining = this.contextManager.drainRemainingMessages();
-    const unresolvedObligations = this.buildUnresolvedObligationLines();
     if (remaining.length > 0) {
       const extras = remaining.map((m) => m.content).join('; ');
       return this.queueQuestion(
-        `Ich habe mein Iterationslimit erreicht. Du hattest auch noch gefragt: "${extras}".\n\nOffene Verpflichtungen:\n${unresolvedObligations}\n\nSoll ich damit weitermachen?`,
+        `Ich habe mein Iterationslimit erreicht. Du hattest auch noch gefragt: "${extras}"\n\nSoll ich damit weitermachen?`,
         this.iteration,
         {
           kind: 'continue',
           turnId: this.getActiveTurnId() || undefined,
-          fingerprint: `limit:inbox:${this.getActiveTurnId() || 'none'}:${extras}:${unresolvedObligations}`,
+          fingerprint: `limit:inbox:${this.getActiveTurnId() || 'none'}:${extras}`,
         },
       );
     }
 
     return this.queueQuestion(
-      `Die Anfrage hat mehr Schritte benoetigt als erlaubt.\n\nOffene Verpflichtungen:\n${unresolvedObligations}\n\nSoll ich weitermachen?`,
+      'Die Anfrage hat mehr Schritte benoetigt als erlaubt. Soll ich weitermachen?',
       this.iteration,
       {
         kind: 'continue',
         turnId: this.getActiveTurnId() || undefined,
-        fingerprint: `limit:plain:${this.getActiveTurnId() || 'none'}:${unresolvedObligations}`,
+        fingerprint: `limit:plain:${this.getActiveTurnId() || 'none'}`,
       },
     );
   }

@@ -312,7 +312,6 @@ export function getStateSummary(sessionId: string): {
   pendingQuestions: number;
   activeParallelExecutions: number;
   approvalGranted: boolean;
-  unresolvedObligations: number;
 } | null {
   const state = getState(sessionId);
   if (!state) return null;
@@ -326,6 +325,5 @@ export function getStateSummary(sessionId: string): {
     pendingQuestions: state.pendingQuestions.length,
     activeParallelExecutions: state.parallelExecutions.filter((e) => e.status === 'running').length,
     approvalGranted: state.taskContext.approvalGranted,
-    unresolvedObligations: state.obligations.filter((o) => o.status === 'open' || o.status === 'failed').length,
   };
 }

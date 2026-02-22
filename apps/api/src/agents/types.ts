@@ -183,27 +183,6 @@ export interface UserResponse {
   timestamp: string;
 }
 
-export type ObligationType = 'user_request' | 'delegation';
-export type ObligationStatus = 'open' | 'satisfied' | 'waived' | 'failed';
-export type ObligationOrigin = 'primary' | 'inbox' | 'delegation';
-
-export interface SessionObligation {
-  obligationId: string;
-  type: ObligationType;
-  description: string;
-  requiredOutcome?: string;
-  sourceAgent: AgentName;
-  status: ObligationStatus;
-  evidence: string[];
-  fingerprint?: string;
-  turnId?: string;
-  origin?: ObligationOrigin;
-  blocking?: boolean;
-  createdAt: string;
-  resolvedAt?: string;
-  metadata?: Record<string, unknown>;
-}
-
 export interface ApprovalRequest {
   approvalId: string;
   description: string;
@@ -255,9 +234,6 @@ export interface ConversationState {
   pendingApprovals: ApprovalRequest[];
   pendingQuestions: UserQuestion[];
   parallelExecutions: ParallelExecution[];
-
-  // Lightweight obligation ledger (coverage guard)
-  obligations: SessionObligation[];
 
   todos: TodoItem[];
 
