@@ -54,6 +54,7 @@ export const CHAPO_AGENT: AgentDefinition = {
     'delegateToScout',
     'askUser',
     'requestApproval',
+    'respondToUser',
   ],
 
   systemPrompt: CHAPO_SYSTEM_PROMPT,
@@ -241,13 +242,18 @@ export const CHAPO_META_TOOLS = [
   },
   {
     name: 'askUser',
-    description: 'Stelle dem User eine Frage bei Unklarheiten. Nutze dies BEVOR du Freigabe einholst.',
+    description: 'Stelle dem User eine Frage bei Unklarheiten. Nutze dies BEVOR du Freigabe einholst. Mit blocking=false kannst du eine Frage stellen und gleichzeitig an anderen Aufgaben weiterarbeiten.',
     parameters: {
       type: 'object',
       properties: {
         question: {
           type: 'string',
           description: 'Die Frage an den User',
+        },
+        blocking: {
+          type: 'boolean',
+          description: 'Wenn false, laueft die Loop weiter waehrend auf Antwort gewartet wird. Antwort kommt via Inbox. Default: true.',
+          default: true,
         },
         options: {
           type: 'array',
@@ -285,6 +291,25 @@ export const CHAPO_META_TOOLS = [
         },
       },
       required: ['description', 'riskLevel'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'respondToUser',
+    description: 'Sende eine Zwischenantwort an den User waehrend du an weiteren Aufgaben arbeitest. Nutze dies wenn du eine Aufgabe abgeschlossen hast aber noch andere Aufgaben bearbeiten musst.',
+    parameters: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          description: 'Der Antworttext fuer den User.',
+        },
+        inReplyTo: {
+          type: 'string',
+          description: 'Optional: Zitat oder Referenz auf welche User-Nachricht sich diese Antwort bezieht.',
+        },
+      },
+      required: ['message'],
     },
     requiresConfirmation: false,
   },

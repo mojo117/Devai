@@ -41,6 +41,7 @@ import type {
 import type { LLMProvider, ContentBlock } from '../llm/types.js';
 import { getTextContent } from '../llm/types.js';
 import { tagCurrentWork } from '../memory/topicTagger.js';
+import type { QueueQuestionOptions } from './chapo-loop/gateManager.js';
 
 export type SendEventFn = (event: AgentStreamEvent) => void;
 
@@ -154,12 +155,25 @@ export class ChapoLoop {
     return !userText.includes('GENEHMIGTER PLAN-TASK');
   }
 
+  private getActiveTurnId(): string | null {
+    return stateManager.getActiveTurnId(this.sessionId);
+  }
+
   private buildUnresolvedObligationLines(maxItems: number = 4): string {
-    return stateManager.summarizeUnresolvedObligations(this.sessionId, maxItems);
+    const activeTurnId = this.getActiveTurnId();
+    return stateManager.summarizeUnresolvedObligations(
+      this.sessionId,
+      maxItems,
+      {
+        turnId: activeTurnId || undefined,
+        blockingOnly: true,
+      },
+    );
   }
 
   async run(userMessage: string | ContentBlock[], conversationHistory: Array<{ role: string; content: string }>): Promise<ChapoLoopResult> {
     const userText = getTextContent(userMessage);
+    stateManager.ensureActiveTurnId(this.sessionId);
     this.contextManager.setPinnedRequest(userText);
 
     // 1. Warm system context
@@ -270,11 +284,29 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
 
       // No tool calls → ACTION: ANSWER
       if (!response.toolCalls || response.toolCalls.length === 0) {
+        // Check inbox before finalizing — catch late-arriving messages
+        const hasNew = this.contextManager.checkInbox();
+        if (hasNew) {
+          // Save current answer as intermediate response, continue loop
+          this.conversation.addMessage({
+            role: 'assistant',
+            content: response.content || '',
+          });
+          continue;
+        }
+
         const answer = response.content || '';
         const userText = getTextContent(userMessage);
 
         if (this.shouldApplyCoverageGuard(userText)) {
-          const unresolvedBefore = stateManager.getUnresolvedObligations(this.sessionId);
+          const activeTurnId = this.getActiveTurnId();
+          const unresolvedBefore = stateManager.getUnresolvedObligations(
+            this.sessionId,
+            {
+              turnId: activeTurnId || undefined,
+              blockingOnly: true,
+            },
+          );
           if (unresolvedBefore.length > 0) {
             const coverage = await this.answerValidator.evaluateObligationCoverage(unresolvedBefore, answer);
             for (const obligationId of coverage.resolvedIds) {
@@ -308,6 +340,11 @@ Arbeite diese Punkte zuerst ab (Tool/Delegation/askUser bei echtem Blocker), dan
                 return this.queueQuestion(
                   `Ich habe noch offene Teilaufgaben:\n${unresolvedLines}\n\nSoll ich weitermachen, um diese Punkte abzuschliessen?`,
                   this.iteration + 1,
+                  {
+                    kind: 'continue',
+                    turnId: activeTurnId || undefined,
+                    fingerprint: `continue:${activeTurnId || 'none'}:${unresolvedLines}`,
+                  },
                 );
               }
               continue;
@@ -319,6 +356,7 @@ Arbeite diese Punkte zuerst ab (Tool/Delegation/askUser bei echtem Blocker), dan
           return this.queueQuestion(
             this.answerValidator.extractClarificationQuestion(answer),
             this.iteration + 1,
+            { kind: 'clarification', turnId: this.getActiveTurnId() || undefined },
           );
         }
         return this.answerValidator.validateAndNormalize(userText, answer, this.iteration, this.emitDecisionPath.bind(this), this.errorHandler);
@@ -398,12 +436,22 @@ Arbeite diese Punkte zuerst ab (Tool/Delegation/askUser bei echtem Blocker), dan
       return this.queueQuestion(
         `Ich habe mein Iterationslimit erreicht. Du hattest auch noch gefragt: "${extras}".\n\nOffene Verpflichtungen:\n${unresolvedObligations}\n\nSoll ich damit weitermachen?`,
         this.iteration,
+        {
+          kind: 'continue',
+          turnId: this.getActiveTurnId() || undefined,
+          fingerprint: `limit:inbox:${this.getActiveTurnId() || 'none'}:${extras}:${unresolvedObligations}`,
+        },
       );
     }
 
     return this.queueQuestion(
       `Die Anfrage hat mehr Schritte benoetigt als erlaubt.\n\nOffene Verpflichtungen:\n${unresolvedObligations}\n\nSoll ich weitermachen?`,
       this.iteration,
+      {
+        kind: 'continue',
+        turnId: this.getActiveTurnId() || undefined,
+        fingerprint: `limit:plain:${this.getActiveTurnId() || 'none'}:${unresolvedObligations}`,
+      },
     );
   }
 
@@ -419,8 +467,12 @@ Arbeite diese Punkte zuerst ab (Tool/Delegation/askUser bei echtem Blocker), dan
     return [...new Set(paths)];
   }
 
-  private queueQuestion(question: string, totalIterations: number): Promise<ChapoLoopResult> {
-    return this.gateManager.queueQuestion(question, totalIterations);
+  private queueQuestion(
+    question: string,
+    totalIterations: number,
+    options?: QueueQuestionOptions,
+  ): Promise<ChapoLoopResult> {
+    return this.gateManager.queueQuestion(question, totalIterations, options);
   }
 
   private queueApproval(

@@ -275,18 +275,16 @@ export function ChatUI({
         ]);
         break;
       }
-      case 'inbox_classified': {
-        setToolEvents((prev) => [
-          ...prev,
-          {
-            id: String(event.messageId || crypto.randomUUID()),
-            type: 'status',
-            name: 'inbox',
-            result: `${String(event.classification)}: ${String(event.summary)}`,
-            completed: true,
-            agent: 'chapo' as AgentName,
-          },
-        ]);
+      case 'partial_response': {
+        const partialMessage: ChatMessage = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: String((event as Record<string, unknown>).message || ''),
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, partialMessage]);
+        freezeToolEvents(partialMessage.id);
+        // Keep isLoading true — loop is still running
         break;
       }
     }
@@ -323,9 +321,15 @@ export function ChatUI({
         session.setSessionId(response.sessionId);
         await saveSetting('lastSessionId', response.sessionId);
       }
-      setMessages((prev) => [...prev, response.message]);
       await session.refreshSessions(response.sessionId);
-      return { message: response.message, sessionId: response.sessionId };
+
+      const responseMessage = response.message;
+      if (!responseMessage) {
+        return null;
+      }
+
+      setMessages((prev) => [...prev, responseMessage]);
+      return { message: responseMessage, sessionId: response.sessionId };
     };
 
     try {

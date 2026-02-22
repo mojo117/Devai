@@ -172,6 +172,10 @@ export interface UserQuestion {
   context?: string;
   fromAgent: AgentName;
   timestamp: string;
+  turnId?: string;
+  questionKind?: 'continue' | 'clarification' | 'generic';
+  fingerprint?: string;
+  expiresAt?: string;
 }
 
 export interface UserResponse {
@@ -179,6 +183,27 @@ export interface UserResponse {
   answer: string;
   selectedOption?: string;
   timestamp: string;
+}
+
+export type ObligationType = 'user_request' | 'delegation' | 'plan_task';
+export type ObligationStatus = 'open' | 'satisfied' | 'waived' | 'failed';
+export type ObligationOrigin = 'primary' | 'inbox' | 'delegation' | 'plan';
+
+export interface SessionObligation {
+  obligationId: string;
+  type: ObligationType;
+  description: string;
+  requiredOutcome?: string;
+  sourceAgent: AgentName;
+  status: ObligationStatus;
+  evidence: string[];
+  fingerprint?: string;
+  turnId?: string;
+  origin?: ObligationOrigin;
+  blocking?: boolean;
+  createdAt: string;
+  resolvedAt?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ApprovalRequest {
@@ -236,6 +261,9 @@ export interface ConversationState {
   tasks: PlanTask[];
   taskOrder: string[]; // Ordered list of taskIds
 
+  // Lightweight obligation ledger (coverage guard)
+  obligations: SessionObligation[];
+
   // Multi-message state
   isLoopRunning: boolean;
 }
@@ -249,13 +277,20 @@ export interface GatheredInfo {
 
   // Context blocks (cached per session)
   devaiMdBlock?: string;
+  devaiMdSourcePath?: string;
   claudeMdBlock?: string;
+  claudeMdSourcePaths?: string[];
   workspaceMdBlock?: string;
+  workspaceMdSourcePaths?: string[];
   workspaceMdMode?: string;
   workspaceMdDiagnostics?: unknown;
   globalContextBlock?: string;
+  globalContextSource?: string;
   memoryBlock?: string;
   memoryQualityBlock?: string;
+  memoryNamespaces?: string[];
+  memoryRetrievedHits?: number;
+  activeTurnId?: string;
 
   // Request qualification
   taskComplexity?: string;
@@ -381,10 +416,11 @@ export type AgentStreamEvent =
   | { type: 'scout_tool'; tool: string }
   | { type: 'scout_complete'; summary: ScoutResult }
   | { type: 'scout_error'; error: string }
+  // Intermediate response events
+  | { type: 'partial_response'; message: string; inReplyTo?: string }
   // Inbox events
   | { type: 'message_queued'; messageId: string; preview: string }
-  | { type: 'inbox_processing'; count: number }
-  | { type: 'inbox_classified'; messageId: string; classification: 'parallel' | 'amendment' | 'expansion'; summary: string };
+  | { type: 'inbox_processing'; count: number };
 
 // Agent Response
 export interface AgentResponse {
@@ -526,6 +562,15 @@ export interface WebFinding {
   title: string;
   url: string;
   relevance: string;
+  claim?: string;
+  evidence?: Array<{
+    url: string;
+    snippet?: string;
+    publishedAt?: string;
+  }>;
+  freshness?: string;
+  confidence?: ScoutConfidence;
+  gaps?: string[];
 }
 
 export interface ScoutResult {

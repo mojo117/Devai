@@ -13,6 +13,7 @@ import {
   parseParallelDelegations,
   type ParallelDelegation,
 } from './delegationUtils.js';
+import type { QueueQuestionOptions } from './gateManager.js';
 import {
   buildDelegationDecisionPath,
   buildDelegationThinkingStatus,
@@ -44,7 +45,11 @@ interface ToolExecutorDeps {
   iteration: number;
   sendEvent: (event: AgentStreamEvent) => void;
   errorHandler: AgentErrorHandler;
-  queueQuestion: (question: string, totalIterations: number) => Promise<ChapoLoopResult>;
+  queueQuestion: (
+    question: string,
+    totalIterations: number,
+    options?: QueueQuestionOptions,
+  ) => Promise<ChapoLoopResult>;
   queueApproval: (
     description: string,
     riskLevel: RiskLevel,
@@ -63,9 +68,82 @@ export class ChapoToolExecutor {
   constructor(private deps: ToolExecutorDeps) {}
 
   async execute(toolCall: ToolCallLike): Promise<ToolCallOutcome> {
-    // ACTION: ASK — pause loop, wait for user
+    // ACTION: RESPOND — send intermediate response, continue loop
+    if (toolCall.name === 'respondToUser') {
+      const message = (toolCall.arguments.message as string) || '';
+      const inReplyTo = toolCall.arguments.inReplyTo as string | undefined;
+
+      // Add to conversation context so CHAPO knows what was already answered
+      // (This is NOT an early return — the loop continues)
+
+      // Emit partial_response event for frontend
+      this.deps.sendEvent({
+        type: 'partial_response',
+        message,
+        inReplyTo,
+      });
+
+      // Satisfy matching inbox obligations via keyword match
+      const activeTurnId = stateManager.getActiveTurnId(this.deps.sessionId);
+      if (activeTurnId) {
+        const unresolved = stateManager.getUnresolvedObligations(this.deps.sessionId, {
+          turnId: activeTurnId,
+          blockingOnly: true,
+        });
+        const inboxObligations = unresolved.filter((o) => o.origin === 'inbox');
+        const responseLower = message.toLowerCase();
+        for (const obligation of inboxObligations) {
+          const keywords = (obligation.requiredOutcome || obligation.description)
+            .toLowerCase()
+            .split(/\s+/)
+            .filter((w) => w.length > 3);
+          const matchCount = keywords.filter((kw) => responseLower.includes(kw)).length;
+          if (keywords.length > 0 && matchCount >= Math.ceil(keywords.length * 0.3)) {
+            stateManager.satisfyObligation(
+              this.deps.sessionId,
+              obligation.obligationId,
+              `Covered by respondToUser: ${message.slice(0, 200)}`,
+            );
+          }
+        }
+      }
+
+      return {
+        toolResult: {
+          toolUseId: toolCall.id,
+          result: 'delivered',
+          isError: false,
+        },
+      };
+    }
+
+    // ACTION: ASK — pause loop (blocking) or continue (non-blocking)
     if (toolCall.name === 'askUser') {
       const question = (toolCall.arguments.question as string) || 'Kannst du das genauer beschreiben?';
+      const blocking = toolCall.arguments.blocking !== false; // default true
+
+      if (!blocking) {
+        // Non-blocking: emit question to user, continue loop
+        this.deps.sendEvent({
+          type: 'user_question',
+          question: {
+            questionId: `nb-${toolCall.id}`,
+            question,
+            fromAgent: 'chapo',
+            options: toolCall.arguments.options as string[] | undefined,
+            timestamp: new Date().toISOString(),
+          },
+        });
+        return {
+          toolResult: {
+            toolUseId: toolCall.id,
+            result: 'Frage gesendet, arbeite weiter. Antwort kommt via Inbox.',
+            isError: false,
+          },
+        };
+      }
+
+      // Blocking: pause loop, wait for user reply (existing behavior)
       const earlyReturn = await this.deps.queueQuestion(question, this.deps.iteration + 1);
       return { earlyReturn };
     }
@@ -83,6 +161,17 @@ export class ChapoToolExecutor {
         };
       }
 
+      const delegationObligations = delegations.map((delegation) =>
+        stateManager.addOrReuseDelegationObligation(this.deps.sessionId, {
+          target: delegation.target,
+          domain: delegation.domain,
+          objective: delegation.objective,
+          expectedOutcome: delegation.expectedOutcome,
+        }, {
+          turnId: stateManager.getActiveTurnId(this.deps.sessionId) || undefined,
+        })
+      );
+
       this.deps.emitDecisionPath({
         path: 'tool',
         reason: `Unabhaengige Teilaufgaben werden parallel delegiert (${delegations.length}).`,
@@ -96,7 +185,7 @@ export class ChapoToolExecutor {
         status: `Delegiere parallel (${delegations.length} Aufgaben)...`,
       });
 
-      const [parallelSummary, parallelErr] = await this.deps.errorHandler.safe(
+      const [parallelResult, parallelErr] = await this.deps.errorHandler.safe(
         `delegate:parallel:${this.deps.iteration}`,
         () => runParallelDelegations(
           this.deps.getDelegationRunnerDeps(),
@@ -106,6 +195,13 @@ export class ChapoToolExecutor {
       );
 
       if (parallelErr) {
+        for (const obligation of delegationObligations) {
+          stateManager.failObligation(
+            this.deps.sessionId,
+            obligation.obligationId,
+            `Parallel delegation failed: ${parallelErr.message}`,
+          );
+        }
         return {
           toolResult: {
             toolUseId: toolCall.id,
@@ -115,18 +211,40 @@ export class ChapoToolExecutor {
         };
       }
 
+      for (const [index, obligation] of delegationObligations.entries()) {
+        const result = parallelResult.results[index];
+        if (result?.success) {
+          const evidence = (result.result || result.loopResult?.summary || 'Parallel delegation completed.')
+            .toString()
+            .slice(0, 300);
+          stateManager.satisfyObligation(
+            this.deps.sessionId,
+            obligation.obligationId,
+            evidence,
+          );
+        } else {
+          const evidence = (result?.error || 'Parallel delegation failed').toString().slice(0, 300);
+          stateManager.failObligation(
+            this.deps.sessionId,
+            obligation.obligationId,
+            evidence,
+          );
+        }
+      }
+
+      const failedCount = parallelResult.results.filter((entry) => !entry.success).length;
       this.deps.sendEvent({
         type: 'tool_result',
         agent: 'chapo',
         toolName: toolCall.name,
         result: { delegated: true, parallel: delegations.length },
-        success: true,
+        success: failedCount === 0,
       });
       return {
         toolResult: {
           toolUseId: toolCall.id,
-          result: parallelSummary,
-          isError: false,
+          result: parallelResult.summary,
+          isError: failedCount > 0,
         },
       };
     }
@@ -135,6 +253,14 @@ export class ChapoToolExecutor {
     const delegationTarget = resolveDelegationTarget(toolCall.name);
     if (delegationTarget) {
       const delegation = buildDelegation(delegationTarget, toolCall.arguments);
+      const delegationObligation = stateManager.addOrReuseDelegationObligation(this.deps.sessionId, {
+        target: delegation.target,
+        domain: delegation.domain,
+        objective: delegation.objective,
+        expectedOutcome: delegation.expectedOutcome,
+      }, {
+        turnId: stateManager.getActiveTurnId(this.deps.sessionId) || undefined,
+      });
       this.deps.emitDecisionPath(buildDelegationDecisionPath(delegation));
 
       this.deps.sendEvent({
@@ -149,6 +275,11 @@ export class ChapoToolExecutor {
       );
 
       if (delegationErr) {
+        stateManager.failObligation(
+          this.deps.sessionId,
+          delegationObligation.obligationId,
+          `${delegation.target.toUpperCase()} error: ${delegationErr.message}`,
+        );
         return {
           toolResult: {
             toolUseId: toolCall.id,
@@ -156,6 +287,20 @@ export class ChapoToolExecutor {
             isError: true,
           },
         };
+      }
+
+      if (delegationResult.status === 'success' || delegationResult.status === 'partial') {
+        stateManager.satisfyObligation(
+          this.deps.sessionId,
+          delegationObligation.obligationId,
+          delegationResult.summary.slice(0, 300),
+        );
+      } else {
+        stateManager.failObligation(
+          this.deps.sessionId,
+          delegationObligation.obligationId,
+          delegationResult.summary.slice(0, 300),
+        );
       }
 
       const envelope = this.deps.buildVerificationEnvelope(delegation, delegationResult);

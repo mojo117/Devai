@@ -26,6 +26,7 @@ import { pushToInbox } from '../../agents/inbox.js';
 import { SessionLogger } from '../../audit/sessionLogger.js';
 import {
   createSession,
+  ensureSessionExists,
   getMessages,
   updateSessionTitleIfEmpty,
 } from '../../db/queries.js';
@@ -34,8 +35,12 @@ import {
   getState,
   getOrCreateState,
   setGatheredInfo,
+  setActiveTurnId,
+  getActiveTurnId,
   setPhase,
   isLoopActive,
+  addUserRequestObligations,
+  waiveObligationsExceptTurn,
 } from '../../agents/stateManager.js';
 import { config } from '../../config.js';
 import type { ChatMessage } from '@devai/shared';
@@ -43,6 +48,7 @@ import { buildUserfileContext } from '../../services/userfileContext.js';
 import type { ContentBlock, TextContentBlock } from '../../llm/types.js';
 import { buildConversationHistoryContext } from '../../agents/conversationHistory.js';
 import { createCollectingBridge, persistAndEmitTerminalResponse } from './eventBridge.js';
+import { classifyInboundText } from '../../agents/intakeClassifier.js';
 
 /** Result returned after dispatching a command. */
 export type DispatchResult =
@@ -122,11 +128,34 @@ export class CommandHandlers {
     }
 
     const activeSessionId = command.sessionId || (await createSession()).id;
+    const initialTitle = buildSessionTitle(message) || undefined;
+    await ensureSessionExists(activeSessionId, initialTitle);
     opts.joinSession(activeSessionId);
     await ensureStateLoaded(activeSessionId);
+    const stateSnapshot = getState(activeSessionId);
+    const pendingApprovals = stateSnapshot?.pendingApprovals ?? [];
+    const pendingQuestions = stateSnapshot?.pendingQuestions ?? [];
+    const latestQuestion = pendingQuestions[pendingQuestions.length - 1];
+    const intake = classifyInboundText(message, {
+      hasPendingApprovals: pendingApprovals.length > 0,
+      hasPendingQuestions: pendingQuestions.length > 0,
+      latestPendingQuestion: typeof latestQuestion?.question === 'string' ? latestQuestion.question : '',
+    });
+    setGatheredInfo(activeSessionId, 'requestIntakeKind', intake.kind);
+    setGatheredInfo(activeSessionId, 'requestIntakeReason', intake.reason);
 
     // Multi-message: if a loop is already running, queue instead of starting a new one
     if (isLoopActive(activeSessionId)) {
+      const activeTurnId = getActiveTurnId(activeSessionId) || command.requestId;
+      const queuedObligationCount = intake.shouldCreateObligation
+        ? addUserRequestObligations(activeSessionId, message, {
+          turnId: activeTurnId,
+          origin: 'inbox',
+          blocking: true,
+        }).length
+        : 0;
+      setGatheredInfo(activeSessionId, 'queuedObligationCount', queuedObligationCount);
+      setGatheredInfo(activeSessionId, 'queuedIntakeKind', intake.kind);
       const inboxMsg: InboxMessage = {
         id: nanoid(),
         content: typeof command.message === 'string' ? command.message : '[multimodal content]',
@@ -147,6 +176,25 @@ export class CommandHandlers {
       preState.pendingQuestions = [];
       setPhase(activeSessionId, 'idle');
     }
+
+    // Fresh explicit request => start a new turn and waive unresolved obligations from older turns.
+    const turnId = command.requestId;
+    setActiveTurnId(activeSessionId, turnId);
+    const waivedCount = waiveObligationsExceptTurn(
+      activeSessionId,
+      turnId,
+      `Waived: superseded by explicit request turn ${turnId}.`,
+    );
+    setGatheredInfo(activeSessionId, 'waivedObligationCount', waivedCount);
+    setGatheredInfo(activeSessionId, 'activeTurnId', turnId);
+    const seededObligationCount = intake.shouldCreateObligation
+      ? addUserRequestObligations(activeSessionId, message, {
+        turnId,
+        origin: 'primary',
+        blocking: true,
+      }).length
+      : 0;
+    setGatheredInfo(activeSessionId, 'obligationCount', seededObligationCount);
 
     const historyMessages = await getMessages(activeSessionId);
     const recentHistory = buildConversationHistoryContext(historyMessages);
@@ -276,6 +324,7 @@ export class CommandHandlers {
     opts: DispatchOptions,
   ): Promise<DispatchResult> {
     opts.joinSession(command.sessionId);
+    await ensureSessionExists(command.sessionId);
     await ensureStateLoaded(command.sessionId);
 
     // Emit gate resolution event (for audit trail — state is still handled by router directly)
@@ -314,6 +363,7 @@ export class CommandHandlers {
     opts: DispatchOptions,
   ): Promise<DispatchResult> {
     opts.joinSession(command.sessionId);
+    await ensureSessionExists(command.sessionId);
     await ensureStateLoaded(command.sessionId);
 
     // Emit gate resolution event (for audit trail)
@@ -352,6 +402,7 @@ export class CommandHandlers {
     opts: DispatchOptions,
   ): Promise<DispatchResult> {
     opts.joinSession(command.sessionId);
+    await ensureSessionExists(command.sessionId);
     await ensureStateLoaded(command.sessionId);
 
     // Emit gate resolution event (for audit/state projections)

@@ -464,15 +464,6 @@ export const InboxEvents = {
     type: 'inbox_processing' as const,
     count,
   }),
-
-  /** CHAPO classified an inbox message */
-  classified: (sessionId: string, messageId: string, classification: 'parallel' | 'amendment' | 'expansion', summary: string) => ({
-    ...createBaseEvent('inbox', sessionId),
-    type: 'inbox_classified' as const,
-    messageId,
-    classification,
-    summary,
-  }),
 };
 
 // ============================================

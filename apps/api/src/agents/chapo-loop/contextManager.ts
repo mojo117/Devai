@@ -38,31 +38,22 @@ export class ChapoLoopContextManager {
     this.originalUserMessage = userMessage;
   }
 
-  checkInbox(): void {
-    if (!this.hasInboxMessages) return;
+  checkInbox(): boolean {
+    if (!this.hasInboxMessages) return false;
     this.hasInboxMessages = false;
 
     const messages = drainInbox(this.sessionId);
-    if (messages.length === 0) return;
+    if (messages.length === 0) return false;
 
-    const inboxBlock = messages
-      .map(
-        (m, i) => `[New message #${i + 1} from user while you were working]: "${m.content}"`,
-      )
-      .join('\n');
-
-    this.conversation.addMessage({
-      role: 'system',
-      content:
-        `${inboxBlock}\n\n` +
-        `Classify each new message:\n` +
-        `- PARALLEL: Independent task -> use delegateParallel or handle after current task\n` +
-        `- AMENDMENT: Replaces/changes current task -> decide: abort (if early) or finish-then-pivot\n` +
-        `- EXPANSION: Adds to current task scope -> integrate into current plan\n` +
-        `Acknowledge each message to the user in your response.`,
-    });
+    for (const msg of messages) {
+      this.conversation.addMessage({
+        role: 'user',
+        content: msg.content,
+      });
+    }
 
     this.sendEvent({ type: 'inbox_processing', count: messages.length });
+    return true;
   }
 
   async checkAndCompact(): Promise<void> {
