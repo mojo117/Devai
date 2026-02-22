@@ -258,7 +258,16 @@ export class AnswerValidator {
   }
 
   private obligationLooksAddressed(obligation: SessionObligation, answerLower: string): boolean {
+    if (!answerLower.trim()) return false;
+
     const source = (obligation.requiredOutcome || obligation.description || '').toLowerCase();
+
+    // Questions are addressed by any substantive answer — keyword echo is
+    // unreliable because factual answers rarely reuse the question's words.
+    if (this.sourceIsQuestion(source) && answerLower.trim().length >= 1) {
+      return true;
+    }
+
     const keywords = source
       .split(/[^a-z0-9äöüß]+/i)
       .map((word) => word.trim())
@@ -275,6 +284,18 @@ export class AnswerValidator {
       return matched >= 1;
     }
     return matched >= Math.max(2, Math.ceil(keywords.length * 0.4));
+  }
+
+  /** Returns true if the text looks like a question rather than an action request. */
+  private sourceIsQuestion(source: string): boolean {
+    const trimmed = source.trim();
+    // Explicit question mark
+    if (trimmed.endsWith('?')) return true;
+    // Starts with a question word (EN/DE)
+    if (/^(what|who|where|when|why|how|which|is |are |do |does |can |was |wer |wie |wo |wann |warum |welch|ist |sind |kann |hat )/.test(trimmed)) {
+      return true;
+    }
+    return false;
   }
 
   private isAmbiguousRequest(userMessage: string): boolean {
