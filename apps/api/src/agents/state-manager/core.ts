@@ -90,6 +90,8 @@ function normalizeLoadedState(sessionId: string, raw: unknown): ConversationStat
     planHistory: Array.isArray(r.planHistory) ? r.planHistory : base.planHistory,
     tasks: Array.isArray(r.tasks) ? r.tasks : base.tasks,
     taskOrder: Array.isArray(r.taskOrder) ? r.taskOrder : base.taskOrder,
+    // Loop activity is runtime-only and cannot be restored safely from DB.
+    isLoopRunning: false,
   };
 
   return merged;

@@ -14,6 +14,9 @@ import type {
   UserQuestion,
 } from '../types.js';
 
+// Runtime-only loop activity map. This must not be reconstructed from persisted state.
+const activeLoopSessions = new Set<string>();
+
 // Phase Management
 export function setPhase(sessionId: string, phase: AgentPhase): void {
   const state = getOrCreateState(sessionId);
@@ -64,11 +67,24 @@ export function setGatheredInfo(
 export function setLoopRunning(sessionId: string, running: boolean): void {
   const state = getOrCreateState(sessionId);
   state.isLoopRunning = running;
+  if (running) {
+    activeLoopSessions.add(sessionId);
+  } else {
+    activeLoopSessions.delete(sessionId);
+  }
 }
 
 export function isLoopActive(sessionId: string): boolean {
+  if (activeLoopSessions.has(sessionId)) {
+    return true;
+  }
+
+  // Self-heal stale persisted flags from older runs/restarts.
   const state = getState(sessionId);
-  return state?.isLoopRunning ?? false;
+  if (state?.isLoopRunning) {
+    state.isLoopRunning = false;
+  }
+  return false;
 }
 
 export function grantApproval(sessionId: string): void {

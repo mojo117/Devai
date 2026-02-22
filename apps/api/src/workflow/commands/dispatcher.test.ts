@@ -192,6 +192,7 @@ describe('inbox gating logic', () => {
 
   beforeEach(() => {
     clearInbox(sessionId);
+    setLoopRunning(sessionId, false);
   });
 
   it('isLoopActive returns false by default', () => {
@@ -203,6 +204,13 @@ describe('inbox gating logic', () => {
     getOrCreateState(sessionId);
     setLoopRunning(sessionId, true);
     expect(isLoopActive(sessionId)).toBe(true);
+  });
+
+  it('ignores stale persisted loop flags without an active runtime loop', () => {
+    const state = getOrCreateState(sessionId);
+    state.isLoopRunning = true; // simulate stale DB-loaded value
+    expect(isLoopActive(sessionId)).toBe(false);
+    expect(state.isLoopRunning).toBe(false); // self-healed
   });
 
   it('messages queue when loop is running', () => {

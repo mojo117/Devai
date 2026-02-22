@@ -205,7 +205,26 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
         }
 
         try {
-          await commandDispatcher.dispatch(command, { joinSession });
+          const result = await commandDispatcher.dispatch(command, { joinSession });
+          if (result.type === 'queued') {
+            // Resolve request immediately so UI doesn't wait for a terminal response
+            // while the active loop continues with queued follow-up messages.
+            socket.send(JSON.stringify({
+              type: 'response',
+              requestId,
+              response: {
+                message: {
+                  id: nanoid(),
+                  role: 'assistant',
+                  content: 'Nachricht erhalten — ich kuemmere mich darum, sobald ich mit dem aktuellen Task fertig bin.',
+                  timestamp: new Date().toISOString(),
+                },
+                pendingActions: [],
+                sessionId: result.sessionId,
+                agentHistory: getState(result.sessionId)?.agentHistory || [],
+              },
+            }));
+          }
         } catch (err) {
           console.error('[WS] Command dispatch error:', err);
           socket.send(JSON.stringify({
