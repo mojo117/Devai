@@ -2,7 +2,6 @@
  * AnswerValidator — Normalization and routing of CHAPO answers
  *
  * - Clarification detection and extraction
- * - Assumption extraction
  */
 
 import type { SessionLogger } from '../audit/sessionLogger.js';
@@ -26,12 +25,11 @@ export class AnswerValidator {
     iteration: number,
     emitDecisionPath: (insights: DecisionPathInsights) => void,
   ): Promise<ChapoLoopResult> {
-    const unresolvedAssumptions = this.extractAssumptionsFromAnswer(answer);
     emitDecisionPath({
       path: 'answer',
       reason: 'No further tool calls needed; answer delivered directly.',
       confidence: 0.8,
-      unresolvedAssumptions,
+      unresolvedAssumptions: [],
     });
 
     return {
@@ -115,17 +113,4 @@ export class AnswerValidator {
     return extracted.length > 0 && extracted.length <= 220;
   }
 
-  private extractAssumptionsFromAnswer(answer: string): string[] {
-    const assumptions = new Set<string>();
-    const text = answer.toLowerCase();
-
-    if (/(vorausgesetzt|assuming|assume|falls|if )/.test(text)) {
-      assumptions.add('Answer contains conditional assumptions.');
-    }
-    if (/(nicht verifiziert|unverified|unsicher|unclear)/.test(text)) {
-      assumptions.add('Parts of the answer are not fully verified.');
-    }
-
-    return Array.from(assumptions).slice(0, 3);
-  }
 }
