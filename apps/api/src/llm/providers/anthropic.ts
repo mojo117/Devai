@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { MessageParam, ContentBlockParam } from '@anthropic-ai/sdk/resources/messages';
 import { config } from '../../config.js';
 import type { LLMProviderAdapter, GenerateRequest, GenerateResponse, ToolDefinition, LLMMessage } from '../types.js';
+import { getTextContent } from '../types.js';
 
 export class AnthropicProvider implements LLMProviderAdapter {
   readonly name = 'anthropic' as const;
@@ -16,7 +17,10 @@ export class AnthropicProvider implements LLMProviderAdapter {
       if (!config.anthropicApiKey) {
         throw new Error('ANTHROPIC_API_KEY is not configured');
       }
-      this.client = new Anthropic({ apiKey: config.anthropicApiKey });
+      this.client = new Anthropic({
+        apiKey: config.anthropicApiKey,
+        timeout: 60_000, // 60s request timeout
+      });
     }
     return this.client;
   }
@@ -87,7 +91,7 @@ export class AnthropicProvider implements LLMProviderAdapter {
     if (role === 'assistant' && message.toolCalls?.length) {
       const content: ContentBlockParam[] = [];
       if (message.content) {
-        content.push({ type: 'text', text: message.content });
+        content.push({ type: 'text', text: getTextContent(message.content) });
       }
       for (const tc of message.toolCalls) {
         content.push({
@@ -112,7 +116,7 @@ export class AnthropicProvider implements LLMProviderAdapter {
     }
 
     // Simple text message
-    return { role, content: message.content };
+    return { role, content: getTextContent(message.content) };
   }
 
   listModels(): string[] {

@@ -1,16 +1,17 @@
 /**
  * Multi-Agent System Types
  *
- * Three agents: CHAPO (Coordinator), KODA (Developer), DEVO (DevOps)
+ * Three agents: CHAPO (Coordinator), DEVO (Developer & DevOps), SCOUT (Explorer)
  */
 
 import type { ActionPreview } from '../actions/types.js';
 
-export type AgentName = 'chapo' | 'koda' | 'devo' | 'scout';
+export type AgentName = 'chapo' | 'devo' | 'scout' | 'caio';
 
-export type AgentRole = 'Task Coordinator' | 'Senior Developer' | 'DevOps Engineer' | 'Exploration Specialist';
+export type AgentRole = 'Task Coordinator' | 'Developer & DevOps Engineer' | 'Exploration Specialist' | 'Communications & Administration Officer';
 
 export type TaskType = 'code_change' | 'devops' | 'exploration' | 'mixed' | 'unclear';
+export type DelegationDomain = 'development' | 'communication' | 'research';
 
 export type RiskLevel = 'low' | 'medium' | 'high';
 
@@ -19,7 +20,7 @@ export type TaskComplexity = 'simple' | 'moderate' | 'complex';
 // Smart model selection - for performance optimization
 export type TaskComplexityLevel = 'trivial' | 'simple' | 'moderate' | 'complex';
 
-export type LLMProviderName = 'anthropic' | 'openai' | 'gemini';
+export type LLMProviderName = 'anthropic' | 'openai' | 'gemini' | 'zai';
 
 export interface ModelSelection {
   provider: LLMProviderName;
@@ -33,9 +34,8 @@ export interface ModelTier {
 }
 
 export type AgentPhase =
+  | 'idle'
   | 'qualification'
-  | 'planning'              // Multi-perspective planning phase
-  | 'waiting_plan_approval' // Waiting for user to approve plan
   | 'execution'
   | 'review'
   | 'error'
@@ -68,12 +68,16 @@ export interface AgentCapabilities {
   canGitPush?: boolean;
   canTriggerWorkflows?: boolean;
   canManagePM2?: boolean;
-  canDelegateToKoda?: boolean;
   canDelegateToDevo?: boolean;
   canDelegateToScout?: boolean;
   canAskUser?: boolean;
   canRequestApproval?: boolean;
   canEscalate?: boolean;
+  canManageScheduler?: boolean;
+  canSendNotifications?: boolean;
+  canSendEmail?: boolean;
+  canManageTaskForge?: boolean;
+  canDelegateToCaio?: boolean;
 }
 
 // Task Qualification
@@ -101,6 +105,8 @@ export interface GatheredContext {
   projectInfo?: Record<string, unknown>;
   // Delegation context (when CHAPO delegates to another agent)
   delegationTask?: string;
+  delegationDomain?: DelegationDomain;
+  delegationObjective?: string;
   delegationContext?: unknown;
   delegationFiles?: string[];
 }
@@ -164,6 +170,10 @@ export interface UserQuestion {
   context?: string;
   fromAgent: AgentName;
   timestamp: string;
+  turnId?: string;
+  questionKind?: 'continue' | 'clarification' | 'generic';
+  fingerprint?: string;
+  expiresAt?: string;
 }
 
 export interface UserResponse {
@@ -200,6 +210,20 @@ export interface ApprovalResponse {
   timestamp: string;
 }
 
+// Session Inbox
+export interface InboxMessage {
+  id: string;
+  content: string;
+  receivedAt: Date;
+  acknowledged: boolean;
+  source: 'websocket' | 'telegram';
+}
+
+export interface TodoItem {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}
+
 // Conversation State
 export interface ConversationState {
   sessionId: string;
@@ -211,20 +235,66 @@ export interface ConversationState {
   pendingQuestions: UserQuestion[];
   parallelExecutions: ParallelExecution[];
 
-  // Plan Mode state
-  currentPlan?: ExecutionPlan;
-  planHistory: ExecutionPlan[];
+  todos: TodoItem[];
 
-  // Task Tracking state
-  tasks: PlanTask[];
-  taskOrder: string[]; // Ordered list of taskIds
+  // Multi-message state
+  isLoopRunning: boolean;
+}
+
+export interface GatheredInfo {
+  // Project context
+  projectRoot?: string;
+  claudeMdProjectRoot?: string;
+  platform?: string;
+  uiHost?: string;
+
+  // Context blocks (cached per session)
+  devaiMdBlock?: string;
+  devaiMdSourcePath?: string;
+  claudeMdBlock?: string;
+  claudeMdSourcePaths?: string[];
+  workspaceMdBlock?: string;
+  workspaceMdSourcePaths?: string[];
+  workspaceMdMode?: string;
+  workspaceMdDiagnostics?: unknown;
+  globalContextBlock?: string;
+  globalContextSource?: string;
+  memoryBlock?: string;
+  memoryQualityBlock?: string;
+  memoryNamespaces?: string[];
+  memoryRetrievedHits?: number;
+  activeTurnId?: string;
+
+  // Request qualification
+  taskComplexity?: string;
+  modelSelection?: unknown;
+  trustMode?: string;
+
+  // Workspace/channel modes
+  workspaceContextMode?: string;
+  chatMode?: string;
+  sessionMode?: string;
+  visibility?: string;
+
+  // Delegation tracking
+  lastDelegation?: {
+    from: string;
+    to: string;
+    task: string;
+    domain: string;
+    objective: string;
+    constraints: string[];
+  };
+
+  // Allow additional keys for forward compatibility
+  [key: string]: unknown;
 }
 
 export interface TaskContext {
   originalRequest: string;
   qualificationResult?: QualificationResult;
   gatheredFiles: string[];
-  gatheredInfo: Record<string, unknown>;
+  gatheredInfo: GatheredInfo;
   approvalGranted: boolean;
   approvalTimestamp?: string;
 }
@@ -277,7 +347,16 @@ export type AgentStreamEvent =
   | { type: 'agent_start'; agent: AgentName; phase: AgentPhase }
   | { type: 'agent_thinking'; agent: AgentName; status: string }
   | { type: 'agent_switch'; from: AgentName; to: AgentName; reason: string }
-  | { type: 'delegation'; from: AgentName; to: AgentName; task: string }
+  | {
+      type: 'delegation';
+      from: AgentName;
+      to: AgentName;
+      task: string;
+      domain?: DelegationDomain;
+      objective?: string;
+      constraints?: string[];
+      expectedOutcome?: string;
+    }
   | { type: 'escalation'; from: AgentName; issue: EscalationIssue }
   | { type: 'tool_call'; agent: AgentName; toolName: string; args: Record<string, unknown> }
   | { type: 'tool_result'; agent: AgentName; toolName: string; result: unknown; success: boolean }
@@ -290,26 +369,17 @@ export type AgentStreamEvent =
   | { type: 'parallel_complete'; results: DelegationResult[] }
   | { type: 'agent_complete'; agent: AgentName; result: unknown }
   | { type: 'error'; agent: AgentName; error: string }
-  // Plan Mode events
-  | { type: 'plan_start'; sessionId: string }
-  | { type: 'perspective_start'; agent: AgentName }
-  | { type: 'perspective_complete'; agent: AgentName; perspective: AgentPerspective }
-  | { type: 'plan_ready'; plan: ExecutionPlan }
-  | { type: 'plan_approval_request'; plan: ExecutionPlan }
-  | { type: 'plan_approved'; planId: string }
-  | { type: 'plan_rejected'; planId: string; reason: string }
-  // Task tracking events
-  | { type: 'task_created'; task: PlanTask }
-  | { type: 'task_update'; taskId: string; status: TaskStatus; progress?: number; activeForm?: string }
-  | { type: 'task_started'; taskId: string; agent: AgentName }
-  | { type: 'task_completed'; taskId: string; result?: string }
-  | { type: 'task_failed'; taskId: string; error: string }
-  | { type: 'tasks_list'; tasks: PlanTask[] }
   // SCOUT events
   | { type: 'scout_start'; query: string; scope: ScoutScope }
   | { type: 'scout_tool'; tool: string }
   | { type: 'scout_complete'; summary: ScoutResult }
-  | { type: 'scout_error'; error: string };
+  | { type: 'scout_error'; error: string }
+  // Intermediate response events
+  | { type: 'partial_response'; message: string; inReplyTo?: string }
+  | { type: 'todo_updated'; todos: TodoItem[] }
+  // Inbox events
+  | { type: 'message_queued'; messageId: string; preview: string }
+  | { type: 'inbox_processing'; count: number };
 
 // Agent Response
 export interface AgentResponse {
@@ -324,132 +394,6 @@ export interface AgentResponse {
 }
 
 // ============================================
-// PLAN MODE TYPES
-// ============================================
-
-export type PlanStatus =
-  | 'draft'
-  | 'pending_approval'
-  | 'approved'
-  | 'rejected'
-  | 'executing'
-  | 'completed';
-
-export type EffortEstimate = 'trivial' | 'small' | 'medium' | 'large';
-
-// Base perspective interface
-export interface AgentPerspective {
-  agent: AgentName;
-  analysis: string;
-  concerns: string[];
-  recommendations: string[];
-  estimatedEffort: EffortEstimate;
-  dependencies?: string[];
-  timestamp: string;
-}
-
-// CHAPO's strategic perspective
-export interface ChapoPerspective extends AgentPerspective {
-  agent: 'chapo';
-  strategicAnalysis: string;
-  riskAssessment: RiskLevel;
-  impactAreas: string[];
-  coordinationNeeds: string[];
-}
-
-// KODA's code-focused perspective
-export interface KodaPerspective extends AgentPerspective {
-  agent: 'koda';
-  affectedFiles: string[];
-  codePatterns: string[];
-  potentialBreakingChanges: string[];
-  testingRequirements: string[];
-}
-
-// DEVO's ops-focused perspective
-export interface DevoPerspective extends AgentPerspective {
-  agent: 'devo';
-  deploymentImpact: string[];
-  rollbackStrategy: string;
-  servicesAffected: string[];
-  infrastructureChanges: string[];
-}
-
-// Combined execution plan
-export interface ExecutionPlan {
-  planId: string;
-  sessionId: string;
-  status: PlanStatus;
-
-  // Multi-perspective analysis
-  chapoPerspective: ChapoPerspective;
-  kodaPerspective?: KodaPerspective;
-  devoPerspective?: DevoPerspective;
-
-  // Synthesized plan
-  summary: string;
-  tasks: PlanTask[];
-  estimatedDuration: string;
-  overallRisk: RiskLevel;
-
-  // Approval tracking
-  createdAt: string;
-  approvedAt?: string;
-  rejectedAt?: string;
-  rejectionReason?: string;
-}
-
-// ============================================
-// TASK TRACKING TYPES
-// ============================================
-
-export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
-
-export type TaskPriority = 'critical' | 'high' | 'normal' | 'low';
-
-export interface PlanTask {
-  taskId: string;
-  planId: string;
-
-  // Task definition
-  subject: string;
-  description: string;
-  activeForm: string; // Present continuous for spinner (e.g., "Creating file...")
-
-  // Assignment and ownership
-  assignedAgent: AgentName;
-  priority: TaskPriority;
-
-  // Status tracking
-  status: TaskStatus;
-  progress?: number; // 0-100 percentage
-
-  // Dependencies
-  blockedBy: string[]; // taskIds that must complete first
-  blocks: string[];    // taskIds that are waiting on this
-
-  // Execution details
-  toolsToExecute?: PlannedToolCall[];
-  toolsExecuted?: ExecutedTool[];
-
-  // Timestamps
-  createdAt: string;
-  startedAt?: string;
-  completedAt?: string;
-
-  // Results
-  result?: string;
-  error?: string;
-}
-
-export interface PlannedToolCall {
-  toolName: string;
-  toolArgs: Record<string, unknown>;
-  description: string;
-  requiresApproval: boolean;
-}
-
-// ============================================
 // SCOUT AGENT TYPES
 // ============================================
 
@@ -461,6 +405,15 @@ export interface WebFinding {
   title: string;
   url: string;
   relevance: string;
+  claim?: string;
+  evidence?: Array<{
+    url: string;
+    snippet?: string;
+    publishedAt?: string;
+  }>;
+  freshness?: string;
+  confidence?: ScoutConfidence;
+  gaps?: string[];
 }
 
 export interface ScoutResult {
@@ -470,6 +423,55 @@ export interface ScoutResult {
   webFindings: WebFinding[];
   recommendations: string[];
   confidence: ScoutConfidence;
+}
+
+// ============================================
+// UNIFIED DELEGATION PROTOCOL (Ralph Verification)
+// ============================================
+
+export type LoopDelegationStatus = 'success' | 'partial' | 'failed' | 'escalated';
+
+export interface ToolEvidence {
+  tool: string;
+  success: boolean;
+  summary: string;
+  pendingApproval?: boolean;
+  externalId?: string;
+  nextStep?: string;
+}
+
+export interface ScoutFindings {
+  relevantFiles: string[];
+  codePatterns: Record<string, string>;
+  webFindings: WebFinding[];
+  recommendations: string[];
+  confidence: ScoutConfidence;
+}
+
+export interface LoopDelegationResult {
+  status: LoopDelegationStatus;
+  summary: string;
+  toolEvidence: ToolEvidence[];
+  escalation?: string;
+  findings?: ScoutFindings;
+}
+
+// ============================================
+// CHAPO LOOP TYPES
+// ============================================
+
+export interface ValidationResult {
+  isComplete: boolean;
+  confidence: number;
+  issues: string[];
+  suggestion?: string;
+}
+
+export interface ChapoLoopResult {
+  answer: string;
+  status: 'completed' | 'waiting_for_user' | 'error';
+  totalIterations: number;
+  question?: string; // if status === 'waiting_for_user'
 }
 
 // SCOUT-specific stream events (extend AgentStreamEvent)

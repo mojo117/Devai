@@ -1,4 +1,8 @@
 import type { WebSocket } from 'ws';
+import { triggerSessionEndExtraction } from '../memory/service.js';
+import { renderRecentFocusMd } from '../memory/recentFocusRenderer.js';
+import { cleanupSession } from '../memory/topicTagger.js';
+import { getMessages } from '../db/queries.js';
 
 /** Per-session state: connected clients, event ring buffer, sequence counter. */
 interface ChatSessionState {
@@ -36,9 +40,32 @@ export function unregisterChatClient(ws: WebSocket, sessionId: string): void {
   const session = chatSessions.get(sessionId);
   if (!session) return;
   session.clients.delete(ws);
-  if (session.clients.size === 0 && session.events.length === 0) {
-    chatSessions.delete(sessionId);
+
+  if (session.clients.size === 0) {
+    // Session ended — trigger async memory extraction
+    getMessages(sessionId).then((messages) => {
+      if (messages.length < 3) return; // Skip trivial sessions
+      const conversationText = messages
+        .map((m: { role: string; content: string }) => `[${m.role}]: ${m.content}`)
+        .join('\n\n');
+      triggerSessionEndExtraction(conversationText, sessionId);
+    }).catch((err) => {
+      console.error('[ChatGW] session-end extraction failed:', err);
+    });
+
+    // Render RECENT_FOCUS.md from current DB state
+    renderRecentFocusMd().catch((err) => {
+      console.error('[ChatGW] RECENT_FOCUS.md render failed:', err);
+    });
+
+    // Cleanup tagger debounce state
+    cleanupSession(sessionId);
+
+    if (session.events.length === 0) {
+      chatSessions.delete(sessionId);
+    }
   }
+
   console.log(`[ChatGW] Client unregistered from session ${sessionId}. Remaining: ${session?.clients.size ?? 0}`);
 }
 

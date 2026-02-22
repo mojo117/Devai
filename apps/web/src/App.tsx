@@ -1,46 +1,25 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ChatUI, type ToolEvent, type ChatSessionState, type ChatSessionCommand, type ChatSessionCommandEnvelope } from './components/ChatUI';
+import { ChatUI, type ChatSessionState, type ChatSessionCommand, type ChatSessionCommandEnvelope } from './components/ChatUI';
 import { type AgentName, type AgentPhase } from './components/AgentStatus';
 import { BurgerMenu } from './components/BurgerMenu';
-import { type FeedEvent, toolEventToFeedEvent } from './components/SystemFeed';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   fetchHealth,
-  fetchActions,
-  approveAction,
-  rejectAction,
-  retryAction,
 } from './api';
-import type { Action, HealthResponse } from './types';
+import type { HealthResponse } from './types';
 import { useAuth } from './hooks/useAuth';
-import { useSkills } from './hooks/useSkills';
-import { useProject } from './hooks/useProject';
 import { usePersistedSettings } from './hooks/usePersistedSettings';
 
 function App() {
   // Custom hooks for grouped state
   const auth = useAuth();
   const [error, setError] = useState<string | null>(null);
-  const handleError = useCallback((msg: string) => setError(msg), []);
 
-  const skills = useSkills(auth.isAuthed, handleError);
   const [health, setHealth] = useState<HealthResponse | null>(null);
-  const project = useProject(auth.isAuthed, health?.projectRoot, handleError);
   const settings = usePersistedSettings(auth.isAuthed);
 
-  // Actions state
-  const [actions, setActions] = useState<Action[]>([]);
-
   // UI state
-  const [contextStats, setContextStats] = useState<{
-    tokensUsed: number;
-    tokenBudget: number;
-    note?: string;
-  } | null>(null);
-  const [feedEvents, setFeedEvents] = useState<FeedEvent[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
-  const [clearFeedTrigger, setClearFeedTrigger] = useState(0);
-  const [isMobile, setIsMobile] = useState(false);
   const [activeAgent, setActiveAgent] = useState<AgentName | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>('idle');
   const [chatSessionState, setChatSessionState] = useState<ChatSessionState | null>(null);
@@ -59,80 +38,26 @@ function App() {
     setAgentPhase(phase);
   }, []);
 
-  // Mobile detection
-  useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768);
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
-  // Tool events to feed events
-  const handleToolEvents = useCallback((toolEvents: ToolEvent[]) => {
-    const newFeedEvents = toolEvents.map(toolEventToFeedEvent);
-    setFeedEvents(newFeedEvents);
-  }, []);
-
-  const handleClearFeed = useCallback(() => {
-    setFeedEvents([]);
-    setClearFeedTrigger((prev) => prev + 1);
-  }, []);
-
-  // Fetch health when authenticated
+  // Fetch health when authenticated (retry silently on failure — the ●/○ indicator shows status)
   useEffect(() => {
     if (!auth.isAuthed) return;
-    fetchHealth()
-      .then(setHealth)
-      .catch((err) => setError(err.message));
+    let cancelled = false;
+    const tryFetch = (retries: number) => {
+      fetchHealth()
+        .then((h) => { if (!cancelled) setHealth(h); })
+        .catch(() => {
+          if (!cancelled && retries > 0) {
+            setTimeout(() => tryFetch(retries - 1), 2000);
+          }
+        });
+    };
+    tryFetch(3);
+    return () => { cancelled = true; };
   }, [auth.isAuthed]);
-
-  // Poll actions
-  useEffect(() => {
-    if (!auth.isAuthed) return;
-    const interval = setInterval(() => {
-      fetchActions()
-        .then((data) => setActions(data.actions))
-        .catch(console.error);
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [auth.isAuthed]);
-
-  // Action handlers
-  const handleApprove = async (actionId: string) => {
-    try {
-      await approveAction(actionId);
-      const data = await fetchActions();
-      setActions(data.actions);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to approve');
-    }
-  };
-
-  const handleReject = async (actionId: string) => {
-    try {
-      await rejectAction(actionId);
-      const data = await fetchActions();
-      setActions(data.actions);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to reject');
-    }
-  };
-
-  const handleRetry = async (actionId: string) => {
-    try {
-      await retryAction(actionId);
-      const data = await fetchActions();
-      setActions(data.actions);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to retry');
-    }
-  };
 
   // Agent icon/phase for header
   const agentIcon = activeAgent === 'chapo'
     ? '🎯'
-    : activeAgent === 'koda'
-    ? '💻'
     : activeAgent === 'devo'
     ? '🔧'
     : activeAgent === 'scout'
@@ -222,7 +147,7 @@ function App() {
                 issueSessionCommand({ type: 'select', sessionId: v });
               }}
               disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState || chatSessionState.sessions.length === 0}
-              className="bg-devai-card border border-devai-border rounded px-2 py-1 text-xs text-devai-text max-w-[220px]"
+              className="bg-devai-card border border-devai-border rounded px-2 py-1 text-xs text-devai-text max-w-[120px] md:max-w-[220px]"
               title={chatSessionState?.sessionId || ''}
             >
               {!chatSessionState || chatSessionState.sessionsLoading ? (
@@ -240,7 +165,7 @@ function App() {
             <button
               onClick={() => issueSessionCommand({ type: 'restart' })}
               disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState?.hasMessages}
-              className="hidden md:inline text-[11px] text-devai-accent hover:text-devai-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-[11px] text-devai-accent hover:text-devai-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
               title="Save current conversation to history and start fresh"
             >
               Restart
@@ -248,7 +173,7 @@ function App() {
             <button
               onClick={() => issueSessionCommand({ type: 'new' })}
               disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState}
-              className="hidden md:inline text-[11px] text-devai-text-secondary hover:text-devai-text disabled:opacity-50"
+              className="text-[11px] text-devai-text-secondary hover:text-devai-text disabled:opacity-50"
             >
               New
             </button>
@@ -304,20 +229,16 @@ function App() {
         <div className="flex flex-col min-w-0 min-h-0 overflow-hidden flex-1 max-w-4xl mx-auto w-full">
           <ChatUI
             projectRoot={health?.projectRoot}
-            skillIds={skills.selectedSkillIds}
             allowedRoots={health?.allowedRoots}
-            pinnedFiles={settings.pinnedFiles}
             ignorePatterns={settings.ignorePatterns}
-            projectContextOverride={settings.projectContextOverride}
             onPinFile={settings.addPinnedFile}
-            onContextUpdate={(stats) => setContextStats(stats)}
-            onToolEvent={handleToolEvents}
             onLoadingChange={setChatLoading}
             onAgentChange={handleAgentChange}
-            clearFeedTrigger={clearFeedTrigger}
             showSessionControls={false}
             sessionCommand={sessionCommand}
             onSessionStateChange={setChatSessionState}
+            pinnedUserfileIds={settings.pinnedUserfileIds}
+            onPinUserfile={settings.togglePinnedUserfile}
           />
         </div>
       </div>
@@ -326,27 +247,9 @@ function App() {
       <BurgerMenu
         isOpen={menuOpen}
         onClose={() => setMenuOpen(false)}
-        allowedRoots={health?.allowedRoots}
-        skills={skills.skills}
-        selectedSkillIds={skills.selectedSkillIds}
-        skillsLoadedAt={skills.skillsLoadedAt}
-        skillsErrors={skills.skillsErrors}
-        onToggleSkill={skills.handleToggleSkill}
-        onReloadSkills={skills.handleReloadSkills}
-        skillsLoading={skills.skillsLoading}
-        projectRoot={health?.projectRoot || null}
-        projectContext={project.projectContext}
-        projectContextLoadedAt={project.projectContextLoadedAt}
-        onRefreshProject={project.handleRefreshProject}
-        projectLoading={project.projectLoading}
-        pinnedFiles={settings.pinnedFiles}
-        onUnpinFile={settings.removePinnedFile}
-        ignorePatterns={settings.ignorePatterns}
-        onUpdateIgnorePatterns={settings.setIgnorePatterns}
-        projectContextOverride={settings.projectContextOverride}
-        onUpdateProjectContextOverride={settings.setProjectContextOverride}
-        contextStats={contextStats}
-        mcpServers={health?.mcp}
+        pinnedUserfileIds={settings.pinnedUserfileIds}
+        onTogglePinUserfile={settings.togglePinnedUserfile}
+        onClearPinnedUserfiles={settings.clearPinnedUserfiles}
       />
     </div>
     </ErrorBoundary>

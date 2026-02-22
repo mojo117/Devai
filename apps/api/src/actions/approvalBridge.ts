@@ -4,9 +4,12 @@ import type { Action } from './types.js';
 import { buildActionPreview } from './preview.js';
 import { checkPermission } from '../permissions/checker.js';
 import { executeTool, type ToolExecutionResult } from '../tools/executor.js';
-import { normalizeToolName, toolRequiresConfirmation } from '../tools/registry.js';
+import { normalizeToolName, toolRequiresConfirmation, toolRegistry } from '../tools/registry.js';
+import { mcpManager } from '../mcp/index.js';
 
 export interface ApprovalBridgeOptions {
+  /** The agent requesting tool execution — used for access control */
+  agentName?: string;
   userId?: string;
   onActionPending?: (action: Action) => void | Promise<void>;
 }
@@ -39,6 +42,10 @@ function generateToolDescription(toolName: string, args: Record<string, unknown>
       return `Trigger workflow: ${args.workflow} on ${args.ref}`;
     case 'bash_execute':
       return `Execute: ${args.command}`;
+    case 'devo_exec_session_start':
+      return `Start exec session: ${args.command}`;
+    case 'devo_exec_session_write':
+      return `Write to exec session: ${args.sessionId}`;
     case 'ssh_execute':
       return `SSH to ${args.host}: ${args.command}`;
     case 'pm2_restart':
@@ -64,6 +71,22 @@ export async function executeToolWithApprovalBridge(
   options?: ApprovalBridgeOptions
 ): Promise<ApprovalBridgeExecutionResult> {
   const normalizedToolName = normalizeToolName(toolName);
+
+  // Unified agent access check — if an agentName is provided, verify the agent
+  // is allowed to use this tool before doing anything else.
+  if (options?.agentName) {
+    const agent = options.agentName;
+    const allowed =
+      toolRegistry.canAccess(agent, normalizedToolName) ||
+      mcpManager.getToolsForAgent(agent).includes(normalizedToolName);
+    if (!allowed) {
+      return {
+        success: false,
+        error: `Tool "${normalizedToolName}" is not available to ${agent}`,
+      };
+    }
+  }
+
   const permission = await checkPermission(normalizedToolName, toolArgs, options?.userId);
 
   if (!permission.allowed) {
@@ -100,8 +123,13 @@ export async function executeToolWithApprovalBridge(
 
   const needsBypass = toolRequiresConfirmation(normalizedToolName);
   if (needsBypass) {
-    return executeTool(normalizedToolName, toolArgs, { bypassConfirmation: true });
+    return executeTool(normalizedToolName, toolArgs, {
+      bypassConfirmation: true,
+      agentName: options?.agentName,
+    });
   }
 
-  return executeTool(normalizedToolName, toolArgs);
+  return executeTool(normalizedToolName, toolArgs, {
+    agentName: options?.agentName,
+  });
 }

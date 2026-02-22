@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { config } from '../../config.js';
 import type { LLMProviderAdapter, GenerateRequest, GenerateResponse, ToolDefinition, LLMMessage } from '../types.js';
+import { getTextContent } from '../types.js';
 
 export class OpenAIProvider implements LLMProviderAdapter {
   readonly name = 'openai' as const;
@@ -92,18 +93,62 @@ export class OpenAIProvider implements LLMProviderAdapter {
   }
 
   private convertTool(tool: ToolDefinition, alias?: string): OpenAI.ChatCompletionTool {
+    const sanitizedParameters = this.sanitizeJsonSchema({
+      type: 'object',
+      properties: tool.parameters.properties,
+      required: tool.parameters.required,
+    });
+
     return {
       type: 'function',
       function: {
         name: alias || tool.name,
         description: tool.description,
-        parameters: {
-          type: 'object',
-          properties: tool.parameters.properties,
-          required: tool.parameters.required,
-        },
+        parameters: sanitizedParameters,
       },
     };
+  }
+
+  /**
+   * OpenAI rejects array schemas without `items`.
+   * Some MCP tools emit incomplete JSON schema fragments, so we normalize them.
+   */
+  private sanitizeJsonSchema(value: unknown): Record<string, unknown> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {};
+    }
+
+    const schema = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+
+    for (const [key, raw] of Object.entries(schema)) {
+      if (key === 'properties' && raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        const properties = raw as Record<string, unknown>;
+        const normalizedProps: Record<string, unknown> = {};
+        for (const [propName, propSchema] of Object.entries(properties)) {
+          normalizedProps[propName] = this.sanitizeJsonSchema(propSchema);
+        }
+        out.properties = normalizedProps;
+        continue;
+      }
+
+      if (key === 'items') {
+        out.items = this.sanitizeJsonSchema(raw);
+        continue;
+      }
+
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        out[key] = this.sanitizeJsonSchema(raw);
+      } else {
+        out[key] = raw;
+      }
+    }
+
+    if (out.type === 'array' && !out.items) {
+      out.items = { type: 'string' };
+    }
+
+    return out;
   }
 
   private convertMessage(
@@ -123,7 +168,7 @@ export class OpenAIProvider implements LLMProviderAdapter {
       }));
       messages.push({
         role: 'assistant',
-        content: message.content || null,
+        content: getTextContent(message.content) || null,
         tool_calls: toolCalls,
       });
       return;
@@ -144,7 +189,7 @@ export class OpenAIProvider implements LLMProviderAdapter {
     // Simple text message
     messages.push({
       role: message.role as 'user' | 'assistant',
-      content: message.content,
+      content: getTextContent(message.content),
     });
   }
 

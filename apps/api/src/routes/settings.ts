@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getSetting, setSetting, getTrustMode, setTrustMode } from '../db/queries.js';
+import { parseOrReply400 } from './validation.js';
 import {
   getPermissionPatterns,
   addPermissionPattern,
@@ -33,15 +34,10 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/settings', async (request, reply) => {
-    const parseResult = UpdateSettingSchema.safeParse(request.body);
-    if (!parseResult.success) {
-      return reply.status(400).send({
-        error: 'Invalid request',
-        details: parseResult.error.issues,
-      });
-    }
+    const parsed = parseOrReply400(reply, UpdateSettingSchema, request.body);
+    if (!parsed) return;
 
-    const { key, value } = parseResult.data;
+    const { key, value } = parsed;
     try {
       await setSetting(key, JSON.stringify(value));
       return { key, value };
@@ -72,16 +68,11 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/settings/permissions', async (request, reply) => {
-    const parseResult = AddPatternSchema.safeParse(request.body);
-    if (!parseResult.success) {
-      return reply.status(400).send({
-        error: 'Invalid request',
-        details: parseResult.error.issues,
-      });
-    }
+    const parsed = parseOrReply400(reply, AddPatternSchema, request.body);
+    if (!parsed) return;
 
     try {
-      const pattern = await addPermissionPattern(parseResult.data);
+      const pattern = await addPermissionPattern(parsed);
       return {
         pattern,
         formatted: formatPattern(pattern),
@@ -131,17 +122,12 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
 
   // Update global context
   app.post('/settings/global-context', async (request, reply) => {
-    const parseResult = GlobalContextSchema.safeParse(request.body);
-    if (!parseResult.success) {
-      return reply.status(400).send({
-        error: 'Invalid request',
-        details: parseResult.error.issues,
-      });
-    }
+    const parsed = parseOrReply400(reply, GlobalContextSchema, request.body);
+    if (!parsed) return;
 
     try {
-      await setSetting('globalContext', JSON.stringify(parseResult.data));
-      return parseResult.data;
+      await setSetting('globalContext', JSON.stringify(parsed));
+      return parsed;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       return reply.status(500).send({ error: message });

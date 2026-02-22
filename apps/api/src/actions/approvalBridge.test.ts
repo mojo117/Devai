@@ -39,7 +39,7 @@ describe('approvalBridge', () => {
 
     const result = await executeToolWithApprovalBridge('fs_listFiles', { path: '.' });
 
-    expect(executeTool).toHaveBeenCalledWith('fs_listFiles', { path: '.' });
+    expect(executeTool).toHaveBeenCalledWith('fs_listFiles', { path: '.' }, { agentName: undefined });
     expect(result.success).toBe(true);
     expect(result.pendingApproval).toBeUndefined();
   });
@@ -115,7 +115,7 @@ describe('approvalBridge', () => {
     expect(executeTool).toHaveBeenCalledWith(
       'fs_writeFile',
       { path: 'docs/notes.txt', content: 'allowed' },
-      { bypassConfirmation: true }
+      { bypassConfirmation: true, agentName: undefined }
     );
     expect(result.success).toBe(true);
   });

@@ -3,17 +3,18 @@
  *
  * Role: Handles codebase exploration and web search tasks.
  * Returns structured JSON summaries without modifying files.
- * Can be spawned by CHAPO, KODA, or DEVO for research tasks.
+ * Can be spawned by CHAPO or DEVO for research tasks.
  */
 
 import type { AgentDefinition } from './types.js';
 import { SCOUT_SYSTEM_PROMPT } from '../prompts/scout.js';
+import { registerMetaTools, registerAgentTools } from '../tools/registry.js';
 
 export const SCOUT_AGENT: AgentDefinition = {
   name: 'scout',
   role: 'Exploration Specialist',
-  model: 'claude-sonnet-4-20250514',
-  fallbackModel: 'claude-3-5-haiku-20241022',
+  model: 'glm-4.7-flash', // ZAI GLM-4.7 Flash - FREE
+  fallbackModel: 'claude-sonnet-4-20250514',
 
   capabilities: {
     readOnly: true,
@@ -26,8 +27,12 @@ export const SCOUT_AGENT: AgentDefinition = {
     'fs_readFile',
     'fs_glob',
     'fs_grep',
+    // Read-only context documents
+    'context_searchDocuments',
     'git_status',
     'git_diff',
+    // GitHub (read-only)
+    'github_getWorkflowRunStatus',
     // Workspace memory
     'memory_remember',
     'memory_search',
@@ -35,6 +40,12 @@ export const SCOUT_AGENT: AgentDefinition = {
     // Web tools
     'web_search',
     'web_fetch',
+    'scout_search_fast',
+    'scout_search_deep',
+    'scout_site_map',
+    'scout_crawl_focused',
+    'scout_extract_schema',
+    'scout_research_bundle',
     // Escalation
     'escalateToChapo',
   ],
@@ -74,3 +85,7 @@ export const SCOUT_META_TOOLS = [
     requiresConfirmation: false,
   },
 ];
+
+// Register SCOUT's meta-tools and agent access in the unified registry
+registerMetaTools(SCOUT_META_TOOLS, 'scout');
+registerAgentTools('scout', SCOUT_AGENT.tools);

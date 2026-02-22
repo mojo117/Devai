@@ -1,4 +1,4 @@
-export type LLMProvider = 'anthropic' | 'openai' | 'gemini';
+export type LLMProvider = 'anthropic' | 'openai' | 'gemini' | 'zai';
 
 export interface ToolResult {
   toolUseId: string;
@@ -6,9 +6,21 @@ export interface ToolResult {
   isError?: boolean;
 }
 
+export interface TextContentBlock {
+  type: 'text';
+  text: string;
+}
+
+export interface ImageContentBlock {
+  type: 'image_url';
+  image_url: { url: string };
+}
+
+export type ContentBlock = TextContentBlock | ImageContentBlock;
+
 export interface LLMMessage {
   role: 'user' | 'assistant' | 'system';
-  content: string;
+  content: string | ContentBlock[];
   toolCalls?: ToolCall[];      // For assistant messages with tool calls
   toolResults?: ToolResult[];  // For user messages with tool results
 }
@@ -56,4 +68,13 @@ export interface LLMProviderAdapter {
   readonly isConfigured: boolean;
   generate(request: GenerateRequest): Promise<GenerateResponse>;
   listModels(): string[];
+}
+
+/** Extract plain text from content that may be string or ContentBlock[] */
+export function getTextContent(content: string | ContentBlock[]): string {
+  if (typeof content === 'string') return content;
+  return content
+    .filter((b): b is TextContentBlock => b.type === 'text')
+    .map((b) => b.text)
+    .join('\n');
 }

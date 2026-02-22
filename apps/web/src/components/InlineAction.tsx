@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from './ui';
 
 export interface PendingAction {
   actionId: string;
@@ -122,20 +123,23 @@ export function InlineAction({ action, onApprove, onReject }: InlineActionProps)
 
       {/* Buttons */}
       <div className="flex items-center gap-3">
-        <button
+        <Button
           onClick={handleApprove}
           disabled={isLoading}
-          className="bg-green-600 hover:bg-green-700 disabled:bg-green-800 disabled:cursor-not-allowed text-white text-sm font-medium py-1.5 px-4 rounded transition-colors"
+          size="sm"
+          className="bg-green-600 hover:bg-green-700 disabled:bg-green-800 text-white py-1.5 px-4"
         >
           {status === 'approving' ? 'Approving...' : '✓ Approve'}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
           onClick={handleReject}
           disabled={isLoading}
-          className="text-red-400 hover:text-red-300 disabled:text-red-600 disabled:cursor-not-allowed text-sm font-medium py-1.5 px-2 transition-colors"
+          size="sm"
+          className="text-red-400 hover:text-red-300 disabled:text-red-600 py-1.5 px-2"
         >
           {status === 'rejecting' ? 'Rejecting...' : '✗ Reject'}
-        </button>
+        </Button>
       </div>
     </div>
   );

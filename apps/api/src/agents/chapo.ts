@@ -2,22 +2,23 @@
  * CHAPO - Task Coordinator Agent
  *
  * Role: Analyzes incoming requests, gathers context, qualifies tasks,
- * and delegates to KODA or DEVO. Has read-only access to the codebase.
+ * and delegates to DEVO or SCOUT. Has read-only access to the codebase.
  */
 
 import type { AgentDefinition } from './types.js';
 import { CHAPO_SYSTEM_PROMPT } from '../prompts/chapo.js';
+import { registerMetaTools, registerAgentTools } from '../tools/registry.js';
 
 export const CHAPO_AGENT: AgentDefinition = {
   name: 'chapo',
   role: 'Task Coordinator',
-  model: 'claude-opus-4-5-20251101', // Claude Opus 4.5 - most capable
-  fallbackModel: 'claude-sonnet-4-20250514', // Fallback if Opus unavailable
+  model: 'glm-5', // ZAI GLM-5 - primary (cost-optimized)
+  fallbackModel: 'claude-opus-4-5-20251101', // Fallback to Opus
 
   capabilities: {
     readOnly: true,
-    canDelegateToKoda: true,
     canDelegateToDevo: true,
+    canDelegateToCaio: true,
     canDelegateToScout: true,
     canAskUser: true,
     canRequestApproval: true,
@@ -29,6 +30,9 @@ export const CHAPO_AGENT: AgentDefinition = {
     'fs_readFile',
     'fs_glob',
     'fs_grep',
+    // Web tools (read-only research)
+    'web_search',
+    'web_fetch',
     // Git status (read-only)
     'git_status',
     'git_diff',
@@ -40,12 +44,20 @@ export const CHAPO_AGENT: AgentDefinition = {
     'memory_remember',
     'memory_search',
     'memory_readToday',
+    // Skill tools (read-only management)
+    'skill_list',
+    'skill_reload',
+    // CHAPO control tools
+    'chapo_plan_set',
     // Meta-tools for coordination
-    'delegateToKoda',
     'delegateToDevo',
+    'delegateToCaio',
+    'delegateParallel',
     'delegateToScout',
     'askUser',
     'requestApproval',
+    'todoWrite',
+    'respondToUser',
   ],
 
   systemPrompt: CHAPO_SYSTEM_PROMPT,
@@ -54,68 +66,232 @@ export const CHAPO_AGENT: AgentDefinition = {
 // Tool definitions for CHAPO-specific meta-tools
 export const CHAPO_META_TOOLS = [
   {
-    name: 'delegateToKoda',
-    description: 'Delegiere Code-Arbeit an KODA (Senior Developer). Nutze dies für: Dateien erstellen/bearbeiten/löschen, Code refactoring, neue Features implementieren.',
+    name: 'chapo_plan_set',
+    description: 'Setzt einen kurzen Ausfuehrungsplan mit Schritten, Owner und Status fuer die laufende Aufgabe.',
     parameters: {
       type: 'object',
       properties: {
-        task: {
+        title: {
           type: 'string',
-          description: 'Beschreibung der Aufgabe für KODA',
+          description: 'Plan-Titel.',
         },
-        context: {
-          type: 'object',
-          description: 'Gesammelter Kontext (relevante Dateien, Code-Snippets)',
-        },
-        files: {
+        steps: {
           type: 'array',
-          description: 'Liste relevanter Dateipfade',
-        },
-        constraints: {
-          type: 'array',
-          description: 'Einschränkungen oder besondere Anweisungen',
+          description: 'Plan-Schritte (genau 1 Schritt darf status=doing haben).',
+          items: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+                description: 'Stabile Schritt-ID (z.B. s1).',
+              },
+              text: {
+                type: 'string',
+                description: 'Kurze Aktionsbeschreibung.',
+              },
+              owner: {
+                type: 'string',
+                enum: ['chapo', 'devo', 'scout', 'caio'],
+                description: 'Zustaendiger Agent.',
+              },
+              status: {
+                type: 'string',
+                enum: ['todo', 'doing', 'done', 'blocked'],
+                description: 'Aktueller Schrittstatus.',
+              },
+            },
+            required: ['id', 'text', 'owner', 'status'],
+          },
         },
       },
-      required: ['task'],
+      required: ['title', 'steps'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'todoWrite',
+    description: 'Schreibe oder aktualisiere deine persoenliche Todo-Liste. Sende immer die KOMPLETTE Liste — sie wird jedes Mal ueberschrieben.',
+    parameters: {
+      type: 'object',
+      properties: {
+        todos: {
+          type: 'array',
+          description: 'Die komplette Todo-Liste.',
+          items: {
+            type: 'object',
+            properties: {
+              content: {
+                type: 'string',
+                description: 'Was zu tun ist.',
+              },
+              status: {
+                type: 'string',
+                enum: ['pending', 'in_progress', 'completed'],
+                description: 'Aktueller Status.',
+              },
+            },
+            required: ['content', 'status'],
+          },
+        },
+      },
+      required: ['todos'],
     },
     requiresConfirmation: false,
   },
   {
     name: 'delegateToDevo',
-    description: 'Delegiere DevOps-Arbeit an DEVO (DevOps Engineer). Nutze dies für: Git operations, npm commands, SSH, PM2, GitHub Actions.',
+    description: 'Delegiere Entwicklungs-/DevOps-Aufgaben an DEVO. Entscheide nur die Domäne und das Ziel; DEVO wählt die konkreten Tools.',
     parameters: {
       type: 'object',
       properties: {
-        task: {
+        domain: {
           type: 'string',
-          description: 'Beschreibung der Aufgabe für DEVO',
+          enum: ['development'],
+          description: 'Delegationsdomäne für DEVO.',
+        },
+        objective: {
+          type: 'string',
+          description: 'Konkretes Ziel der Delegation (ohne Toolnamen).',
         },
         context: {
           type: 'object',
-          description: 'Gesammelter Kontext (Server-Info, Git-Status)',
+          description: 'Zusätzlicher Kontext (Fakten, Rahmenbedingungen).',
         },
-        commands: {
+        contextFacts: {
           type: 'array',
-          description: 'Vorgeschlagene Befehle (optional)',
+          description: 'Optionale Faktenpunkte als Strings.',
+          items: { type: 'string' },
         },
         constraints: {
           type: 'array',
-          description: 'Einschränkungen oder besondere Anweisungen',
+          description: 'Einschränkungen/Leitplanken für die Ausführung.',
+          items: { type: 'string' },
+        },
+        expectedOutcome: {
+          type: 'string',
+          description: 'Erwartetes Ergebnis als Klartext.',
+        },
+        task: {
+          type: 'string',
+          description: 'Legacy-Feld: wird als objective interpretiert.',
         },
       },
-      required: ['task'],
+      required: ['domain', 'objective'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'delegateToCaio',
+    description: 'Delegiere Kommunikations-/Admin-Aufgaben an CAIO. Entscheide nur die Domäne und das Ziel; CAIO wählt die konkreten Tools.',
+    parameters: {
+      type: 'object',
+      properties: {
+        domain: {
+          type: 'string',
+          enum: ['communication'],
+          description: 'Delegationsdomäne für CAIO.',
+        },
+        objective: {
+          type: 'string',
+          description: 'Konkretes Ziel der Delegation (ohne Toolnamen).',
+        },
+        context: {
+          type: 'object',
+          description: 'Zusätzlicher Kontext (Fakten, Rahmenbedingungen).',
+        },
+        contextFacts: {
+          type: 'array',
+          description: 'Optionale Faktenpunkte als Strings.',
+          items: { type: 'string' },
+        },
+        constraints: {
+          type: 'array',
+          description: 'Einschränkungen/Leitplanken für die Ausführung.',
+          items: { type: 'string' },
+        },
+        expectedOutcome: {
+          type: 'string',
+          description: 'Erwartetes Ergebnis als Klartext.',
+        },
+        task: {
+          type: 'string',
+          description: 'Legacy-Feld: wird als objective interpretiert.',
+        },
+      },
+      required: ['domain', 'objective'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'delegateParallel',
+    description: 'Führe mehrere unabhängige Delegationen parallel aus (DEVO/CAIO/SCOUT). Nur nutzen, wenn keine harte Datenabhängigkeit zwischen den Teilaufgaben besteht.',
+    parameters: {
+      type: 'object',
+      properties: {
+        delegations: {
+          type: 'array',
+          description: 'Liste der Delegationen',
+          items: {
+            type: 'object',
+            properties: {
+              agent: {
+                type: 'string',
+                enum: ['devo', 'caio', 'scout'],
+                description: 'Ziel-Agent',
+              },
+              domain: {
+                type: 'string',
+                enum: ['development', 'communication', 'research'],
+                description: 'Delegationsdomäne für diesen Teilauftrag.',
+              },
+              objective: {
+                type: 'string',
+                description: 'Ziel/Aufgabe für den Ziel-Agenten (ohne Toolnamen).',
+              },
+              context: {
+                type: 'object',
+                description: 'Optionaler Zusatzkontext.',
+              },
+              constraints: {
+                type: 'array',
+                description: 'Optionale Leitplanken.',
+                items: { type: 'string' },
+              },
+              expectedOutcome: {
+                type: 'string',
+                description: 'Optionales erwartetes Ergebnis.',
+              },
+              task: {
+                type: 'string',
+                description: 'Legacy-Feld: wird als objective interpretiert.',
+              },
+            },
+            required: ['agent', 'domain', 'objective'],
+          },
+        },
+      },
+      required: ['delegations'],
     },
     requiresConfirmation: false,
   },
   {
     name: 'delegateToScout',
-    description: 'Delegiere Exploration/Recherche an SCOUT. Nutze dies für: Codebase durchsuchen, Web-Recherche, Dokumentation finden, Muster erkennen.',
+    description: 'Delegiere Exploration/Recherche an SCOUT. Entscheide Domäne + Ziel, SCOUT wählt die Recherche-Tools.',
     parameters: {
       type: 'object',
       properties: {
-        query: {
+        domain: {
+          type: 'string',
+          enum: ['research'],
+          description: 'Delegationsdomäne für SCOUT.',
+        },
+        objective: {
           type: 'string',
           description: 'Was soll SCOUT suchen/erforschen?',
+        },
+        query: {
+          type: 'string',
+          description: 'Legacy-Feld: wird als objective interpretiert.',
         },
         scope: {
           type: 'string',
@@ -123,17 +299,26 @@ export const CHAPO_META_TOOLS = [
           description: 'Wo soll gesucht werden? (default: both)',
         },
         context: {
-          type: 'string',
+          type: 'object',
           description: 'Zusätzlicher Kontext für die Suche (optional)',
         },
+        constraints: {
+          type: 'array',
+          description: 'Optionale Leitplanken für die Recherche.',
+          items: { type: 'string' },
+        },
+        expectedOutcome: {
+          type: 'string',
+          description: 'Erwartetes Ergebnis als Klartext.',
+        },
       },
-      required: ['query'],
+      required: ['domain', 'objective'],
     },
     requiresConfirmation: false,
   },
   {
     name: 'askUser',
-    description: 'Stelle dem User eine Frage bei Unklarheiten. Nutze dies BEVOR du Freigabe einholst.',
+    description: 'Stelle dem User eine Frage bei Unklarheiten. Nutze dies BEVOR du Freigabe einholst. Mit blocking=false kannst du eine Frage stellen und gleichzeitig an anderen Aufgaben weiterarbeiten.',
     parameters: {
       type: 'object',
       properties: {
@@ -141,9 +326,15 @@ export const CHAPO_META_TOOLS = [
           type: 'string',
           description: 'Die Frage an den User',
         },
+        blocking: {
+          type: 'boolean',
+          description: 'Wenn false, laueft die Loop weiter waehrend auf Antwort gewartet wird. Antwort kommt via Inbox. Default: true.',
+          default: true,
+        },
         options: {
           type: 'array',
           description: 'Mögliche Antworten (optional)',
+          items: { type: 'string' },
         },
         context: {
           type: 'string',
@@ -172,10 +363,34 @@ export const CHAPO_META_TOOLS = [
         actions: {
           type: 'array',
           description: 'Liste der geplanten Aktionen',
+          items: { type: 'object' },
         },
       },
       required: ['description', 'riskLevel'],
     },
     requiresConfirmation: false,
   },
+  {
+    name: 'respondToUser',
+    description: 'Sende eine Zwischenantwort an den User waehrend du an weiteren Aufgaben arbeitest. Nutze dies wenn du eine Aufgabe abgeschlossen hast aber noch andere Aufgaben bearbeiten musst.',
+    parameters: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          description: 'Der Antworttext fuer den User.',
+        },
+        inReplyTo: {
+          type: 'string',
+          description: 'Optional: Zitat oder Referenz auf welche User-Nachricht sich diese Antwort bezieht.',
+        },
+      },
+      required: ['message'],
+    },
+    requiresConfirmation: false,
+  },
 ];
+
+// Register CHAPO's meta-tools and agent access in the unified registry
+registerMetaTools(CHAPO_META_TOOLS, 'chapo');
+registerAgentTools('chapo', CHAPO_AGENT.tools);

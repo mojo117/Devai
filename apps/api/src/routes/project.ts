@@ -4,9 +4,14 @@ import { config } from '../config.js';
 import { getProjectContext, clearProjectCache } from '../scanner/projectScanner.js';
 import { listFiles, readFile, grepFiles, globFiles } from '../tools/fs.js';
 import fg from 'fast-glob';
-// minimatch is currently installed as a CJS default export in prod (Baso). Use default import for runtime compatibility.
-import minimatch from 'minimatch';
+import * as minimatchPkg from 'minimatch';
 import type { ProjectContext } from '@devai/shared';
+
+const minimatch = ((minimatchPkg as unknown as { minimatch?: unknown; default?: unknown }).minimatch
+  ?? (minimatchPkg as unknown as { default?: unknown }).default) as (
+  path: string,
+  pattern: string,
+) => boolean;
 
 // Validate that a path is within allowed roots
 function validateProjectPath(path: string): string {

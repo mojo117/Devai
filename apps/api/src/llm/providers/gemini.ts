@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI, Content, Tool, FunctionDeclaration, SchemaType, Part } from '@google/generative-ai';
 import { config } from '../../config.js';
 import type { LLMProviderAdapter, GenerateRequest, GenerateResponse, ToolDefinition, LLMMessage } from '../types.js';
+import { getTextContent } from '../types.js';
 
 export class GeminiProvider implements LLMProviderAdapter {
   readonly name = 'gemini' as const;
@@ -139,7 +140,7 @@ export class GeminiProvider implements LLMProviderAdapter {
     if (message.role === 'assistant' && message.toolCalls?.length) {
       const parts: Part[] = [];
       if (message.content) {
-        parts.push({ text: message.content });
+        parts.push({ text: getTextContent(message.content) });
       }
       for (const tc of message.toolCalls) {
         parts.push({
@@ -164,7 +165,7 @@ export class GeminiProvider implements LLMProviderAdapter {
     }
 
     // Simple text message
-    return { role, parts: [{ text: message.content }] };
+    return { role, parts: [{ text: getTextContent(message.content) }] };
   }
 
   listModels(): string[] {

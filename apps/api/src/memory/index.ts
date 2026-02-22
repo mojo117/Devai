@@ -1,0 +1,10 @@
+export { retrieveRelevantMemories, triggerSessionEndExtraction } from './service.js';
+export { runExtractionPipeline } from './extraction.js';
+export { compactMessages } from './compaction.js';
+export { runDecay, searchMemories } from './memoryStore.js';
+export { generateEmbedding } from './embeddings.js';
+export type { MemoryCandidate, StoredMemory, MemoryType, MemoryPriority, MemorySource } from './types.js';
+export { getActiveTopics, upsertTopic, runRecentTopicDecay } from './recentFocus.js';
+export type { RecentTopic } from './recentFocus.js';
+export { tagCurrentWork, cleanupSession } from './topicTagger.js';
+export { renderRecentFocusMd, syncManualEdits, buildRecentFocusBlock } from './recentFocusRenderer.js';

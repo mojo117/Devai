@@ -72,7 +72,10 @@ export async function executeSSH(
     host = knownHost.privateIp || knownHost.host;
     user = options?.user || knownHost.user;
   } else {
-    // Assume it's a direct host address
+    // Validate direct host: must be IP or simple hostname
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9.\-]*$/.test(hostOrAlias) || hostOrAlias.includes(' ')) {
+      throw new Error(`Invalid host: "${hostOrAlias}". Use a known alias (baso, klyde, infrit) or a valid hostname/IP.`);
+    }
     host = hostOrAlias;
     user = options?.user || 'root';
   }
@@ -81,7 +84,7 @@ export async function executeSSH(
 
   // Build SSH command
   // Using StrictHostKeyChecking=no and BatchMode=yes for non-interactive execution
-  const sshCommand = `ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=10 ${user}@${host} "${escapeCommand(command)}"`;
+  const sshCommand = `ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=10 ${user}@${host} '${escapeCommand(command)}'`;
 
   try {
     const { stdout, stderr } = await execAsync(sshCommand, {
@@ -123,11 +126,13 @@ export async function executeSSH(
 }
 
 /**
- * Escape command for SSH
+ * Escape command for SSH using single-quote wrapping to prevent shell interpretation.
  */
 function escapeCommand(command: string): string {
-  // Escape double quotes and backslashes
-  return command.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  // Use single quotes to prevent shell interpretation.
+  // Escape any single quotes within the command using the standard
+  // shell idiom: end quote, escaped quote, start quote.
+  return command.replace(/'/g, "'\\''");
 }
 
 /**

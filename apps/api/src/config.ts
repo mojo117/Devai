@@ -7,8 +7,27 @@ loadEnv({ path: resolve(process.cwd(), "../../.env") });
 // Hardcoded allowed roots for file access security
 // These paths are enforced regardless of environment variables
 const HARDCODED_ALLOWED_ROOTS: readonly string[] = [
-  "/root",   // Clawd home — projects, OpenClaw workspace
-  "/opt",    // Clawd /opt — includes /opt/Devai itself
+  "/root",   // Clawd home — projects, scripts
+  "/opt",    // Clawd /opt — project files, tools
+  "/home",   // Service home directories
+] as const;
+
+// Paths that are explicitly denied even within allowed roots
+// OpenClaw is a separate system — Devai must not read its config, credentials, or workspace
+// Devai must not be able to modify its own deployment
+const HARDCODED_DENIED_PATHS: readonly string[] = [
+  "/root/.openclaw",  // OpenClaw config, credentials, workspace — separate system
+  "/opt/Devai",       // Devai's own deployment — prevent self-modification
+] as const;
+
+// Directories/files within /opt/Devai that SCOUT must NOT read (secrets, runtime data)
+const SELF_INSPECTION_EXCLUDE: readonly string[] = [
+  '.env',
+  'secrets',
+  'var',
+  'workspace/memory',
+  '.git',
+  'node_modules',
 ] as const;
 
 export interface Config {
@@ -19,6 +38,7 @@ export interface Config {
   anthropicApiKey?: string;
   openaiApiKey?: string;
   geminiApiKey?: string;
+  zaiApiKey?: string;
 
   // GitHub
   githubToken?: string;
@@ -28,6 +48,11 @@ export interface Config {
   // Project
   projectRoot?: string;
   allowedRoots: readonly string[];
+  deniedPaths: readonly string[];
+
+  // Self-inspection: allows SCOUT to read Devai's own source (read-only, secrets excluded)
+  selfInspectionRoot: string;
+  selfInspectionExclude: string[];
 
   // Skills
   skillsDir: string;
@@ -44,16 +69,43 @@ export interface Config {
   supabaseUrl: string;
   supabaseServiceKey: string;
 
+  // CAIO — TaskForge, Email, Telegram
+  taskforgeApiKeys: Record<string, string>;
+  taskforgeDefaultProject: string;
+  resendApiKey: string;
+  resendFromAddress: string;
+  telegramBotToken: string;
+  telegramAllowedChatId: string;
+
   // Persistence
   dbPath: string;
 
-  // Looper-AI
+  // Decision loop runtime tuning (legacy LOOPER_* env var names retained)
   looperMaxIterations: number;
   looperMaxConversationTokens: number;
   looperMaxToolRetries: number;
   looperMinValidationConfidence: number;
   looperSelfValidationEnabled: boolean;
 
+  // Memory retrieval tuning
+  memoryRetrievalThresholds: number[];
+  memoryMinHitsBeforeStop: number;
+  memoryIncludePersonalScope: boolean;
+  contextProvenanceTags: boolean;
+  gateQuestionTtlMs: number;
+  gateQuestionDedup: boolean;
+
+}
+
+export interface EnvValidationIssue {
+  key: string;
+  reason: string;
+}
+
+export interface EnvValidationResult {
+  ok: boolean;
+  errors: EnvValidationIssue[];
+  warnings: EnvValidationIssue[];
 }
 
 export function loadConfig(): Config {
@@ -68,13 +120,25 @@ export function loadConfig(): Config {
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,
     openaiApiKey: process.env.OPENAI_API_KEY,
     geminiApiKey: process.env.GEMINI_API_KEY,
+    zaiApiKey: process.env.ZAI_API_KEY,
 
     githubToken: process.env.GITHUB_TOKEN,
     githubOwner: process.env.GITHUB_OWNER,
     githubRepo: process.env.GITHUB_REPO,
 
+    taskforgeApiKeys: buildTaskForgeKeyMap(),
+    taskforgeDefaultProject: 'devai',
+    resendApiKey: process.env.RESEND_API_KEY || '',
+    resendFromAddress: process.env.RESEND_FROM_ADDRESS || '',
+    telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
+    telegramAllowedChatId: process.env.TELEGRAM_ALLOWED_CHAT_ID || '',
+
     projectRoot: undefined, // Disabled - use allowedRoots only
     allowedRoots,
+    deniedPaths: HARDCODED_DENIED_PATHS,
+
+    selfInspectionRoot: '/opt/Devai',
+    selfInspectionExclude: [...SELF_INSPECTION_EXCLUDE],
 
     skillsDir: process.env.SKILLS_DIR || resolve(process.cwd(), "../../skills"),
 
@@ -96,17 +160,110 @@ export function loadConfig(): Config {
 
     dbPath: process.env.DB_PATH || resolve(process.cwd(), "../../var/devai.db"),
 
-    // Looper-AI
+    // Decision loop runtime tuning (legacy env names for compatibility)
     looperMaxIterations: parseInt(process.env.LOOPER_MAX_ITERATIONS || "25", 10),
-    looperMaxConversationTokens: parseInt(process.env.LOOPER_MAX_CONVERSATION_TOKENS || "120000", 10),
+    looperMaxConversationTokens: parseInt(process.env.LOOPER_MAX_CONVERSATION_TOKENS || "180000", 10),
     looperMaxToolRetries: parseInt(process.env.LOOPER_MAX_TOOL_RETRIES || "3", 10),
     looperMinValidationConfidence: parseFloat(process.env.LOOPER_MIN_VALIDATION_CONFIDENCE || "0.7"),
     looperSelfValidationEnabled: process.env.LOOPER_SELF_VALIDATION !== "false",
+    memoryRetrievalThresholds: parseNumberList(
+      process.env.MEMORY_RETRIEVAL_THRESHOLDS,
+      [0.5, 0.35, 0.2],
+      { min: 0, max: 1, sortDesc: true },
+    ),
+    memoryMinHitsBeforeStop: Math.max(1, parseInt(process.env.MEMORY_MIN_HITS_BEFORE_STOP || "3", 10)),
+    memoryIncludePersonalScope: process.env.MEMORY_INCLUDE_PERSONAL_SCOPE !== "false",
+    contextProvenanceTags: process.env.CONTEXT_PROVENANCE_TAGS !== "false",
+    gateQuestionTtlMs: Math.max(0, parseInt(process.env.GATE_QUESTION_TTL_MS || "600000", 10)),
+    gateQuestionDedup: process.env.GATE_QUESTION_DEDUP !== "false",
 
   };
 }
 
 export const config = loadConfig();
+
+export function validateRequiredEnv(currentConfig: Config = config): EnvValidationResult {
+  const errors: EnvValidationIssue[] = [];
+  const warnings: EnvValidationIssue[] = [];
+
+  const hasAnyLlmProvider = Boolean(
+    currentConfig.zaiApiKey ||
+    currentConfig.anthropicApiKey ||
+    currentConfig.openaiApiKey ||
+    currentConfig.geminiApiKey,
+  );
+
+  if (!currentConfig.supabaseUrl) {
+    errors.push({
+      key: 'DEVAI_SUPABASE_URL | SUPABASE_URL',
+      reason: 'Supabase project URL is required for sessions, auth, scheduler, and memory.',
+    });
+  }
+
+  if (!currentConfig.supabaseServiceKey) {
+    errors.push({
+      key: 'DEVAI_SUPABASE_SERVICE_ROLE_KEY | SUPABASE_SERVICE_ROLE_KEY | SUPABASE_SERVICE_KEY',
+      reason: 'Supabase service key is required for backend data access.',
+    });
+  }
+
+  if (!process.env.DEVAI_JWT_SECRET) {
+    errors.push({
+      key: 'DEVAI_JWT_SECRET',
+      reason: 'JWT signing secret is required for authentication routes.',
+    });
+  }
+
+  if (!hasAnyLlmProvider) {
+    errors.push({
+      key: 'ZAI_API_KEY | ANTHROPIC_API_KEY | OPENAI_API_KEY | GEMINI_API_KEY',
+      reason: 'At least one LLM provider key must be configured.',
+    });
+  }
+
+  if (!currentConfig.telegramBotToken) {
+    warnings.push({
+      key: 'TELEGRAM_BOT_TOKEN',
+      reason: 'Telegram notifications are disabled.',
+    });
+  }
+
+  if (!currentConfig.telegramAllowedChatId) {
+    warnings.push({
+      key: 'TELEGRAM_ALLOWED_CHAT_ID',
+      reason: 'Telegram inbound webhooks will reject all chats until allowed IDs are set.',
+    });
+  }
+
+  if (Object.keys(currentConfig.taskforgeApiKeys).length === 0) {
+    warnings.push({
+      key: 'TASKFORGE_KEY_* | DEVAI_TASKBOARD_API_KEY',
+      reason: 'TaskForge integration is disabled (no API keys configured).',
+    });
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+  };
+}
+
+function buildTaskForgeKeyMap(): Record<string, string> {
+  const map: Record<string, string> = {};
+  // Support both new per-project keys and legacy single key
+  const prefixed = Object.entries(process.env)
+    .filter(([k]) => k.startsWith('TASKFORGE_KEY_'))
+    .map(([k, v]) => [k.replace('TASKFORGE_KEY_', '').toLowerCase().replace(/_/g, '-'), v || ''] as const);
+  for (const [name, key] of prefixed) {
+    if (key) map[name] = key;
+  }
+  // Legacy fallback: DEVAI_TASKBOARD_API_KEY → 'devai'
+  if (!map.devai && process.env.DEVAI_TASKBOARD_API_KEY) {
+    map.devai = process.env.DEVAI_TASKBOARD_API_KEY;
+  }
+  return map;
+}
 
 function parseExtensions(value?: string): string[] {
   if (!value) {
@@ -133,4 +290,28 @@ function parseExtensions(value?: string): string[] {
     .map((ext) => ext.trim())
     .filter(Boolean)
     .map((ext) => (ext.startsWith(".") ? ext : `.${ext}`));
+}
+
+function parseNumberList(
+  value: string | undefined,
+  fallback: number[],
+  options: { min?: number; max?: number; sortDesc?: boolean } = {},
+): number[] {
+  const source = (value || '')
+    .split(/[;,]/)
+    .map((entry) => Number(entry.trim()))
+    .filter((entry) => Number.isFinite(entry));
+
+  const raw = source.length > 0 ? source : fallback;
+  const filtered = raw.filter((entry) => {
+    if (options.min !== undefined && entry < options.min) return false;
+    if (options.max !== undefined && entry > options.max) return false;
+    return true;
+  });
+
+  const unique = Array.from(new Set(filtered));
+  if (options.sortDesc) {
+    unique.sort((a, b) => b - a);
+  }
+  return unique.length > 0 ? unique : fallback;
 }

@@ -41,7 +41,7 @@ const SENSITIVE_KEYS = [
 ];
 
 // Recursively sanitize an object to remove sensitive data
-function sanitize(obj: unknown, depth: number = 0): unknown {
+export function sanitize(obj: unknown, depth: number = 0): unknown {
   if (depth > 10) return '[max depth]';
 
   if (obj === null || obj === undefined) {

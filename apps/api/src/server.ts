@@ -1,8 +1,12 @@
 import Fastify from 'fastify';
+import { nanoid } from 'nanoid';
 import cors from '@fastify/cors';
+import cookie from '@fastify/cookie';
+import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import fastifyWebsocket from '@fastify/websocket';
-import { config } from './config.js';
+import multipart from '@fastify/multipart';
+import { config, validateRequiredEnv } from './config.js';
 import { healthRoutes } from './routes/health.js';
 import { actionRoutes } from './routes/actions.js';
 import { projectRoutes } from './routes/project.js';
@@ -10,14 +14,53 @@ import { skillsRoutes } from './routes/skills.js';
 import { sessionsRoutes } from './routes/sessions.js';
 import { settingsRoutes } from './routes/settings.js';
 import { memoryRoutes } from './routes/memory.js';
-import { looperRoutes } from './routes/looper.js';
+import { externalRoutes } from './routes/external.js';
+import { SessionLogger } from './audit/sessionLogger.js';
+import { userfilesRoutes } from './routes/userfiles.js';
+import { transcribeRoutes } from './routes/transcribe.js';
 import { authMiddleware, registerAuthRoutes } from './routes/auth.js';
 import { initDb } from './db/index.js';
 import { websocketRoutes } from './websocket/routes.js';
 import { mcpManager } from './mcp/index.js';
 import { registerMcpTools } from './tools/registry.js';
+import { registerProjections } from './workflow/projections/index.js';
+import { refreshSkills } from './skills/registry.js';
+import { schedulerService } from './scheduler/schedulerService.js';
+import { processRequest } from './agents/router.js';
+import { loadRecentConversationHistory } from './agents/router/requestUtils.js';
+import { sendTelegramMessage } from './external/telegram.js';
+import { getAgentSoulStatusReport } from './prompts/agentSoul.js';
+import { ensureSessionExists, saveMessage } from './db/queries.js';
+import { getDefaultNotificationChannel, logSchedulerExecution } from './db/schedulerQueries.js';
+import {
+  backupLocalDbJob,
+  cleanupExpiredUserfilesJob,
+  collectSystemHealthSnapshot,
+  formatHealthAlert,
+  memoryDecayJob,
+  recentTopicDecayJob,
+} from './services/systemReliability.js';
+
+const envValidation = validateRequiredEnv(config);
+if (!envValidation.ok) {
+  console.error('[startup] Missing required environment configuration:');
+  for (const issue of envValidation.errors) {
+    console.error(`  - ${issue.key}: ${issue.reason}`);
+  }
+  process.exit(1);
+}
+
+if (envValidation.warnings.length > 0) {
+  console.warn('[startup] Optional integrations not configured:');
+  for (const issue of envValidation.warnings) {
+    console.warn(`  - ${issue.key}: ${issue.reason}`);
+  }
+}
 
 await initDb();
+
+// Register workflow event projections (state → stream → external-output → markdown → audit)
+registerProjections();
 
 const app = Fastify({
   logger: {
@@ -37,7 +80,13 @@ const corsOrigins = [
 // Register CORS for frontend
 await app.register(cors, {
   origin: corsOrigins,
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
+});
+
+// Security headers (CSP handled by Caddy + frontend meta tag)
+await app.register(helmet as any, {
+  contentSecurityPolicy: false,
 });
 
 // Global rate limiting (per IP)
@@ -50,6 +99,23 @@ await app.register(rateLimit, {
 // Register WebSocket support
 await app.register(fastifyWebsocket);
 
+// Register multipart support for file uploads (10MB limit)
+await app.register(multipart as any, { limits: { fileSize: 10 * 1024 * 1024 } });
+
+// Register cookie parsing (needed for httpOnly auth cookies)
+await app.register(cookie as any);
+
+// Global error handler — sanitize unexpected errors
+app.setErrorHandler((error: { statusCode?: number; message: string }, _request, reply) => {
+  const statusCode = error.statusCode ?? 500;
+  if (statusCode >= 500) {
+    app.log.error(error);
+    reply.status(statusCode).send({ error: 'Internal server error' });
+  } else {
+    reply.status(statusCode).send({ error: error.message });
+  }
+});
+
 // Register auth routes
 await registerAuthRoutes(app);
 
@@ -57,7 +123,12 @@ await registerAuthRoutes(app);
 app.addHook('preHandler', async (request, reply) => {
   const url = request.url || '';
   if (!url.startsWith('/api')) return;
-  if (url.startsWith('/api/health') || url.startsWith('/api/auth') || url.startsWith('/api/ws')) return;
+  if (
+    url.startsWith('/api/health') ||
+    url.startsWith('/api/auth') ||
+    url.startsWith('/api/ws') ||
+    url.startsWith('/api/telegram')
+  ) return;
   await authMiddleware(request, reply);
 });
 
@@ -69,22 +140,40 @@ await app.register(skillsRoutes, { prefix: '/api' });
 await app.register(sessionsRoutes, { prefix: '/api' });
 await app.register(settingsRoutes, { prefix: '/api' });
 await app.register(memoryRoutes, { prefix: '/api' });
-await app.register(looperRoutes, { prefix: '/api' });
+await app.register(externalRoutes, { prefix: '/api' });
 await app.register(websocketRoutes, { prefix: '/api' });
+await app.register(userfilesRoutes, { prefix: '/api' });
+await app.register(transcribeRoutes, { prefix: '/api' });
 
 // Start server
 const start = async () => {
   try {
+    SessionLogger.cleanup();
     await app.listen({ port: config.port, host: '0.0.0.0' });
     console.log(`DevAI API running on http://localhost:${config.port}`);
     console.log(`Environment: ${config.nodeEnv}`);
 
     // Log configured providers
     const providers = [];
+    if (config.zaiApiKey) providers.push('ZAI');
     if (config.anthropicApiKey) providers.push('Anthropic');
     if (config.openaiApiKey) providers.push('OpenAI');
     if (config.geminiApiKey) providers.push('Gemini');
     console.log(`Configured LLM providers: ${providers.length > 0 ? providers.join(', ') : 'None'}`);
+
+    // Log agent soul loading status (CAIO/DEVO/SCOUT)
+    const soulStatuses = getAgentSoulStatusReport();
+    for (const soul of soulStatuses) {
+      if (soul.loaded) {
+        console.log(`[Soul] ${soul.agent.toUpperCase()} loaded from ${soul.soulFile} (${soul.charCount} chars)`);
+      } else {
+        console.warn(`[Soul] ${soul.agent.toUpperCase()} missing or empty (${soul.soulFile})`);
+      }
+    }
+
+    // Load skills and register as tools
+    const skillResult = await refreshSkills();
+    console.info(`[server] Skills loaded: ${skillResult.count} skills, ${skillResult.errors.length} errors`);
 
     // Initialize MCP servers asynchronously so the API starts quickly even if MCP servers are slow.
     // This avoids long startup delays (e.g. Serena scanning large project trees).
@@ -104,6 +193,149 @@ const start = async () => {
     // Ensure shutdown waits for init to settle before trying to tear down MCP.
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
     (app as any).mcpInitPromise = mcpInitPromise;
+
+    const sendSchedulerNotification = async (message: string, targetChannel?: string | null) => {
+      let chatId = targetChannel ? String(targetChannel) : '';
+      if (!chatId) {
+        const defaultChannel = await getDefaultNotificationChannel();
+        chatId = defaultChannel?.external_chat_id || '';
+      }
+
+      if (!chatId) {
+        console.warn('[Scheduler] No Telegram target channel configured; skipping notification.');
+        return;
+      }
+
+      await sendTelegramMessage(chatId, message);
+    };
+
+    // Initialize scheduler (loads DB jobs, registers cron schedules, enables recovery loop)
+    schedulerService.configure(
+      async (instruction: string, jobId: string) => {
+        const sessionId = `scheduler-${jobId}`;
+        const now = () => new Date().toISOString();
+
+        await ensureSessionExists(sessionId, `Scheduler ${jobId}`);
+        const history = await loadRecentConversationHistory(sessionId);
+
+        await saveMessage(sessionId, {
+          id: nanoid(),
+          role: 'user',
+          content: instruction,
+          timestamp: now(),
+        });
+
+        try {
+          const result = await processRequest(
+            sessionId,
+            instruction,
+            history,
+            null,
+            () => {},
+          );
+
+          await saveMessage(sessionId, {
+            id: nanoid(),
+            role: 'assistant',
+            content: result,
+            timestamp: now(),
+          });
+
+          return result;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          await saveMessage(sessionId, {
+            id: nanoid(),
+            role: 'assistant',
+            content: `Error: ${message}`,
+            timestamp: now(),
+          });
+          throw error;
+        }
+      },
+      sendSchedulerNotification,
+    );
+    await schedulerService.start();
+
+    let lastHealthStatus: 'ok' | 'degraded' | null = null;
+    let lastHealthAlertAt = 0;
+    const HEALTH_ALERT_COOLDOWN_MS = 30 * 60 * 1000;
+
+    const runHealthWatchdog = async (): Promise<string> => {
+      const snapshot = await collectSystemHealthSnapshot();
+      const phase = snapshot.status === 'ok' ? 'success' : 'failure';
+      await logSchedulerExecution({
+        jobId: 'system-health-watchdog',
+        jobName: 'system-health-watchdog',
+        executionType: 'watchdog',
+        phase,
+        message: `Health snapshot: ${snapshot.status}`,
+        metadata: {
+          supabaseOk: snapshot.dependencies.supabase.ok,
+          schedulerRunning: snapshot.dependencies.scheduler.running,
+          configuredProviders: snapshot.llm.configuredProviders,
+        },
+      });
+
+      const now = Date.now();
+      if (snapshot.status === 'degraded') {
+        if (lastHealthStatus !== 'degraded' || now - lastHealthAlertAt >= HEALTH_ALERT_COOLDOWN_MS) {
+          app.log.warn(formatHealthAlert(snapshot));
+          lastHealthAlertAt = now;
+        }
+      } else if (lastHealthStatus === 'degraded') {
+        app.log.info(`System health recovered at ${snapshot.timestamp}`);
+      }
+
+      lastHealthStatus = snapshot.status;
+      return `Health status: ${snapshot.status}`;
+    };
+
+    // Internal maintenance jobs run through scheduler framework (cron + retry + telemetry).
+    schedulerService.registerInternalJob({
+      id: 'maintenance-userfile-cleanup',
+      name: 'Maintenance: Userfile Cleanup',
+      cronExpression: '0 3 * * *',
+      run: cleanupExpiredUserfilesJob,
+      runOnStart: true,
+      notifyOnFailure: false,
+    });
+
+    schedulerService.registerInternalJob({
+      id: 'maintenance-memory-decay',
+      name: 'Maintenance: Memory Decay',
+      cronExpression: '30 3 * * *',
+      run: memoryDecayJob,
+      runOnStart: true,
+      notifyOnFailure: false,
+    });
+
+    schedulerService.registerInternalJob({
+      id: 'maintenance-recent-topic-decay',
+      name: 'Maintenance: Recent Topic Decay',
+      cronExpression: '35 3 * * *',
+      run: recentTopicDecayJob,
+      runOnStart: true,
+      notifyOnFailure: false,
+    });
+
+    schedulerService.registerInternalJob({
+      id: 'maintenance-local-db-backup',
+      name: 'Maintenance: Local DB Backup',
+      cronExpression: '0 4 * * *',
+      run: () => backupLocalDbJob(14),
+      runOnStart: true,
+      notifyOnFailure: false,
+    });
+
+    schedulerService.registerInternalJob({
+      id: 'system-health-watchdog',
+      name: 'System Health Watchdog',
+      cronExpression: '*/5 * * * *',
+      run: runHealthWatchdog,
+      runOnStart: true,
+      notifyOnFailure: false,
+    });
   } catch (err) {
     app.log.error(err);
     process.exit(1);
@@ -113,6 +345,7 @@ const start = async () => {
 // Graceful shutdown
 const shutdown = async () => {
   console.log('Shutting down...');
+  schedulerService.stop();
   const mcpInitPromise = (app as any).mcpInitPromise as Promise<void> | undefined;
   if (mcpInitPromise) {
     try { await mcpInitPromise; } catch { /* ignore */ }

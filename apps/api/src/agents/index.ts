@@ -29,7 +29,6 @@ export type {
 
 // Agent Definitions
 export { CHAPO_AGENT, CHAPO_META_TOOLS } from './chapo.js';
-export { KODA_AGENT, KODA_META_TOOLS } from './koda.js';
 export { DEVO_AGENT, DEVO_META_TOOLS } from './devo.js';
 export { SCOUT_AGENT, SCOUT_META_TOOLS } from './scout.js';
 
@@ -60,6 +59,9 @@ export {
   setQualificationResult,
   addGatheredFile,
   setGatheredInfo,
+  setActiveTurnId,
+  getActiveTurnId,
+  ensureActiveTurnId,
   grantApproval,
   isApprovalGranted,
   getStateSummary,
@@ -76,8 +78,6 @@ export {
   // Event factories
   AgentEvents,
   ToolEvents,
-  PlanEvents,
-  TaskEvents,
   ScoutEvents,
   UserEvents,
   ParallelEvents,
