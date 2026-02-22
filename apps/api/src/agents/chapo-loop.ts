@@ -40,6 +40,7 @@ import type {
 } from './types.js';
 import type { LLMProvider, ContentBlock } from '../llm/types.js';
 import { getTextContent } from '../llm/types.js';
+import { tagCurrentWork } from '../memory/topicTagger.js';
 
 export type SendEventFn = (event: AgentStreamEvent) => void;
 
@@ -147,6 +148,14 @@ export class ChapoLoop {
       result: insights,
       success: true,
     });
+  }
+
+  private shouldApplyCoverageGuard(userText: string): boolean {
+    return !userText.includes('GENEHMIGTER PLAN-TASK');
+  }
+
+  private buildUnresolvedObligationLines(maxItems: number = 4): string {
+    return stateManager.summarizeUnresolvedObligations(this.sessionId, maxItems);
   }
 
   async run(userMessage: string | ContentBlock[], conversationHistory: Array<{ role: string; content: string }>): Promise<ChapoLoopResult> {
@@ -262,13 +271,57 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
       // No tool calls → ACTION: ANSWER
       if (!response.toolCalls || response.toolCalls.length === 0) {
         const answer = response.content || '';
-        if (this.answerValidator.shouldConvertToAsk(getTextContent(userMessage), answer)) {
+        const userText = getTextContent(userMessage);
+
+        if (this.shouldApplyCoverageGuard(userText)) {
+          const unresolvedBefore = stateManager.getUnresolvedObligations(this.sessionId);
+          if (unresolvedBefore.length > 0) {
+            const coverage = await this.answerValidator.evaluateObligationCoverage(unresolvedBefore, answer);
+            for (const obligationId of coverage.resolvedIds) {
+              stateManager.satisfyObligation(
+                this.sessionId,
+                obligationId,
+                'Covered by final answer draft.',
+              );
+            }
+
+            if (coverage.unresolved.length > 0) {
+              const unresolvedLines = coverage.unresolved
+                .slice(0, 4)
+                .map((obligation) => `- ${obligation.requiredOutcome || obligation.description}`)
+                .join('\n');
+
+              this.sendEvent({
+                type: 'agent_thinking',
+                agent: 'chapo',
+                status: `Coverage Guard: ${coverage.unresolved.length} offene Verpflichtung(en) erkannt.`,
+              });
+
+              const guidance = `[Coverage Guard]
+Die Antwort ist noch nicht vollstaendig. Offene Verpflichtungen:
+${unresolvedLines}
+
+Arbeite diese Punkte zuerst ab (Tool/Delegation/askUser bei echtem Blocker), dann antworte final.`;
+              this.conversation.addMessage({ role: 'system', content: guidance });
+
+              if (this.iteration >= this.config.maxIterations - 1) {
+                return this.queueQuestion(
+                  `Ich habe noch offene Teilaufgaben:\n${unresolvedLines}\n\nSoll ich weitermachen, um diese Punkte abzuschliessen?`,
+                  this.iteration + 1,
+                );
+              }
+              continue;
+            }
+          }
+        }
+
+        if (this.answerValidator.shouldConvertToAsk(userText, answer)) {
           return this.queueQuestion(
             this.answerValidator.extractClarificationQuestion(answer),
             this.iteration + 1,
           );
         }
-        return this.answerValidator.validateAndNormalize(getTextContent(userMessage), answer, this.iteration, this.emitDecisionPath.bind(this), this.errorHandler);
+        return this.answerValidator.validateAndNormalize(userText, answer, this.iteration, this.emitDecisionPath.bind(this), this.errorHandler);
       }
 
       // Add assistant message with tool calls to conversation
@@ -321,24 +374,49 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
         toolResults,
       });
 
+      // Fire-and-forget: tag current work topic for recent focus
+      if (response.toolCalls && response.toolCalls.length > 0) {
+        const toolNames = response.toolCalls.map((tc) => tc.name);
+        const filePaths = this.extractFilePathsFromToolCalls(response.toolCalls);
+        tagCurrentWork(this.sessionId, {
+          userMessage: getTextContent(userMessage).slice(0, 300),
+          toolCalls: toolNames,
+          assistantResponse: (response.content || '').slice(0, 300),
+          filePaths,
+        }).catch((err) => console.error('[chapo-loop] topic tagging failed:', err));
+      }
+
       // Check inbox for new messages between iterations
       this.contextManager.checkInbox();
     }
 
     // Loop exhaustion — check for unprocessed inbox messages
     const remaining = this.contextManager.drainRemainingMessages();
+    const unresolvedObligations = this.buildUnresolvedObligationLines();
     if (remaining.length > 0) {
       const extras = remaining.map((m) => m.content).join('; ');
       return this.queueQuestion(
-        `Ich habe mein Iterationslimit erreicht. Du hattest auch noch gefragt: "${extras}" — soll ich damit weitermachen?`,
+        `Ich habe mein Iterationslimit erreicht. Du hattest auch noch gefragt: "${extras}".\n\nOffene Verpflichtungen:\n${unresolvedObligations}\n\nSoll ich damit weitermachen?`,
         this.iteration,
       );
     }
 
     return this.queueQuestion(
-      'Die Anfrage hat mehr Schritte benoetigt als erlaubt. Soll ich weitermachen?',
+      `Die Anfrage hat mehr Schritte benoetigt als erlaubt.\n\nOffene Verpflichtungen:\n${unresolvedObligations}\n\nSoll ich weitermachen?`,
       this.iteration,
     );
+  }
+
+  private extractFilePathsFromToolCalls(toolCalls: Array<{ name: string; arguments: Record<string, unknown> }>): string[] {
+    const paths: string[] = [];
+    for (const tc of toolCalls) {
+      const args = tc.arguments;
+      if (typeof args.path === 'string') paths.push(args.path);
+      if (typeof args.file_path === 'string') paths.push(args.file_path);
+      if (typeof args.filePath === 'string') paths.push(args.filePath);
+      if (typeof args.target === 'string' && args.target.includes('/')) paths.push(args.target);
+    }
+    return [...new Set(paths)];
   }
 
   private queueQuestion(question: string, totalIterations: number): Promise<ChapoLoopResult> {

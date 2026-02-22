@@ -1,5 +1,6 @@
 import { searchMemories, reinforceMemory } from './memoryStore.js';
 import { runExtractionPipeline } from './extraction.js';
+import { getActiveTopics } from './recentFocus.js';
 import type { StoredMemory } from './types.js';
 import type { LLMProvider } from '../llm/types.js';
 import { config } from '../config.js';
@@ -9,7 +10,7 @@ import { normalizeNamespacePrefix, uniqueNormalizedNamespaces } from './namespac
 // Budget constants — keep injected memory context within token limits
 // ---------------------------------------------------------------------------
 
-const MEMORY_TOKEN_BUDGET = 2000;
+const MEMORY_TOKEN_BUDGET = 3000;
 const CHARS_PER_TOKEN = 4;
 const MAX_MEMORY_CHARS = MEMORY_TOKEN_BUDGET * CHARS_PER_TOKEN;
 
@@ -113,6 +114,17 @@ export function formatMemoryQualityBlock(quality: MemoryQualitySignals): string 
   ].join('\n');
 }
 
+async function augmentQueryWithRecentTopics(query: string): Promise<string> {
+  try {
+    const topics = await getActiveTopics(3);
+    if (topics.length === 0) return query;
+    const topicNames = topics.map((t) => t.topic).join(', ');
+    return `${query} [recent focus: ${topicNames}]`;
+  } catch {
+    return query;
+  }
+}
+
 export async function retrieveRelevantMemories(
   query: string,
   projectName?: string,
@@ -123,9 +135,10 @@ export async function retrieveRelevantMemories(
     const limit = 10;
     const minimumHitsBeforeStop = Math.min(limit, Math.max(1, config.memoryMinHitsBeforeStop));
     const mergedById = new Map<string, StoredMemory>();
+    const augmentedQuery = await augmentQueryWithRecentTopics(query);
 
     for (const threshold of thresholds) {
-      const retrieved = await searchMemories(query, namespaces, limit, threshold);
+      const retrieved = await searchMemories(augmentedQuery, namespaces, limit, threshold);
       for (const memory of retrieved) {
         mergedById.set(memory.id, memory);
       }
