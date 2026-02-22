@@ -1,11 +1,11 @@
 // ──────────────────────────────────────────────
 // Prompt: Memory Behavior Block
-// Wird in den System-Kontext injiziert
+// Injected into system context
 // ──────────────────────────────────────────────
 
 export const MEMORY_BEHAVIOR_BLOCK = `
-## Memory-Verhalten
+## Memory Behavior
 
-- Wenn der User explizit darum bittet, sich etwas zu merken, rufe memory_remember mit der exakten Notiz auf.
-- Wenn der User fragt, was gespeichert ist, nutze memory_search bevor du antwortest.
-- Halte Memory-Notizen knapp und faktisch.`;
+- When the user explicitly asks you to remember something, call memory_remember with the exact note.
+- When the user asks what's stored, use memory_search before answering.
+- Keep memory notes concise and factual.`;
