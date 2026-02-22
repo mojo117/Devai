@@ -164,16 +164,16 @@ export class ChapoLoop {
 ${systemContextBlock}
 ${this.projectRoot ? `Working Directory: ${this.projectRoot}` : ''}
 
-Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
-- Delegiere Entwicklungsaufgaben in der Domaene "development" an DEVO
-- Delegiere Kommunikations/Admin-Aufgaben in der Domaene "communication" an CAIO
-- Delegiere Rechercheaufgaben in der Domaene "research" an SCOUT
-- Wenn du delegierst: gib domain + objective + optional constraints/context/expectedOutcome
-- Nenne in Delegationen keine konkreten Toolnamen; der Ziel-Agent waehlt die Tools selbst
-- Nutze direkte Read-Only Tools nur fuer Kontextsammlung oder kurze Faktenchecks
-- Nutze delegateParallel nur fuer unabhaengige Teilaufgaben
-- Nutze askUser NUR wenn du wirklich eine Rueckfrage brauchst
-- Wenn du die Antwort hast, antworte direkt OHNE Tool-Calls`;
+You are Chapo in the decision loop. Execute tasks DIRECTLY:
+- Delegate development tasks (domain "development") to DEVO
+- Delegate communication/admin tasks (domain "communication") to CAIO
+- Delegate research tasks (domain "research") to SCOUT
+- When delegating: provide domain + objective + optional constraints/context/expectedOutcome
+- Never mention specific tool names in delegations; the target agent picks their own tools
+- Use direct read-only tools only for context gathering or quick fact checks
+- Use delegateParallel only for independent sub-tasks
+- Use askUser ONLY when you genuinely need clarification
+- When you have the answer, respond directly WITHOUT tool calls`;
 
     this.conversation.setSystemPrompt(systemPrompt);
 
@@ -225,7 +225,7 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
       this.sendEvent({
         type: 'agent_thinking',
         agent: 'chapo',
-        status: this.iteration === 0 ? 'Analysiere Anfrage...' : `Iteration ${this.iteration + 1}...`,
+        status: this.iteration === 0 ? 'Analyzing request...' : `Iteration ${this.iteration + 1}...`,
       });
 
       // Check if compaction needed before LLM call
@@ -252,7 +252,7 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
 
         if (!this.errorHandler.canRetry('llm_call')) {
           return {
-            answer: `Fehler bei der Verarbeitung: ${err.message}`,
+            answer: `Error during processing: ${err.message}`,
             status: 'error',
             totalIterations: this.iteration + 1,
           };
@@ -307,6 +307,12 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
         buildVerificationEnvelope: this.buildVerificationEnvelope.bind(this),
         buildToolResultContent: this.buildToolResultContent.bind(this),
         markExternalActionToolSuccess: this.markExternalActionToolSuccess.bind(this),
+        onPartialResponse: (message: string, inReplyTo?: string) => {
+          const label = inReplyTo
+            ? `[Intermediate response sent — re: "${inReplyTo}"] ${message}`
+            : `[Intermediate response sent] ${message}`;
+          this.conversation.addMessage({ role: 'system', content: label });
+        },
       });
 
       for (const toolCall of response.toolCalls) {
@@ -321,6 +327,14 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
         }
         if (outcome.toolResult) {
           toolResults.push(outcome.toolResult);
+          // Structured reflection: inject thinking after tool failures
+          if (outcome.toolResult.isError) {
+            this.conversation.addThinking(
+              `Tool "${toolCall.name}" failed: ${outcome.toolResult.result}. ` +
+              `Before retrying or trying a different approach, consider: ` +
+              `Why did this fail? Is there a different approach? Should I inform the user?`
+            );
+          }
         }
       }
 
@@ -357,7 +371,7 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
     if (remaining.length > 0) {
       const extras = remaining.map((m) => m.content).join('; ');
       return this.queueQuestion(
-        `Ich habe mein Iterationslimit erreicht. Du hattest auch noch gefragt: "${extras}"\n\nSoll ich damit weitermachen?`,
+        `I've reached my iteration limit. You also asked: "${extras}"\n\nShould I continue?`,
         this.iteration,
         {
           kind: 'continue',
@@ -368,7 +382,7 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
     }
 
     return this.queueQuestion(
-      'Die Anfrage hat mehr Schritte benoetigt als erlaubt. Soll ich weitermachen?',
+      'This request needed more steps than allowed. Should I continue?',
       this.iteration,
       {
         kind: 'continue',
