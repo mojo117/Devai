@@ -1,5 +1,5 @@
 # DevAI Architecture
-Last updated 2026-02-21
+Last updated 2026-02-22
 
 This document describes the architecture of DevAI, including the CHAPO Decision Loop and the multi-agent system.
 
@@ -325,6 +325,24 @@ runLoop() iteration:
 
 **Lifecycle**: `setLoopRunning(true)` before `runLoop()`, `setLoopRunning(false) + dispose()` in `finally` block.
 
+### Multi-Message v2 (Planned)
+
+> Full design: `docs/plans/2026-02-22-multi-message-v2-design.md`
+
+The current inbox system has limitations: messages are injected as system hints (not `user` role), the loop can only produce one final answer, and `checkInbox()` doesn't run on the answer path (timing gap). v2 addresses these with:
+
+1. **`respondToUser` tool** — CHAPO sends intermediate chat bubbles without exiting the loop. Backend emits `partial_response` WebSocket event.
+2. **Non-blocking `askUser`** — `askUser(blocking: false)` continues the loop while waiting for user reply. Reply arrives via inbox.
+3. **Inbox as `user` role messages** — Replace system-hint injection with real user messages. Remove classification labels (PARALLEL/AMENDMENT/EXPANSION) — GLM-5 classifies in-context.
+4. **Timing fix** — `checkInbox()` before answer exit to catch late-arriving messages.
+5. **Obligation adjustment** — Inbox obligations become `blocking: true`; `respondToUser` results satisfy them.
+
+**Design decisions:**
+- Trust the model (GLM-5) for routing, not heuristics or classifiers
+- CHAPO tracks multiple tasks via conversation context + `respondToUser` (no formal task list needed)
+- Intake classifier may become redundant — kept for now as cheap pre-filter
+- CAIO as inbox task manager is architecturally possible if model self-tracking proves insufficient at high volumes (uses existing delegation, no new systems)
+
 ### ChapoLoopResult
 
 ```typescript
@@ -346,7 +364,7 @@ Four agents with distinct roles:
 |-------|------|----------------------------|-------|---------------|
 | **CHAPO** | Coordinator | GLM-5 / Opus 4.5 | `fs_read*`, `web_*`, `git_read`, `memory_*`, `skill_list`, meta-tools | `CHAPO_SYSTEM_PROMPT` |
 | **DEVO** | Developer + DevOps | GLM-4.7 / Sonnet 4 | `fs_*`, `git_*`, `bash_execute`, `ssh_execute`, `pm2_*`, `npm_*`, `github_*`, `web_*`, `skill_*` | `DEVO_SYSTEM_PROMPT` |
-| **SCOUT** | Exploration Specialist | GLM-4.7-Flash (free) / Sonnet 4 | `fs_read*`, `git_read`, `github_getWorkflowRunStatus`, `web_*`, `memory_*` | `SCOUT_SYSTEM_PROMPT` |
+| **SCOUT** | Exploration Specialist | GLM-4.7-Flash (free) / Sonnet 4 | `fs_read*`, `git_read`, `github_getWorkflowRunStatus`, `web_*`, `scout_*` (Firecrawl), `memory_*` | `SCOUT_SYSTEM_PROMPT` |
 | **CAIO** | Communications & Admin | GLM-4.5-Air / Sonnet 4 | `fs_readFile`, `fs_listFiles`, `fs_glob`, `taskforge_*`, `scheduler_*`, `send_email`, `notify_user`, `memory_*` | `CAIO_SYSTEM_PROMPT` |
 
 ### CHAPO (Coordinator)
@@ -713,7 +731,7 @@ Tools are defined in `apps/api/src/tools/registry.ts`. Each tool is whitelisted 
 | **Git** | `git_status`, `git_diff`, `git_commit`, `git_push`, `git_pull`, `git_add` |
 | **GitHub** | `github_triggerWorkflow`, `github_getWorkflowRunStatus` |
 | **DevOps** | `bash_execute`, `ssh_execute`, `pm2_status`, `pm2_restart`, `pm2_stop`, `pm2_start`, `pm2_logs`, `npm_install`, `npm_run` |
-| **Web** | `web_search`, `web_fetch` |
+| **Web** | `web_search`, `web_fetch`, `scout_search_fast`, `scout_search_deep`, `scout_site_map`, `scout_crawl_focused`, `scout_extract_schema` |
 | **Context** | `context_listDocuments`, `context_readDocument`, `context_searchDocuments` |
 | **Memory** | `memory_remember`, `memory_search`, `memory_readToday` |
 | **Scheduler** | `scheduler_create`, `scheduler_list`, `scheduler_update`, `scheduler_delete`, `reminder_create`, `notify_user` |
@@ -721,13 +739,17 @@ Tools are defined in `apps/api/src/tools/registry.ts`. Each tool is whitelisted 
 | **Email** | `send_email` |
 | **Logs** | `logs_getStagingLogs` |
 
+Web tooling notes:
+- `web_search` uses Perplexity (`PERPLEXITY_API_KEY`).
+- `scout_*` Firecrawl tools use `FIRECRAWL_API_KEY`.
+
 ### Agent --> Tool Mapping
 
 | Agent | Allowed Tools |
 |-------|---------------|
 | **CHAPO** | `fs_read*`, `fs_glob`, `fs_grep`, `web_search`, `web_fetch`, `git_status`, `git_diff`, `github_getWorkflowRunStatus`, `logs_getStagingLogs`, `memory_*`, `skill_list`, `skill_reload` + meta-tools |
 | **DEVO** | `fs_*`, `git_*`, `bash_execute`, `ssh_execute`, `github_*`, `pm2_*`, `npm_*`, `web_search`, `web_fetch`, `logs_getStagingLogs`, `memory_*`, `skill_*` |
-| **SCOUT** | `fs_readFile`, `fs_listFiles`, `fs_glob`, `fs_grep`, `git_status`, `git_diff`, `github_getWorkflowRunStatus`, `web_search`, `web_fetch`, `memory_*` |
+| **SCOUT** | `fs_readFile`, `fs_listFiles`, `fs_glob`, `fs_grep`, `git_status`, `git_diff`, `github_getWorkflowRunStatus`, `web_search`, `web_fetch`, `scout_search_fast`, `scout_search_deep`, `scout_site_map`, `scout_crawl_focused`, `scout_extract_schema`, `memory_*` |
 | **CAIO** | `fs_readFile`, `fs_listFiles`, `fs_glob`, `taskforge_*`, `scheduler_*`, `reminder_create`, `notify_user`, `send_email`, `telegram_send_document`, `deliver_document`, `memory_*` |
 
 ### Special Tools (Coordination)
