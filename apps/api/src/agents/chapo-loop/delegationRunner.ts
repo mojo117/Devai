@@ -55,14 +55,7 @@ export interface DelegationRunnerDeps {
 }
 
 function mapCaioEvidence(evidenceLog: CaioEvidence[]): ToolEvidence[] {
-  return evidenceLog.map((e) => ({
-    tool: e.tool,
-    success: e.success,
-    summary: e.summary,
-    pendingApproval: e.pendingApproval,
-    externalId: e.externalId,
-    nextStep: e.nextStep,
-  }));
+  return evidenceLog.map(({ error, timestamp, ...base }) => base);
 }
 
 async function delegateToSubAgent(

@@ -51,11 +51,11 @@ function resolveWorkspaceMode(sessionId: string): WorkspaceLoadMode {
 
 export async function getDevaiMdBlockForSession(sessionId: string): Promise<string> {
   const state = stateManager.getState(sessionId);
-  if (state?.taskContext.gatheredInfo['devaiMdBlock']) {
-    return String(state.taskContext.gatheredInfo['devaiMdBlock']);
+  if (state?.taskContext.gatheredInfo.devaiMdBlock) {
+    return state.taskContext.gatheredInfo.devaiMdBlock;
   }
 
-  const uiHost = (state?.taskContext.gatheredInfo['uiHost'] as string | undefined) || null;
+  const uiHost = state?.taskContext.gatheredInfo.uiHost || null;
   try {
     const ctx = await loadDevaiMdContext();
     const block = formatDevaiMdBlock(ctx, { uiHost });
@@ -68,12 +68,12 @@ export async function getDevaiMdBlockForSession(sessionId: string): Promise<stri
 
 export async function getClaudeMdBlockForSession(sessionId: string, projectRoot: string | null): Promise<string> {
   const state = stateManager.getState(sessionId);
-  const existing = (state?.taskContext.gatheredInfo['claudeMdBlock'] as string) || '';
+  const existing = state?.taskContext.gatheredInfo.claudeMdBlock || '';
 
   if (!projectRoot) return existing;
 
   const normalizedRoot = resolve(projectRoot);
-  const cachedRoot = (state?.taskContext.gatheredInfo['claudeMdProjectRoot'] as string) || '';
+  const cachedRoot = state?.taskContext.gatheredInfo.claudeMdProjectRoot || '';
   if (cachedRoot === normalizedRoot && existing) return existing;
 
   try {
@@ -91,8 +91,8 @@ export async function getClaudeMdBlockForSession(sessionId: string, projectRoot:
 export async function getWorkspaceMdBlockForSession(sessionId: string): Promise<string> {
   const state = stateManager.getState(sessionId);
   const mode = resolveWorkspaceMode(sessionId);
-  const cachedMode = (state?.taskContext.gatheredInfo['workspaceMdMode'] as WorkspaceLoadMode | undefined) || null;
-  const existing = (state?.taskContext.gatheredInfo['workspaceMdBlock'] as string) || '';
+  const cachedMode = (state?.taskContext.gatheredInfo.workspaceMdMode as WorkspaceLoadMode | undefined) || null;
+  const existing = state?.taskContext.gatheredInfo.workspaceMdBlock || '';
 
   if (cachedMode === mode && existing) return existing;
 
@@ -129,7 +129,7 @@ export async function refreshGlobalContextBlockForSession(sessionId: string): Pr
 
 export async function warmMemoryBlockForSession(sessionId: string, userMessage: string): Promise<string> {
   const state = stateManager.getState(sessionId);
-  const projectRoot = (state?.taskContext.gatheredInfo['projectRoot'] as string) || null;
+  const projectRoot = state?.taskContext.gatheredInfo.projectRoot || null;
 
   let projectName: string | undefined;
   if (projectRoot) {
@@ -163,18 +163,18 @@ export function getCombinedSystemContextBlock(sessionId: string): string {
     : '';
 
   // Inject communication platform so CHAPO knows which channel the user is on
-  const platform = (info.platform as string) || '';
+  const platform = info.platform || '';
   const platformBlock = platform
     ? `## Kommunikationskanal\nDer Benutzer kommuniziert gerade über: **${platform === 'telegram' ? 'Telegram' : 'Web-UI'}**.\nDateien an den Benutzer ${platform === 'telegram' ? 'via Telegram senden (telegram_send_document)' : 'im Web-UI zum Download bereitstellen (deliver_document)'}.`
     : '';
 
   const blocks = [
-    (info.devaiMdBlock as string) || '',
-    (info.claudeMdBlock as string) || '',
-    (info.workspaceMdBlock as string) || '',
-    (info.globalContextBlock as string) || '',
-    (info.memoryQualityBlock as string) || '',
-    (info.memoryBlock as string) || '',
+    info.devaiMdBlock || '',
+    info.claudeMdBlock || '',
+    info.workspaceMdBlock || '',
+    info.globalContextBlock || '',
+    info.memoryQualityBlock || '',
+    info.memoryBlock || '',
     schedulerErrorBlock,
     platformBlock,
   ]

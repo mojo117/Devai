@@ -240,11 +240,53 @@ export interface ConversationState {
   isLoopRunning: boolean;
 }
 
+export interface GatheredInfo {
+  // Project context
+  projectRoot?: string;
+  claudeMdProjectRoot?: string;
+  platform?: string;
+  uiHost?: string;
+
+  // Context blocks (cached per session)
+  devaiMdBlock?: string;
+  claudeMdBlock?: string;
+  workspaceMdBlock?: string;
+  workspaceMdMode?: string;
+  workspaceMdDiagnostics?: unknown;
+  globalContextBlock?: string;
+  memoryBlock?: string;
+  memoryQualityBlock?: string;
+
+  // Request qualification
+  taskComplexity?: string;
+  modelSelection?: unknown;
+  trustMode?: string;
+
+  // Workspace/channel modes
+  workspaceContextMode?: string;
+  chatMode?: string;
+  sessionMode?: string;
+  visibility?: string;
+
+  // Delegation tracking
+  lastDelegation?: {
+    from: string;
+    to: string;
+    task: string;
+    domain: string;
+    objective: string;
+    constraints: string[];
+  };
+
+  // Allow additional keys for forward compatibility
+  [key: string]: unknown;
+}
+
 export interface TaskContext {
   originalRequest: string;
   qualificationResult?: QualificationResult;
   gatheredFiles: string[];
-  gatheredInfo: Record<string, unknown>;
+  gatheredInfo: GatheredInfo;
   approvalGranted: boolean;
   approvalTimestamp?: string;
 }

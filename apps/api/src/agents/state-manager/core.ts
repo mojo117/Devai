@@ -1,5 +1,5 @@
 import { getAgentState, upsertAgentState } from '../../db/queries.js';
-import type { ConversationState } from '../types.js';
+import type { ConversationState, GatheredInfo } from '../types.js';
 import { PersistenceQueue } from './persistenceQueue.js';
 
 // In-memory state storage (per session)
@@ -80,7 +80,7 @@ function normalizeLoadedState(sessionId: string, raw: unknown): ConversationStat
         ? r.taskContext.gatheredFiles
         : base.taskContext.gatheredFiles,
       gatheredInfo: (r.taskContext?.gatheredInfo && typeof r.taskContext.gatheredInfo === 'object')
-        ? (r.taskContext.gatheredInfo as Record<string, unknown>)
+        ? (r.taskContext.gatheredInfo as GatheredInfo)
         : base.taskContext.gatheredInfo,
     },
     agentHistory: Array.isArray(r.agentHistory) ? r.agentHistory : base.agentHistory,

@@ -374,7 +374,7 @@ export class CommandDispatcher {
 
     const state = getOrCreateState(activeSessionId);
     if (validatedProjectRoot) {
-      state.taskContext.gatheredInfo['projectRoot'] = validatedProjectRoot;
+      state.taskContext.gatheredInfo.projectRoot = validatedProjectRoot;
     }
 
     // Apply workspace/session modes from metadata

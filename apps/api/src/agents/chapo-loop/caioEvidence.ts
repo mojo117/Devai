@@ -1,3 +1,5 @@
+import type { ToolEvidence } from '../types.js';
+
 export interface ToolPreflightResult {
   ok: boolean;
   error?: string;
@@ -10,14 +12,8 @@ export interface NormalizedToolOutcome {
   error?: string;
 }
 
-export interface CaioEvidence {
-  tool: string;
-  success: boolean;
-  pendingApproval?: boolean;
-  externalId?: string;
-  summary: string;
+export interface CaioEvidence extends ToolEvidence {
   error?: string;
-  nextStep?: string;
   timestamp: string;
 }
 

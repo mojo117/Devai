@@ -78,8 +78,8 @@ export async function loadRecentConversationHistory(sessionId: string): Promise<
 
 export function getProjectRootFromState(sessionId: string): string | null {
   const state = stateManager.getState(sessionId);
-  const value = state?.taskContext.gatheredInfo['projectRoot'];
-  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+  const value = state?.taskContext.gatheredInfo.projectRoot;
+  return value && value.trim().length > 0 ? value : null;
 }
 
 export function buildToolResultContent(result: { success: boolean; result?: unknown; error?: string }): { content: string; isError: boolean } {
