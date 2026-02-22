@@ -10,7 +10,7 @@ const DEFAULT_FALLBACK_CHAIN: LLMProvider[] = ['zai', 'anthropic', 'openai', 'ge
 
 // Default models per provider (used when falling back to a different provider)
 const DEFAULT_MODELS: Record<LLMProvider, string> = {
-  zai: 'glm-4.7',
+  zai: 'glm-5',
   anthropic: 'claude-sonnet-4-20250514',
   openai: 'gpt-4o',
   gemini: 'gemini-2.0-flash',
