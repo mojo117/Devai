@@ -29,10 +29,10 @@ DevAI is an AI-powered assistant platform. The user interacts with **Chapo** -- 
               |  | Manager       |  | Handler       | |
               |  +---------------+  +---------------+ |
               |                                       |
-              |  +---------------+  +---------------+ |
-              |  | Self-         |  | System        | |
-              |  | Validator     |  | Context       | |
-              |  +---------------+  +---------------+ |
+              |  +---------------+                   |
+              |  | System        |                   |
+              |  | Context       |                   |
+              |  +---------------+                   |
               |                                       |
               |  5 Actions:                           |
               |  +--------+  +--------+  +--------+  |
@@ -55,8 +55,8 @@ DevAI is an AI-powered assistant platform. The user interacts with **Chapo** -- 
 **Key design principles:**
 - Chapo is a versatile assistant, not just a dev tool
 - No separate decision engine -- the LLM's `tool_calls` ARE the decisions
+- **Trust the model** -- the LLM agents are capable enough to do their jobs correctly. Don't add coded validators, regex checks, or heuristic guardrails for things the model can handle through its prompt. If an agent should behave a certain way, tell it in the prompt -- don't build code to police its output. Code-level checks should only exist for things that are genuinely outside the model's control (token limits, API errors, network failures).
 - Errors feed back into the loop as context (never crash)
-- Self-validation runs before every ANSWER (advisory, never blocks)
 - Delegation via `delegateToDevo` / `delegateToScout` / `delegateToCaio` tool calls
 - `delegateParallel` fires multiple agents concurrently via Promise.all()
 - Memory tools executed directly by CHAPO within the loop
@@ -167,7 +167,7 @@ The ChapoLoop is the core of DevAI's intelligence. It replaces the former Looper
 
 ```
 User message --> ChapoLoop.run():
-    +-- ANSWER --> Self-validate, send response, exit loop
+    +-- ANSWER --> Send response, exit loop
     +-- ASK    --> Pause loop, wait for user reply
     +-- TOOL   --> Execute tool, feed result back into loop
     +-- DELEGATE --> Run DEVO/SCOUT sub-loop, feed result back
@@ -248,7 +248,6 @@ runLoop() -- max N iterations:
   |
   +-- No tool_calls in response?
   |   +-- ACTION: ANSWER
-  |   +-- Self-validate (if enabled)
   |   +-- return { status: 'completed', answer }
   |
   +-- For each tool_call:
@@ -494,7 +493,7 @@ Memory tools (`memory_remember`, `memory_search`, `memory_readToday`) are regula
 
 ## Prompt Architecture
 
-All system prompts live in `apps/api/src/prompts/` and are written in **German**. JSON schema field names remain in English (parsed programmatically).
+All system prompts live in `apps/api/src/prompts/` and are written in **English** (identity-first format). JSON schema field names are also in English.
 
 ```
 prompts/
