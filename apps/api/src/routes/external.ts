@@ -18,24 +18,7 @@ import { createSession } from '../db/queries.js';
 import { transcribeBuffer } from '../services/transcriptionService.js';
 import { uploadUserfileFromBuffer, isUploadError } from '../services/userfileService.js';
 import { shouldAttachPinnedContext } from '../external/pinnedContextPolicy.js';
-
-function parseYesNoDecision(text: string): boolean | null {
-  const normalized = text.trim().toLowerCase().replace(/[.!?,;:]+$/g, '');
-  if (!normalized) return null;
-
-  const yes = new Set([
-    'y', 'yes', 'yeah', 'yep', 'ok', 'okay', 'sure', 'continue', 'proceed',
-    'ja', 'j', 'klar', 'weiter', 'mach weiter', 'bitte weiter',
-  ]);
-  const no = new Set([
-    'n', 'no', 'nope', 'stop', 'cancel', 'abort',
-    'nein', 'nee', 'stopp', 'abbrechen',
-  ]);
-
-  if (yes.has(normalized)) return true;
-  if (no.has(normalized)) return false;
-  return null;
-}
+import { classifyInboundText } from '../agents/intakeClassifier.js';
 
 export const externalRoutes: FastifyPluginAsync = async (app) => {
   app.post('/telegram/webhook', async (request, reply) => {
@@ -162,26 +145,45 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
         const state = getState(externalSession.session_id);
         const pendingApprovals = state?.pendingApprovals ?? [];
         const pendingQuestions = state?.pendingQuestions ?? [];
-        const decision = parseYesNoDecision(messageText);
+        const latestQuestion = pendingQuestions[pendingQuestions.length - 1];
+        const activeTurnId = typeof state?.taskContext.gatheredInfo.activeTurnId === 'string'
+          ? state.taskContext.gatheredInfo.activeTurnId
+          : '';
+        const questionExpiresAt = typeof latestQuestion?.expiresAt === 'string'
+          ? Date.parse(latestQuestion.expiresAt)
+          : NaN;
+        const latestQuestionExpired = Number.isFinite(questionExpiresAt) && questionExpiresAt <= Date.now();
+        const latestQuestionTurnMatches = !latestQuestion?.turnId
+          || !activeTurnId
+          || latestQuestion.turnId === activeTurnId;
+        const intake = classifyInboundText(messageText, {
+          hasPendingApprovals: pendingApprovals.length > 0,
+          hasPendingQuestions: pendingQuestions.length > 0 && !latestQuestionExpired && latestQuestionTurnMatches,
+          latestPendingQuestion: typeof latestQuestion?.question === 'string' ? latestQuestion.question : '',
+        });
 
         let command: WorkflowCommand;
-        if (decision !== null && pendingApprovals.length > 0) {
+        if (intake.kind === 'approval_decision' && typeof intake.decision === 'boolean' && pendingApprovals.length > 0) {
           const latestApproval = pendingApprovals[pendingApprovals.length - 1];
           command = {
             type: 'user_approval_decided',
             sessionId: externalSession.session_id,
             requestId: nanoid(),
             approvalId: latestApproval.approvalId,
-            approved: decision,
+            approved: intake.decision,
           };
-        } else if (state?.currentPhase === 'waiting_user' && pendingQuestions.length > 0) {
-          const latestQuestion = pendingQuestions[pendingQuestions.length - 1];
+        } else if (
+          intake.kind === 'question_answer'
+          && pendingQuestions.length > 0
+          && !latestQuestionExpired
+          && latestQuestionTurnMatches
+        ) {
           command = {
             type: 'user_question_answered',
             sessionId: externalSession.session_id,
             requestId: nanoid(),
             questionId: latestQuestion.questionId,
-            answer: messageText,
+            answer: intake.questionAnswer || messageText,
           };
         } else {
           // Multi-message: if loop is running, queue and acknowledge via Telegram
@@ -194,10 +196,6 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
               source: 'telegram' as const,
             };
             pushToInbox(externalSession.session_id, inboxMsg);
-            await sendTelegramMessage(
-              extracted.chatId,
-              'Nachricht erhalten — ich kuemmere mich darum, sobald ich mit dem aktuellen Task fertig bin.',
-            );
             return;
           }
 
@@ -209,7 +207,7 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
             sessionId: externalSession.session_id,
             requestId: nanoid(),
             message: messageText,
-            metadata: { platform: 'telegram' },
+            metadata: { platform: 'telegram', intakeKind: intake.kind, intakeReason: intake.reason },
             pinnedUserfileIds,
           } as WorkflowCommand;
         }

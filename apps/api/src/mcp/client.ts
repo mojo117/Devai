@@ -7,6 +7,11 @@
 
 import type { McpServerConfig } from './config.js';
 
+async function importModule<T>(specifier: string): Promise<T> {
+  const dynamicImport = new Function('s', 'return import(s)') as (s: string) => Promise<T>;
+  return dynamicImport(specifier);
+}
+
 export interface McpToolInfo {
   /** Original tool name from the MCP server */
   name: string;
@@ -41,11 +46,15 @@ export class McpClient {
 
     console.info(`[mcp:${this.config.name}] Connecting via stdio: ${this.config.command} ${this.config.args.join(' ')}`);
 
-    const { Client } = await import(/* @vite-ignore */ '@modelcontextprotocol/sdk/client/index.js')
+    const { Client } = await importModule<{ Client: new (...args: unknown[]) => unknown }>(
+      '@modelcontextprotocol/sdk/client/index.js'
+    )
       .catch((err) => {
         throw new Error(`MCP SDK not available (missing @modelcontextprotocol/sdk). ${err instanceof Error ? err.message : String(err)}`);
       });
-    const { StdioClientTransport } = await import(/* @vite-ignore */ '@modelcontextprotocol/sdk/client/stdio.js')
+    const { StdioClientTransport } = await importModule<{ StdioClientTransport: new (...args: unknown[]) => unknown }>(
+      '@modelcontextprotocol/sdk/client/stdio.js'
+    )
       .catch((err) => {
         throw new Error(`MCP stdio transport not available. ${err instanceof Error ? err.message : String(err)}`);
       });

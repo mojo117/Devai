@@ -43,19 +43,24 @@ export interface BashResult {
   duration: number;
 }
 
-/**
- * Execute a bash command
- */
-export async function executeBash(
-  command: string,
-  options?: {
-    cwd?: string;
-    timeout?: number;
-    env?: Record<string, string>;
-  }
-): Promise<BashResult> {
-  const startTime = Date.now();
+export interface PrepareBashExecutionOptions {
+  cwd?: string;
+  timeout?: number;
+  defaultTimeoutMs: number;
+  requireDevServerCommandTimeoutWrapper?: boolean;
+  devServerMaxTimeoutMs?: number;
+}
 
+export interface PreparedBashExecution {
+  runtimeCwd?: string;
+  timeout: number;
+  isDevServerCommand: boolean;
+}
+
+export async function prepareBashExecution(
+  command: string,
+  options: PrepareBashExecutionOptions,
+): Promise<PreparedBashExecution> {
   const isDevServerCommand =
     /\bnpm\s+run\s+dev\b/.test(command) ||
     /\b(vite|next)\s+dev\b/.test(command) ||
@@ -78,7 +83,7 @@ export async function executeBash(
     if (!bindsAll) {
       throw new Error(`Dev server must bind to 0.0.0.0 for domain:port access (e.g. --host 0.0.0.0).`);
     }
-    if (!/\btimeout\b/.test(command)) {
+    if (options.requireDevServerCommandTimeoutWrapper !== false && !/\btimeout\b/.test(command)) {
       throw new Error(`Dev server commands must be wrapped in "timeout" (e.g. timeout 10m npm run dev -- --host 0.0.0.0 --port ${extractedPort}).`);
     }
   }
@@ -117,17 +122,39 @@ export async function executeBash(
     }
   }
 
-  const timeout = options?.timeout || TIMEOUT_MS;
-  if (isDevServerCommand) {
-    if (timeout > DEVSERVER_MAX_TIMEOUT_MS) {
-      throw new Error(`Dev server timeout too long. Max ${DEVSERVER_MAX_TIMEOUT_MS}ms.`);
-    }
+  const timeout = options.timeout || options.defaultTimeoutMs;
+  if (isDevServerCommand && options.devServerMaxTimeoutMs && timeout > options.devServerMaxTimeoutMs) {
+    throw new Error(`Dev server timeout too long. Max ${options.devServerMaxTimeoutMs}ms.`);
   }
-  const canonicalCwd = options?.cwd || config.allowedRoots[0];
+  const canonicalCwd = options.cwd || config.allowedRoots[0];
   if (canonicalCwd) {
     assertAllowedPath(canonicalCwd);
   }
   const runtimeCwd = canonicalCwd ? await toRuntimePath(canonicalCwd) : undefined;
+
+  return { runtimeCwd, timeout, isDevServerCommand };
+}
+
+/**
+ * Execute a bash command
+ */
+export async function executeBash(
+  command: string,
+  options?: {
+    cwd?: string;
+    timeout?: number;
+    env?: Record<string, string>;
+  }
+): Promise<BashResult> {
+  const startTime = Date.now();
+
+  const { runtimeCwd, timeout } = await prepareBashExecution(command, {
+    cwd: options?.cwd,
+    timeout: options?.timeout,
+    defaultTimeoutMs: TIMEOUT_MS,
+    requireDevServerCommandTimeoutWrapper: true,
+    devServerMaxTimeoutMs: DEVSERVER_MAX_TIMEOUT_MS,
+  });
 
   try {
     const { stdout, stderr } = await execAsync(command, {

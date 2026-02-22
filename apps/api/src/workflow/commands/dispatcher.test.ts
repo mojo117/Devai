@@ -110,30 +110,7 @@ describe('mapWsMessageToCommand', () => {
     }
   });
 
-  // ── AC-4: Plan approval command mapping ────────────────────────
-
-  it('maps "plan_approval" messages to UserPlanApprovalDecidedCommand', () => {
-    const msg = {
-      type: 'plan_approval',
-      planId: 'p-1',
-      approved: true,
-      reason: 'Looks good',
-      sessionId: 'sess-1',
-    };
-
-    const cmd = mapWsMessageToCommand(msg, currentSessionId, requestId);
-
-    expect(cmd).toEqual({
-      type: 'user_plan_approval_decided',
-      sessionId: 'sess-1',
-      requestId: 'req-123',
-      planId: 'p-1',
-      approved: true,
-      reason: 'Looks good',
-    });
-  });
-
-  // ── AC-5: Non-workflow messages return null ────────────────────
+  // ── AC-4: Non-workflow messages return null ─────────────────────
 
   it('returns null for ping messages', () => {
     const cmd = mapWsMessageToCommand({ type: 'ping' }, currentSessionId, requestId);

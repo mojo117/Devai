@@ -35,7 +35,7 @@ export async function spawnScout(
   let prompt = `EXPLORE: ${query}`;
 
   if (scope === 'codebase') {
-    prompt += '\n\nFOKUS: Nur Codebase-Exploration. Nutze KEINE Web-Tools (web_search, web_fetch).';
+    prompt += '\n\nFOKUS: Nur Codebase-Exploration. Nutze KEINE Web-Tools (web_search, web_fetch, scout_search_fast, scout_search_deep, scout_site_map, scout_crawl_focused, scout_extract_schema).';
   } else if (scope === 'web') {
     prompt += '\n\nFOKUS: Nur Web-Recherche. Nutze KEINE Dateisystem-Tools.';
   } else {
@@ -151,7 +151,16 @@ function parseScoutResult(response: string): ScoutResult {
         summary?: string;
         relevantFiles?: string[];
         codePatterns?: Record<string, string>;
-        webFindings?: Array<{ title?: string; url?: string; relevance?: string }>;
+        webFindings?: Array<{
+          title?: string;
+          url?: string;
+          relevance?: string;
+          claim?: string;
+          evidence?: Array<{ url?: string; snippet?: string; publishedAt?: string }>;
+          freshness?: string;
+          confidence?: 'high' | 'medium' | 'low';
+          gaps?: string[];
+        }>;
         recommendations?: string[];
         confidence?: 'high' | 'medium' | 'low';
       };
@@ -163,7 +172,20 @@ function parseScoutResult(response: string): ScoutResult {
         webFindings: (parsed.webFindings || []).map((f) => ({
           title: f.title || 'Unbekannt',
           url: f.url || '',
-          relevance: f.relevance || '',
+          relevance: f.relevance || f.claim || '',
+          claim: f.claim,
+          evidence: Array.isArray(f.evidence)
+            ? f.evidence
+              .filter((item) => item && typeof item.url === 'string' && item.url.trim().length > 0)
+              .map((item) => ({
+                url: item.url as string,
+                snippet: typeof item.snippet === 'string' ? item.snippet : undefined,
+                publishedAt: typeof item.publishedAt === 'string' ? item.publishedAt : undefined,
+              }))
+            : undefined,
+          freshness: f.freshness,
+          confidence: f.confidence,
+          gaps: Array.isArray(f.gaps) ? f.gaps.filter((item) => typeof item === 'string') as string[] : undefined,
         })),
         recommendations: parsed.recommendations || [],
         confidence: parsed.confidence || 'medium',

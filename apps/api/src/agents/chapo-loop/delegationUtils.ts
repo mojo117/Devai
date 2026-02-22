@@ -93,7 +93,7 @@ export function buildDelegation(target: ParallelAgent, args: Record<string, unkn
   const contextFacts = readStringArray(args.contextFacts).map((item) => sanitizeDelegationText(item));
   const context = normalizeDelegationContext(args.context);
   const constraints = readStringArray(args.constraints).map((item) => sanitizeDelegationText(item));
-  const expectedOutcome = readFirstString(args, ['expectedOutcome']) || undefined;
+  const expectedOutcome = readFirstString(args, ['expectedOutcome']) || objective;
   const scopeRaw = readFirstString(args, ['scope']);
   const scope: ScoutScope | undefined =
     scopeRaw === 'codebase' || scopeRaw === 'web' || scopeRaw === 'both'
@@ -175,6 +175,7 @@ export function buildScoutDelegationFromArgs(
     target: 'scout',
     domain: 'research',
     objective: query,
+    expectedOutcome: query,
     context,
     contextFacts: [],
     constraints: [],

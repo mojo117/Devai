@@ -179,8 +179,8 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
       }
 
       // ── Unified command dispatch ───────────────────────────────
-      // All workflow commands (request, approval, question, plan_approval)
-      // go through the CommandDispatcher which handles session setup,
+      // All workflow commands (request, approval, question) go through
+      // the CommandDispatcher which handles session setup,
       // legacy bridge, response construction, and DB persistence.
       const requestId = typeof msg.requestId === 'string' ? msg.requestId : nanoid();
 
@@ -199,26 +199,18 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
           socket.send(JSON.stringify({ type: 'error', requestId, error: 'Missing sessionId or questionId' }));
           return;
         }
-        if (command.type === 'user_plan_approval_decided' && (!command.sessionId || !command.planId)) {
-          socket.send(JSON.stringify({ type: 'error', requestId, error: 'Missing sessionId or planId' }));
-          return;
-        }
 
         try {
           const result = await commandDispatcher.dispatch(command, { joinSession });
           if (result.type === 'queued') {
             // Resolve request immediately so UI doesn't wait for a terminal response
             // while the active loop continues with queued follow-up messages.
+            // Do not inject a synthetic assistant text message for queued requests.
             socket.send(JSON.stringify({
               type: 'response',
               requestId,
               response: {
-                message: {
-                  id: nanoid(),
-                  role: 'assistant',
-                  content: 'Nachricht erhalten — ich kuemmere mich darum, sobald ich mit dem aktuellen Task fertig bin.',
-                  timestamp: new Date().toISOString(),
-                },
+                queued: true,
                 pendingActions: [],
                 sessionId: result.sessionId,
                 agentHistory: getState(result.sessionId)?.agentHistory || [],

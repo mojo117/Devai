@@ -4,9 +4,11 @@ import * as gitTools from './git.js';
 import * as githubTools from './github.js';
 import * as logsTools from './logs.js';
 import * as bashTools from './bash.js';
+import * as execSessionTools from './execSession.js';
 import * as sshTools from './ssh.js';
 import * as pm2Tools from './pm2.js';
 import * as webTools from './web.js';
+import * as firecrawlTools from './firecrawl.js';
 import * as contextTools from './context.js';
 import * as memoryTools from './memory.js';
 import * as schedulerTools from './scheduler.js';
@@ -195,12 +197,68 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   web_fetch: async (args) => webTools.webFetch(args.url as string, {
     timeout: args.timeout as number | undefined,
   }),
+  scout_search_fast: async (args) => firecrawlTools.scoutSearchFast(args.query as string, {
+    limit: args.limit as number | undefined,
+    country: args.country as string | undefined,
+    location: args.location as string | undefined,
+    categories: args.categories as Array<'research' | 'github' | 'pdf'> | undefined,
+    sources: args.sources as Array<'web' | 'news'> | undefined,
+  }),
+  scout_search_deep: async (args) => firecrawlTools.scoutSearchDeep(args.query as string, {
+    limit: args.limit as number | undefined,
+    country: args.country as string | undefined,
+    location: args.location as string | undefined,
+    categories: args.categories as Array<'research' | 'github' | 'pdf'> | undefined,
+    sources: args.sources as Array<'web' | 'news'> | undefined,
+    recency: args.recency as 'day' | 'week' | 'month' | 'year' | undefined,
+  }),
+  scout_site_map: async (args) => firecrawlTools.scoutSiteMap(args.url as string, {
+    search: args.search as string | undefined,
+    limit: args.limit as number | undefined,
+    includeSubdomains: args.includeSubdomains as boolean | undefined,
+    ignoreSitemap: args.ignoreSitemap as boolean | undefined,
+    sitemapOnly: args.sitemapOnly as boolean | undefined,
+  }),
+  scout_crawl_focused: async (args) => firecrawlTools.scoutCrawlFocused(args.url as string, {
+    prompt: args.prompt as string | undefined,
+    includePaths: args.includePaths as string[] | undefined,
+    excludePaths: args.excludePaths as string[] | undefined,
+    maxPages: args.maxPages as number | undefined,
+    maxDepth: args.maxDepth as number | undefined,
+    includeSubdomains: args.includeSubdomains as boolean | undefined,
+    allowExternalLinks: args.allowExternalLinks as boolean | undefined,
+  }),
+  scout_extract_schema: async (args) => firecrawlTools.scoutExtractSchema(args.urls as string[], {
+    prompt: args.prompt as string | undefined,
+    schema: args.schema as Record<string, unknown> | undefined,
+    enableWebSearch: args.enableWebSearch as boolean | undefined,
+  }),
+  scout_research_bundle: async (args) => firecrawlTools.scoutResearchBundle(args.query as string, {
+    domains: args.domains as string[] | undefined,
+    recencyDays: args.recencyDays as number | undefined,
+    maxFindings: args.maxFindings as number | undefined,
+  }),
 
   // DevOps Tools
   bash_execute: async (args) => bashTools.executeBash(args.command as string, {
     cwd: args.cwd as string | undefined,
     timeout: args.timeout as number | undefined,
   }),
+  devo_exec_session_start: async (args) => execSessionTools.devoExecSessionStart(args.command as string, {
+    cwd: args.cwd as string | undefined,
+    timeoutMs: args.timeoutMs as number | undefined,
+    allowArbitraryInput: args.allowArbitraryInput as boolean | undefined,
+  }),
+  devo_exec_session_write: async (args) => execSessionTools.devoExecSessionWrite(
+    args.sessionId as string,
+    args.input as string,
+  ),
+  devo_exec_session_poll: async (args) => execSessionTools.devoExecSessionPoll(
+    args.sessionId as string,
+    {
+      maxBytes: args.maxBytes as number | undefined,
+    },
+  ),
   ssh_execute: async (args) => sshTools.executeSSH(
     args.host as string,
     args.command as string,
@@ -463,6 +521,12 @@ const READ_ONLY_TOOLS = new Set([
   'pm2_logs',
   'web_search',
   'web_fetch',
+  'scout_search_fast',
+  'scout_search_deep',
+  'scout_site_map',
+  'scout_crawl_focused',
+  'scout_extract_schema',
+  'scout_research_bundle',
   'context_listDocuments',
   'context_readDocument',
   'context_searchDocuments',

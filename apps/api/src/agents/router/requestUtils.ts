@@ -2,6 +2,7 @@ import { getMessages } from '../../db/queries.js';
 import * as stateManager from '../stateManager.js';
 import { buildConversationHistoryContext } from '../conversationHistory.js';
 import type { QualificationResult, TaskType } from '../types.js';
+import { isConversationalSmallTalk } from '../intakeClassifier.js';
 
 export function parseYesNo(input: string): boolean | null {
   const raw = input.trim().toLowerCase().replace(/[.!?,;:]+$/g, '');
@@ -31,23 +32,8 @@ export function looksLikeContinuePrompt(text: string): boolean {
   return t.includes('required more steps than allowed') || t.includes('should i continue?');
 }
 
-function normalizeQuickText(text: string): string {
-  return (text || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .replace(/[.!?,;:]+$/g, '');
-}
-
 export function isSmallTalk(text: string): boolean {
-  const t = normalizeQuickText(text);
-  if (!t) return false;
-  const greetings = new Set([
-    'hi', 'hello', 'hey', 'yo', 'sup',
-    'hallo', 'moin', 'servus',
-    'ey', 'was geht', "what's up", 'whats up', 'wie gehts', "wie geht's",
-  ]);
-  return greetings.has(t);
+  return isConversationalSmallTalk(text);
 }
 
 export function extractExplicitRememberNote(text: string): { note: string; promoteToLongTerm: boolean } | null {
@@ -74,6 +60,34 @@ export function extractExplicitRememberNote(text: string): { note: string; promo
 export async function loadRecentConversationHistory(sessionId: string): Promise<Array<{ role: string; content: string }>> {
   const messages = await getMessages(sessionId);
   return buildConversationHistoryContext(messages);
+}
+
+export function formatConversationHistoryForScout(
+  history: Array<{ role: string; content: string }>,
+  options?: { maxTurns?: number; maxChars?: number },
+): string {
+  const maxTurns = options?.maxTurns ?? 6;
+  const maxChars = options?.maxChars ?? 2000;
+
+  const summaryEntry = [...history]
+    .reverse()
+    .find((entry) => entry.role === 'system' && entry.content.trim().length > 0);
+
+  const recentTurns = history
+    .filter((entry) => (entry.role === 'user' || entry.role === 'assistant') && entry.content.trim().length > 0)
+    .slice(-maxTurns)
+    .map((entry) => `${entry.role.toUpperCase()}: ${entry.content.trim()}`);
+
+  const parts = [
+    summaryEntry ? `SUMMARY: ${summaryEntry.content.trim()}` : '',
+    ...recentTurns,
+  ].filter((entry) => entry.length > 0);
+
+  if (parts.length === 0) return '';
+
+  const combined = `RECENT CONVERSATION HISTORY:\n${parts.join('\n\n')}`;
+  if (combined.length <= maxChars) return combined;
+  return `${combined.slice(0, maxChars - 14)}\n...[truncated]`;
 }
 
 export function getProjectRootFromState(sessionId: string): string | null {

@@ -47,6 +47,9 @@ export const DEVO_AGENT: AgentDefinition = {
     'web_fetch',
     // DevOps tools
     'bash_execute',
+    'devo_exec_session_start',
+    'devo_exec_session_write',
+    'devo_exec_session_poll',
     'ssh_execute',
     // Git tools
     'git_status',
@@ -61,7 +64,11 @@ export const DEVO_AGENT: AgentDefinition = {
     // PM2 tools
     'pm2_status',
     'pm2_restart',
+    'pm2_stop',
+    'pm2_start',
     'pm2_logs',
+    'pm2_reloadAll',
+    'pm2_save',
     // NPM tools
     'npm_install',
     'npm_run',

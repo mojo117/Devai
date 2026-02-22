@@ -11,11 +11,9 @@ import {
 import { ChapoLoop } from '../chapo-loop.js';
 import type {
   AgentName,
-  QualificationResult,
   UserResponse,
 } from '../types.js';
 import {
-  buildPlanQualificationForComplexTask,
   extractExplicitRememberNote,
   getProjectRootFromState,
   isSmallTalk,
@@ -23,11 +21,6 @@ import {
   looksLikeContinuePrompt,
   parseYesNo,
 } from './requestUtils.js';
-import {
-  determinePlanModeRequired,
-  handlePlanApproval,
-  runPlanMode,
-} from './planMode.js';
 import type { SendEventFn } from './shared.js';
 
 /**
@@ -117,53 +110,9 @@ export async function processRequest(
   stateManager.setGatheredInfo(sessionId, 'taskComplexity', taskComplexity);
   stateManager.setGatheredInfo(sessionId, 'modelSelection', modelSelection);
   const trustMode = await getTrustMode();
-  const approvalsBypassed = trustMode === 'trusted';
   stateManager.setGatheredInfo(sessionId, 'trustMode', trustMode);
 
   try {
-    // Pre-loop gate: keep full qualification + Plan Mode for complex tasks.
-    if (taskComplexity === 'complex') {
-      stateManager.setPhase(sessionId, 'qualification');
-      stateManager.setActiveAgent(sessionId, 'chapo');
-      sendEvent({ type: 'agent_start', agent: 'chapo', phase: 'qualification' });
-
-      const qualification: QualificationResult = buildPlanQualificationForComplexTask(getTextContent(userMessage));
-
-      stateManager.setQualificationResult(sessionId, qualification);
-
-      if (determinePlanModeRequired(qualification)) {
-        console.info('[agents] Plan Mode required', {
-          sessionId,
-          taskType: qualification.taskType,
-          complexity: qualification.complexity,
-          riskLevel: qualification.riskLevel,
-        });
-
-        const plan = await runPlanMode(
-          sessionId,
-          getTextContent(userMessage),
-          qualification,
-          sendEvent,
-        );
-
-        if (approvalsBypassed) {
-          console.info('[agents] trusted mode: auto-approving generated plan', {
-            sessionId,
-            planId: plan.planId,
-          });
-          return handlePlanApproval(
-            sessionId,
-            plan.planId,
-            true,
-            'Auto-approved in trusted mode',
-            sendEvent,
-          );
-        }
-
-        return `**Plan erstellt und wartet auf Genehmigung**\n\n${plan.summary}\n\n**Risiko:** ${plan.overallRisk}\n**Tasks:** ${plan.tasks.length}\n\nBitte überprüfe den Plan und bestätige die Ausführung.`;
-      }
-    }
-
     const loopProjectRoot = projectRoot || getProjectRootFromState(sessionId);
     const loop = new ChapoLoop(sessionId, sendEvent, loopProjectRoot, modelSelection, {
       selfValidationEnabled: taskComplexity !== 'trivial',
@@ -208,6 +157,25 @@ export async function handleUserResponse(
   const question = stateManager.removePendingQuestion(sessionId, questionId);
   if (!question) {
     return 'Frage nicht gefunden.';
+  }
+
+  const activeTurnId = stateManager.getActiveTurnId(sessionId);
+  const turnMismatch = Boolean(question.turnId && activeTurnId && question.turnId !== activeTurnId);
+  const expired = Boolean(
+    question.expiresAt
+    && Number.isFinite(Date.parse(question.expiresAt))
+    && Date.parse(question.expiresAt) <= Date.now(),
+  );
+  if (turnMismatch || expired) {
+    const history = await loadRecentConversationHistory(sessionId);
+    const projectRoot = getProjectRootFromState(sessionId);
+    return processRequest(
+      sessionId,
+      answer,
+      history,
+      projectRoot,
+      sendEvent,
+    );
   }
 
   const historyAgent: AgentName =

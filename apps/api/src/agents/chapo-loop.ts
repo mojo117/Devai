@@ -50,6 +50,21 @@ interface ChapoLoopConfig {
   maxIterations: number;
 }
 
+interface StoredPreflightIssue {
+  type: string;
+  detail: string;
+}
+
+interface StoredAnswerPreflight {
+  turnId?: string;
+  checkedAt: string;
+  ok: boolean;
+  score?: number;
+  issues: StoredPreflightIssue[];
+}
+
+const PREFLIGHT_MAX_AGE_MS = 30 * 60 * 1000;
+
 export class ChapoLoop {
   private errorHandler: AgentErrorHandler;
   private answerValidator: AnswerValidator;
@@ -169,6 +184,43 @@ export class ChapoLoop {
         blockingOnly: true,
       },
     );
+  }
+
+  private getLatestAnswerPreflight(): StoredAnswerPreflight | null {
+    const raw = stateManager.getState(this.sessionId)?.taskContext.gatheredInfo.chapoAnswerPreflight;
+    if (!raw || typeof raw !== 'object') return null;
+
+    const value = raw as Record<string, unknown>;
+    if (typeof value.checkedAt !== 'string' || typeof value.ok !== 'boolean') {
+      return null;
+    }
+
+    const issues: StoredPreflightIssue[] = Array.isArray(value.issues)
+      ? value.issues
+        .filter((item): item is StoredPreflightIssue =>
+          Boolean(
+            item
+            && typeof item === 'object'
+            && typeof (item as Record<string, unknown>).type === 'string'
+            && typeof (item as Record<string, unknown>).detail === 'string',
+          ),
+        )
+        .slice(0, 8)
+      : [];
+
+    return {
+      turnId: typeof value.turnId === 'string' ? value.turnId : undefined,
+      checkedAt: value.checkedAt,
+      ok: value.ok,
+      score: typeof value.score === 'number' ? value.score : undefined,
+      issues,
+    };
+  }
+
+  private isPreflightFresh(checkedAt: string): boolean {
+    const parsed = Date.parse(checkedAt);
+    if (!Number.isFinite(parsed)) return false;
+    return (Date.now() - parsed) <= PREFLIGHT_MAX_AGE_MS;
   }
 
   async run(userMessage: string | ContentBlock[], conversationHistory: Array<{ role: string; content: string }>): Promise<ChapoLoopResult> {
@@ -297,58 +349,112 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
 
         const answer = response.content || '';
         const userText = getTextContent(userMessage);
-
-        if (this.shouldApplyCoverageGuard(userText)) {
-          const activeTurnId = this.getActiveTurnId();
-          const unresolvedBefore = stateManager.getUnresolvedObligations(
+        const applyCoverageGuard = this.shouldApplyCoverageGuard(userText);
+        const activeTurnId = this.getActiveTurnId();
+        const unresolvedBefore = applyCoverageGuard
+          ? stateManager.getUnresolvedObligations(
             this.sessionId,
             {
               turnId: activeTurnId || undefined,
               blockingOnly: true,
             },
-          );
-          if (unresolvedBefore.length > 0) {
-            const coverage = await this.answerValidator.evaluateObligationCoverage(unresolvedBefore, answer);
-            for (const obligationId of coverage.resolvedIds) {
-              stateManager.satisfyObligation(
-                this.sessionId,
-                obligationId,
-                'Covered by final answer draft.',
-              );
-            }
+          )
+          : [];
 
-            if (coverage.unresolved.length > 0) {
-              const unresolvedLines = coverage.unresolved
-                .slice(0, 4)
-                .map((obligation) => `- ${obligation.requiredOutcome || obligation.description}`)
-                .join('\n');
+        if (applyCoverageGuard && unresolvedBefore.length > 0) {
+          const coverage = await this.answerValidator.evaluateObligationCoverage(unresolvedBefore, answer);
+          for (const obligationId of coverage.resolvedIds) {
+            stateManager.satisfyObligation(
+              this.sessionId,
+              obligationId,
+              'Covered by final answer draft.',
+            );
+          }
 
-              this.sendEvent({
-                type: 'agent_thinking',
-                agent: 'chapo',
-                status: `Coverage Guard: ${coverage.unresolved.length} offene Verpflichtung(en) erkannt.`,
-              });
+          if (coverage.unresolved.length > 0) {
+            const unresolvedLines = coverage.unresolved
+              .slice(0, 4)
+              .map((obligation) => `- ${obligation.requiredOutcome || obligation.description}`)
+              .join('\n');
 
-              const guidance = `[Coverage Guard]
+            this.sendEvent({
+              type: 'agent_thinking',
+              agent: 'chapo',
+              status: `Coverage Guard: ${coverage.unresolved.length} offene Verpflichtung(en) erkannt.`,
+            });
+
+            const guidance = `[Coverage Guard]
 Die Antwort ist noch nicht vollstaendig. Offene Verpflichtungen:
 ${unresolvedLines}
 
 Arbeite diese Punkte zuerst ab (Tool/Delegation/askUser bei echtem Blocker), dann antworte final.`;
-              this.conversation.addMessage({ role: 'system', content: guidance });
+            this.conversation.addMessage({ role: 'system', content: guidance });
 
-              if (this.iteration >= this.config.maxIterations - 1) {
-                return this.queueQuestion(
-                  `Ich habe noch offene Teilaufgaben:\n${unresolvedLines}\n\nSoll ich weitermachen, um diese Punkte abzuschliessen?`,
-                  this.iteration + 1,
-                  {
-                    kind: 'continue',
-                    turnId: activeTurnId || undefined,
-                    fingerprint: `continue:${activeTurnId || 'none'}:${unresolvedLines}`,
-                  },
-                );
-              }
-              continue;
+            if (this.iteration >= this.config.maxIterations - 1) {
+              return this.queueQuestion(
+                `Ich habe noch offene Teilaufgaben:\n${unresolvedLines}\n\nSoll ich weitermachen, um diese Punkte abzuschliessen?`,
+                this.iteration + 1,
+                {
+                  kind: 'continue',
+                  turnId: activeTurnId || undefined,
+                  fingerprint: `continue:${activeTurnId || 'none'}:${unresolvedLines}`,
+                },
+              );
             }
+            continue;
+          }
+        }
+
+        if (applyCoverageGuard && unresolvedBefore.length >= 2) {
+          const preflight = this.getLatestAnswerPreflight();
+          const sameTurn = (preflight?.turnId || null) === (activeTurnId || null);
+          const preflightFresh = preflight ? this.isPreflightFresh(preflight.checkedAt) : false;
+          const unresolvedLines = unresolvedBefore
+            .slice(0, 4)
+            .map((obligation) => `- ${obligation.requiredOutcome || obligation.description}`)
+            .join('\n');
+
+          if (!preflight || !sameTurn || !preflightFresh) {
+            this.sendEvent({
+              type: 'agent_thinking',
+              agent: 'chapo',
+              status: 'Preflight Guard: Vor finaler Antwort ist ein aktueller Entwurfscheck erforderlich.',
+            });
+            this.conversation.addMessage({
+              role: 'system',
+              content: `[Preflight Guard]
+Bei mehreren offenen Verpflichtungen ist ein Preflight vor der finalen Antwort Pflicht.
+Fuehre jetzt chapo_answer_preflight auf deinen aktuellen Entwurf aus (strict=true).
+
+Pflichtpunkte:
+${unresolvedLines}`,
+            });
+            continue;
+          }
+
+          if (!preflight.ok) {
+            const issueLines = preflight.issues.length > 0
+              ? preflight.issues
+                .slice(0, 4)
+                .map((issue) => `- ${issue.type}: ${issue.detail}`)
+                .join('\n')
+              : '- Preflight ist nicht ok, aber es wurden keine Details gespeichert.';
+
+            this.sendEvent({
+              type: 'agent_thinking',
+              agent: 'chapo',
+              status: 'Preflight Guard: Letzter Entwurfscheck ist fehlgeschlagen, ueberarbeite die Antwort.',
+            });
+            this.conversation.addMessage({
+              role: 'system',
+              content: `[Preflight Guard]
+Der letzte Preflight fuer diesen Turn ist nicht ok${typeof preflight.score === 'number' ? ` (score=${preflight.score.toFixed(2)})` : ''}.
+Behebe die Punkte, fuehre chapo_answer_preflight erneut aus und antworte erst dann final.
+
+Issues:
+${issueLines}`,
+            });
+            continue;
           }
         }
 

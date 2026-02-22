@@ -27,6 +27,9 @@ export type ToolName =
   | 'logs_getStagingLogs'
   // DevOps Tools (DEVO)
   | 'bash_execute'
+  | 'devo_exec_session_start'
+  | 'devo_exec_session_write'
+  | 'devo_exec_session_poll'
   | 'ssh_execute'
   | 'pm2_status'
   | 'pm2_restart'
@@ -40,6 +43,12 @@ export type ToolName =
   // Web Tools (SCOUT agent)
   | 'web_search'
   | 'web_fetch'
+  | 'scout_search_fast'
+  | 'scout_search_deep'
+  | 'scout_site_map'
+  | 'scout_crawl_focused'
+  | 'scout_extract_schema'
+  | 'scout_research_bundle'
   // Context Tools (read-only document access)
   | 'context_listDocuments'
   | 'context_readDocument'

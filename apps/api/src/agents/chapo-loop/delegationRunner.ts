@@ -17,6 +17,10 @@ import {
   buildCaioEvidence,
   type CaioEvidence,
 } from './caioEvidence.js';
+import {
+  formatConversationHistoryForScout,
+  loadRecentConversationHistory,
+} from '../router/requestUtils.js';
 import { formatDelegationContext, isDelegationSuccessful, type ParallelDelegation } from './delegationUtils.js';
 import { handleToolCall, devoStrategy, caioStrategy, type RunnerToolCall } from './toolCallHandler.js';
 
@@ -29,11 +33,16 @@ export interface DelegationDecisionPath {
   unresolvedAssumptions: string[];
 }
 
-interface ParallelJobResult extends ParallelDelegation {
+export interface ParallelJobResult extends ParallelDelegation {
   success: boolean;
   result?: string;
   loopResult?: LoopDelegationResult;
   error?: string;
+}
+
+export interface ParallelDelegationSummary {
+  summary: string;
+  results: ParallelJobResult[];
 }
 
 export interface DelegationRunnerDeps {
@@ -203,9 +212,16 @@ async function delegateToScout(
   });
 
   try {
+    const history = await loadRecentConversationHistory(deps.sessionId);
+    const historyContext = formatConversationHistoryForScout(history);
+    const scoutContext = [
+      historyContext,
+      formatDelegationContext(delegation),
+    ].filter((part) => part && part.trim().length > 0).join('\n\n');
+
     const scoutResult = await spawnScout(deps.sessionId, delegation.objective, {
       scope: delegation.scope || 'both',
-      context: formatDelegationContext(delegation),
+      context: scoutContext || undefined,
       sendEvent: deps.sendEvent,
     });
     const scoutFindings: ScoutFindings = {
@@ -309,7 +325,7 @@ export async function delegateParallel(
   deps: DelegationRunnerDeps,
   delegations: ParallelDelegation[],
   buildVerificationEnvelope: (delegation: ParallelDelegation, result: LoopDelegationResult) => string,
-): Promise<string> {
+): Promise<ParallelDelegationSummary> {
   const jobs = delegations.map(async (delegation): Promise<ParallelJobResult> => {
     try {
       const loopResult = await delegateToAgent(deps, delegation, 'chapo');
@@ -360,5 +376,8 @@ export async function delegateParallel(
     }
   }
 
-  return lines.join('\n');
+  return {
+    summary: lines.join('\n'),
+    results,
+  };
 }

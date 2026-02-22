@@ -10,12 +10,8 @@ import {
   GATE_APPROVAL_QUEUED,
   GATE_QUESTION_RESOLVED,
   GATE_APPROVAL_RESOLVED,
-  GATE_PLAN_APPROVAL_RESOLVED,
   WF_TURN_STARTED,
   WF_FAILED,
-  TASK_UPDATED,
-  TASK_COMPLETED,
-  TASK_FAILED,
 } from '../events/catalog.js';
 
 // Mock stateManager
@@ -27,7 +23,6 @@ vi.mock('../../agents/stateManager.js', () => ({
   flushState: vi.fn().mockResolvedValue(undefined),
   setOriginalRequest: vi.fn(),
   setGatheredInfo: vi.fn(),
-  updateTaskStatus: vi.fn(),
 }));
 
 import * as stateManager from '../../agents/stateManager.js';
@@ -167,17 +162,6 @@ describe('StateProjection', () => {
     expect(stateManager.setPhase).not.toHaveBeenCalled();
   });
 
-  it('does NOT handle GATE_PLAN_APPROVAL_RESOLVED', async () => {
-    const event = createEvent(makeCtx(), GATE_PLAN_APPROVAL_RESOLVED, {
-      planId: 'p-1',
-      approved: true,
-    });
-
-    await projection.handle(event);
-
-    expect(stateManager.setPhase).not.toHaveBeenCalled();
-  });
-
   // ── AC-6: WF_TURN_STARTED sets original request ───────────────
 
   it('sets original request on WF_TURN_STARTED', async () => {
@@ -204,49 +188,7 @@ describe('StateProjection', () => {
     expect(stateManager.setPhase).toHaveBeenCalledWith('sess-1', 'error');
   });
 
-  // ── AC-8: TASK_UPDATED/COMPLETED/FAILED update task status ────
-
-  it('updates task status on TASK_UPDATED', async () => {
-    const event = createEvent(makeCtx(), TASK_UPDATED, {
-      taskId: 't-1',
-      status: 'in_progress',
-      progress: 50,
-    });
-
-    await projection.handle(event);
-
-    expect(stateManager.updateTaskStatus).toHaveBeenCalledWith(
-      'sess-1', 't-1', 'in_progress', { progress: 50 },
-    );
-  });
-
-  it('marks task completed on TASK_COMPLETED', async () => {
-    const event = createEvent(makeCtx(), TASK_COMPLETED, {
-      taskId: 't-1',
-      result: 'done',
-    });
-
-    await projection.handle(event);
-
-    expect(stateManager.updateTaskStatus).toHaveBeenCalledWith(
-      'sess-1', 't-1', 'completed', { result: 'done' },
-    );
-  });
-
-  it('marks task failed on TASK_FAILED', async () => {
-    const event = createEvent(makeCtx(), TASK_FAILED, {
-      taskId: 't-1',
-      error: 'timeout',
-    });
-
-    await projection.handle(event);
-
-    expect(stateManager.updateTaskStatus).toHaveBeenCalledWith(
-      'sess-1', 't-1', 'failed', { error: 'timeout' },
-    );
-  });
-
-  // ── AC-9: Unhandled events are silently ignored ────────────────
+  // ── AC-8: Unhandled events are silently ignored ────────────────
 
   it('ignores events not in the switch statement', async () => {
     const event = createEvent(makeCtx(), 'unknown.event', { data: 'test' });
@@ -257,6 +199,5 @@ describe('StateProjection', () => {
     expect(stateManager.setPhase).not.toHaveBeenCalled();
     expect(stateManager.setActiveAgent).not.toHaveBeenCalled();
     expect(stateManager.setOriginalRequest).not.toHaveBeenCalled();
-    expect(stateManager.updateTaskStatus).not.toHaveBeenCalled();
   });
 });

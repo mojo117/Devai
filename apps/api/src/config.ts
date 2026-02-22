@@ -91,6 +91,9 @@ export interface Config {
   memoryRetrievalThresholds: number[];
   memoryMinHitsBeforeStop: number;
   memoryIncludePersonalScope: boolean;
+  contextProvenanceTags: boolean;
+  gateQuestionTtlMs: number;
+  gateQuestionDedup: boolean;
 
 }
 
@@ -170,6 +173,9 @@ export function loadConfig(): Config {
     ),
     memoryMinHitsBeforeStop: Math.max(1, parseInt(process.env.MEMORY_MIN_HITS_BEFORE_STOP || "3", 10)),
     memoryIncludePersonalScope: process.env.MEMORY_INCLUDE_PERSONAL_SCOPE !== "false",
+    contextProvenanceTags: process.env.CONTEXT_PROVENANCE_TAGS !== "false",
+    gateQuestionTtlMs: Math.max(0, parseInt(process.env.GATE_QUESTION_TTL_MS || "600000", 10)),
+    gateQuestionDedup: process.env.GATE_QUESTION_DEDUP !== "false",
 
   };
 }

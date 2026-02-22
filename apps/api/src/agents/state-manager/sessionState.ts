@@ -64,6 +64,35 @@ export function setGatheredInfo(
   schedulePersist(sessionId);
 }
 
+export function setActiveTurnId(sessionId: string, turnId: string): void {
+  const state = getOrCreateState(sessionId);
+  state.taskContext.gatheredInfo.activeTurnId = turnId;
+  schedulePersist(sessionId);
+}
+
+export function getActiveTurnId(sessionId: string): string | null {
+  const state = getState(sessionId);
+  const raw = state?.taskContext.gatheredInfo.activeTurnId;
+  return typeof raw === 'string' && raw.trim().length > 0 ? raw : null;
+}
+
+export function ensureActiveTurnId(sessionId: string, preferredTurnId?: string): string {
+  const preferred = preferredTurnId?.trim();
+  if (preferred) {
+    const existing = getActiveTurnId(sessionId);
+    if (existing !== preferred) {
+      setActiveTurnId(sessionId, preferred);
+    }
+    return preferred;
+  }
+
+  const existing = getActiveTurnId(sessionId);
+  if (existing) return existing;
+  const nextTurnId = nanoid();
+  setActiveTurnId(sessionId, nextTurnId);
+  return nextTurnId;
+}
+
 export function setLoopRunning(sessionId: string, running: boolean): void {
   const state = getOrCreateState(sessionId);
   state.isLoopRunning = running;
@@ -283,6 +312,7 @@ export function getStateSummary(sessionId: string): {
   pendingQuestions: number;
   activeParallelExecutions: number;
   approvalGranted: boolean;
+  unresolvedObligations: number;
 } | null {
   const state = getState(sessionId);
   if (!state) return null;
@@ -296,5 +326,6 @@ export function getStateSummary(sessionId: string): {
     pendingQuestions: state.pendingQuestions.length,
     activeParallelExecutions: state.parallelExecutions.filter((e) => e.status === 'running').length,
     approvalGranted: state.taskContext.approvalGranted,
+    unresolvedObligations: state.obligations.filter((o) => o.status === 'open' || o.status === 'failed').length,
   };
 }

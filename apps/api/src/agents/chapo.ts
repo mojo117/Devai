@@ -47,6 +47,11 @@ export const CHAPO_AGENT: AgentDefinition = {
     // Skill tools (read-only management)
     'skill_list',
     'skill_reload',
+    // CHAPO control tools
+    'chapo_inbox_list_open',
+    'chapo_inbox_resolve',
+    'chapo_plan_set',
+    'chapo_answer_preflight',
     // Meta-tools for coordination
     'delegateToDevo',
     'delegateToCaio',
@@ -54,6 +59,7 @@ export const CHAPO_AGENT: AgentDefinition = {
     'delegateToScout',
     'askUser',
     'requestApproval',
+    'todoWrite',
     'respondToUser',
   ],
 
@@ -62,6 +68,146 @@ export const CHAPO_AGENT: AgentDefinition = {
 
 // Tool definitions for CHAPO-specific meta-tools
 export const CHAPO_META_TOOLS = [
+  {
+    name: 'chapo_inbox_list_open',
+    description: 'Liste offene User-Verpflichtungen aus der Inbox bzw. aktuellen Aufgabe.',
+    parameters: {
+      type: 'object',
+      properties: {
+        scope: {
+          type: 'string',
+          enum: ['all', 'current_task'],
+          description: 'all = alle offenen Punkte, current_task = nur aktive Turn-Aufgabe.',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximale Anzahl Rueckgaben (1-50, default 10).',
+        },
+      },
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'chapo_inbox_resolve',
+    description: 'Markiere eine offene Verpflichtung als erledigt, blockiert oder bewusst verworfen.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: {
+          type: 'string',
+          description: 'Obligation-ID aus chapo_inbox_list_open.',
+        },
+        resolution: {
+          type: 'string',
+          enum: ['done', 'wont_do', 'superseded', 'blocked'],
+          description: 'done=satisfied, blocked=failed, wont_do/superseded=waived.',
+        },
+        note: {
+          type: 'string',
+          description: 'Kurze Begruendung oder Evidenz (optional).',
+        },
+      },
+      required: ['id', 'resolution'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'chapo_plan_set',
+    description: 'Setzt einen kurzen Ausfuehrungsplan mit Schritten, Owner und Status fuer die laufende Aufgabe.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Plan-Titel.',
+        },
+        steps: {
+          type: 'array',
+          description: 'Plan-Schritte (genau 1 Schritt darf status=doing haben).',
+          items: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+                description: 'Stabile Schritt-ID (z.B. s1).',
+              },
+              text: {
+                type: 'string',
+                description: 'Kurze Aktionsbeschreibung.',
+              },
+              owner: {
+                type: 'string',
+                enum: ['chapo', 'devo', 'scout', 'caio'],
+                description: 'Zustaendiger Agent.',
+              },
+              status: {
+                type: 'string',
+                enum: ['todo', 'doing', 'done', 'blocked'],
+                description: 'Aktueller Schrittstatus.',
+              },
+            },
+            required: ['id', 'text', 'owner', 'status'],
+          },
+        },
+      },
+      required: ['title', 'steps'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'chapo_answer_preflight',
+    description: 'Prueft einen Antwortentwurf auf Coverage, Widersprueche und unbelegte Claims.',
+    parameters: {
+      type: 'object',
+      properties: {
+        draft: {
+          type: 'string',
+          description: 'Antwortentwurf, der geprueft werden soll.',
+        },
+        mustAddress: {
+          type: 'array',
+          description: 'Optionale Liste von Punkten, die die Antwort explizit adressieren muss.',
+          items: { type: 'string' },
+        },
+        strict: {
+          type: 'boolean',
+          description: 'Wenn true, nur ohne Issues als okay markieren.',
+        },
+      },
+      required: ['draft'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'todoWrite',
+    description: 'Schreibe oder aktualisiere deine persoenliche Todo-Liste. Sende immer die KOMPLETTE Liste — sie wird jedes Mal ueberschrieben.',
+    parameters: {
+      type: 'object',
+      properties: {
+        todos: {
+          type: 'array',
+          description: 'Die komplette Todo-Liste.',
+          items: {
+            type: 'object',
+            properties: {
+              content: {
+                type: 'string',
+                description: 'Was zu tun ist.',
+              },
+              status: {
+                type: 'string',
+                enum: ['pending', 'in_progress', 'completed'],
+                description: 'Aktueller Status.',
+              },
+            },
+            required: ['content', 'status'],
+          },
+        },
+      },
+      required: ['todos'],
+    },
+    requiresConfirmation: false,
+  },
   {
     name: 'delegateToDevo',
     description: 'Delegiere Entwicklungs-/DevOps-Aufgaben an DEVO. Entscheide nur die Domäne und das Ziel; DEVO wählt die konkreten Tools.',

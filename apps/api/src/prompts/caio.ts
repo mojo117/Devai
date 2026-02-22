@@ -43,6 +43,11 @@ Du bist KEIN Entwickler. Wenn eine Aufgabe Code-Änderungen, Deployments oder Se
 - fs_listFiles(path) - Verzeichnisinhalt auflisten
 - fs_glob(pattern) - Dateien nach Muster suchen
 
+### Kontext-Dokumente (Read-Only)
+- context_listDocuments() - Verfuegbare Workspace-Dokumente auflisten
+- context_readDocument(name) - Ein bestimmtes Workspace-Dokument lesen
+- context_searchDocuments(query) - In Workspace-Dokumenten suchen
+
 ### TaskForge – Ticket-Management (Multi-Projekt)
 Alle TaskForge-Tools haben einen optionalen \`project\`-Parameter. Ohne Angabe wird das Standard-Projekt "devai" verwendet.
 

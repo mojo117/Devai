@@ -4,7 +4,6 @@ import type {
   UserRequestCommand,
   UserQuestionAnsweredCommand,
   UserApprovalDecidedCommand,
-  UserPlanApprovalDecidedCommand,
 } from './types.js';
 import type { RequestContext } from '../context/requestContext.js';
 import { workflowBus } from '../events/bus.js';
@@ -13,13 +12,11 @@ import {
   WF_TURN_STARTED,
   GATE_QUESTION_RESOLVED,
   GATE_APPROVAL_RESOLVED,
-  GATE_PLAN_APPROVAL_RESOLVED,
 } from '../events/catalog.js';
 import {
   processRequest,
   handleUserApproval,
   handleUserResponse,
-  handlePlanApproval,
 } from '../../agents/router.js';
 import type { AgentStreamEvent, InboxMessage } from '../../agents/types.js';
 import { pushToInbox } from '../../agents/inbox.js';
@@ -39,6 +36,7 @@ import {
   getActiveTurnId,
   setPhase,
   isLoopActive,
+  setLoopRunning,
   addUserRequestObligations,
   waiveObligationsExceptTurn,
 } from '../../agents/stateManager.js';
@@ -80,12 +78,6 @@ function buildSessionTitle(message: string): string | null {
 
 function buildApprovalDecisionText(command: UserApprovalDecidedCommand): string {
   return `/approval ${command.approved ? 'yes' : 'no'} (${command.approvalId})`;
-}
-
-function buildPlanApprovalDecisionText(command: UserPlanApprovalDecidedCommand): string {
-  const base = `/plan_approval ${command.approved ? 'yes' : 'no'} (${command.planId})`;
-  const reason = typeof command.reason === 'string' ? command.reason.trim() : '';
-  return reason ? `${base} reason: ${reason}` : base;
 }
 
 function createChatMessage(role: ChatMessage['role'], content: string): ChatMessage {
@@ -266,6 +258,11 @@ export class CommandHandlers {
       }
     }
 
+    // Claim the loop IMMEDIATELY so concurrent messages are queued.
+    // ChapoLoop.run() will clear this flag in its own finally block;
+    // if we fail before reaching the loop, the catch below clears it.
+    setLoopRunning(activeSessionId, true);
+
     try {
       const result = await processRequest(
         activeSessionId,
@@ -295,6 +292,9 @@ export class CommandHandlers {
 
       return { type: 'success', sessionId: activeSessionId, responseMessage };
     } catch (err) {
+      // Ensure the loop flag is cleared if we never reached ChapoLoop.run()
+      setLoopRunning(activeSessionId, false);
+
       const errorContent = `Error: ${err instanceof Error ? err.message : 'Unknown error'}`;
       const userMessage = createChatMessage('user', message);
       const responseMessage = createChatMessage('assistant', errorContent);
@@ -396,44 +396,4 @@ export class CommandHandlers {
     return { type: 'success', sessionId: command.sessionId, responseMessage };
   }
 
-  async handlePlanApproval(
-    command: UserPlanApprovalDecidedCommand,
-    ctx: RequestContext,
-    opts: DispatchOptions,
-  ): Promise<DispatchResult> {
-    opts.joinSession(command.sessionId);
-    await ensureSessionExists(command.sessionId);
-    await ensureStateLoaded(command.sessionId);
-
-    // Emit gate resolution event (for audit/state projections)
-    await workflowBus.emit(createEvent(ctx, GATE_PLAN_APPROVAL_RESOLVED, {
-      planId: command.planId,
-      approved: command.approved,
-      reason: command.reason,
-    }, { source: 'ws', visibility: 'ui' }));
-
-    const { sendEvent, collectedToolEvents } = createCollectingBridge(ctx);
-
-    const result = await handlePlanApproval(
-      command.sessionId,
-      command.planId,
-      command.approved,
-      command.reason,
-      sendEvent as (event: AgentStreamEvent) => void,
-    );
-
-    const responseMessage = createChatMessage('assistant', result);
-    const userMessage = createChatMessage('user', buildPlanApprovalDecisionText(command));
-
-    await persistAndEmitTerminalResponse({
-      ctx,
-      sessionId: command.sessionId,
-      userMessage,
-      responseMessage,
-      collectedToolEvents,
-      isError: false,
-    });
-
-    return { type: 'success', sessionId: command.sessionId, responseMessage };
-  }
 }

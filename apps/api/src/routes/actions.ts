@@ -11,6 +11,7 @@ import {
 import { buildActionPreview } from '../actions/preview.js';
 import { nanoid } from 'nanoid';
 import type { ApproveResponse, RejectResponse, RetryResponse } from '@devai/shared';
+import { parseOrReply400 } from './validation.js';
 
 const ApproveRequestSchema = z.object({
   actionId: z.string(),
@@ -51,16 +52,9 @@ export const actionRoutes: FastifyPluginAsync = async (app) => {
   app.post('/actions/approve', {
     config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
   }, async (request, reply) => {
-    const parseResult = ApproveRequestSchema.safeParse(request.body);
-
-    if (!parseResult.success) {
-      return reply.status(400).send({
-        error: 'Invalid request',
-        details: parseResult.error.issues,
-      });
-    }
-
-    const { actionId } = parseResult.data;
+    const parsed = parseOrReply400(reply, ApproveRequestSchema, request.body);
+    if (!parsed) return;
+    const { actionId } = parsed;
 
     try {
       const action = await approveAndExecuteAction(actionId);
@@ -87,16 +81,9 @@ export const actionRoutes: FastifyPluginAsync = async (app) => {
   app.post('/actions/reject', {
     config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
   }, async (request, reply) => {
-    const parseResult = ApproveRequestSchema.safeParse(request.body);
-
-    if (!parseResult.success) {
-      return reply.status(400).send({
-        error: 'Invalid request',
-        details: parseResult.error.issues,
-      });
-    }
-
-    const { actionId } = parseResult.data;
+    const parsed = parseOrReply400(reply, ApproveRequestSchema, request.body);
+    if (!parsed) return;
+    const { actionId } = parsed;
 
     try {
       const action = await rejectAction(actionId);
@@ -121,16 +108,9 @@ export const actionRoutes: FastifyPluginAsync = async (app) => {
   app.post('/actions/approve-batch', {
     config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
   }, async (request, reply) => {
-    const parseResult = BatchApproveRequestSchema.safeParse(request.body);
-
-    if (!parseResult.success) {
-      return reply.status(400).send({
-        error: 'Invalid request',
-        details: parseResult.error.issues,
-      });
-    }
-
-    const { actionIds } = parseResult.data;
+    const parsed = parseOrReply400(reply, BatchApproveRequestSchema, request.body);
+    if (!parsed) return;
+    const { actionIds } = parsed;
     const results: Array<{ actionId: string; success: boolean; error?: string; result?: unknown }> = [];
 
     for (const actionId of actionIds) {
@@ -158,16 +138,9 @@ export const actionRoutes: FastifyPluginAsync = async (app) => {
   app.post('/actions/reject-batch', {
     config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
   }, async (request, reply) => {
-    const parseResult = BatchApproveRequestSchema.safeParse(request.body);
-
-    if (!parseResult.success) {
-      return reply.status(400).send({
-        error: 'Invalid request',
-        details: parseResult.error.issues,
-      });
-    }
-
-    const { actionIds } = parseResult.data;
+    const parsed = parseOrReply400(reply, BatchApproveRequestSchema, request.body);
+    if (!parsed) return;
+    const { actionIds } = parsed;
     const results: Array<{ actionId: string; success: boolean; error?: string }> = [];
 
     for (const actionId of actionIds) {
@@ -193,16 +166,9 @@ export const actionRoutes: FastifyPluginAsync = async (app) => {
   app.post('/actions/retry', {
     config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
   }, async (request, reply) => {
-    const parseResult = ApproveRequestSchema.safeParse(request.body);
-
-    if (!parseResult.success) {
-      return reply.status(400).send({
-        error: 'Invalid request',
-        details: parseResult.error.issues,
-      });
-    }
-
-    const { actionId } = parseResult.data;
+    const parsed = parseOrReply400(reply, ApproveRequestSchema, request.body);
+    if (!parsed) return;
+    const { actionId } = parsed;
     const action = await getAction(actionId);
 
     if (!action) {

@@ -20,8 +20,6 @@ import {
   TOOL_ACTION_PENDING,
   GATE_QUESTION_QUEUED,
   GATE_APPROVAL_QUEUED,
-  PLAN_READY,
-  TASK_UPDATED,
   WF_COMPLETED,
   WF_FAILED,
 } from '../events/catalog.js';
@@ -44,6 +42,9 @@ function normalizeUserQuestionPayload(payload: Record<string, unknown>): Record<
   if (typeof payload.question === 'string') normalized.question = payload.question;
   if (typeof payload.fromAgent === 'string') normalized.fromAgent = payload.fromAgent;
   if (typeof payload.timestamp === 'string') normalized.timestamp = payload.timestamp;
+  if (typeof payload.turnId === 'string') normalized.turnId = payload.turnId;
+  if (typeof payload.questionKind === 'string') normalized.questionKind = payload.questionKind;
+  if (typeof payload.expiresAt === 'string') normalized.expiresAt = payload.expiresAt;
   return normalized;
 }
 
@@ -107,14 +108,6 @@ export class MarkdownLogProjection implements Projection {
 
       case GATE_APPROVAL_QUEUED:
         logger.logAgentEvent({ type: 'approval_request', request: p });
-        break;
-
-      case PLAN_READY:
-        logger.logAgentEvent({ type: 'plan_ready', plan: p.plan });
-        break;
-
-      case TASK_UPDATED:
-        logger.logAgentEvent({ type: 'task_update', taskId: p.taskId, status: p.status });
         break;
 
       case AGENT_FAILED:

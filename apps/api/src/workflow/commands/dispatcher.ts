@@ -22,8 +22,6 @@ export class CommandDispatcher {
         return handlers.handleQuestionAnswer(command, ctx, opts);
       case 'user_approval_decided':
         return handlers.handleApproval(command, ctx, opts);
-      case 'user_plan_approval_decided':
-        return handlers.handlePlanApproval(command, ctx, opts);
     }
   }
 }
@@ -76,17 +74,6 @@ export function mapWsMessageToCommand(
       requestId,
       approvalId: typeof msg.approvalId === 'string' ? msg.approvalId : '',
       approved: Boolean(msg.approved),
-    };
-  }
-
-  if (msgType === 'plan_approval') {
-    return {
-      type: 'user_plan_approval_decided',
-      sessionId: (typeof msg.sessionId === 'string' ? msg.sessionId : currentSessionId) || '',
-      requestId,
-      planId: typeof msg.planId === 'string' ? msg.planId : '',
-      approved: Boolean(msg.approved),
-      reason: typeof msg.reason === 'string' ? msg.reason : undefined,
     };
   }
 

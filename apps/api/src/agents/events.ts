@@ -10,15 +10,11 @@ import type {
   AgentName,
   AgentPhase,
   DelegationDomain,
-  TaskStatus,
-  PlanTask,
-  ExecutionPlan,
   ScoutResult,
   ScoutScope,
   EscalationIssue,
   UserQuestion,
   ApprovalRequest,
-  AgentPerspective,
   DelegationResult,
   AgentHistoryEntry,
 } from './types.js';
@@ -30,8 +26,6 @@ import type {
 export type EventCategory =
   | 'agent'
   | 'tool'
-  | 'plan'
-  | 'task'
   | 'scout'
   | 'user'
   | 'inbox'
@@ -224,129 +218,6 @@ export const ToolEvents = {
 };
 
 // ============================================
-// PLAN EVENTS
-// ============================================
-
-export const PlanEvents = {
-  /** Plan mode started */
-  start: (sessionId: string) => ({
-    ...createBaseEvent('plan', sessionId),
-    type: 'plan_start' as const,
-    sessionId,
-  }),
-
-  /** Agent perspective analysis started */
-  perspectiveStart: (sessionId: string, agent: AgentName) => ({
-    ...createBaseEvent('plan', sessionId),
-    type: 'perspective_start' as const,
-    agent,
-  }),
-
-  /** Agent perspective analysis completed */
-  perspectiveComplete: (sessionId: string, agent: AgentName, perspective: AgentPerspective) => ({
-    ...createBaseEvent('plan', sessionId),
-    type: 'perspective_complete' as const,
-    agent,
-    perspective,
-  }),
-
-  /** Plan is ready for review */
-  ready: (sessionId: string, plan: ExecutionPlan) => ({
-    ...createBaseEvent('plan', sessionId),
-    type: 'plan_ready' as const,
-    plan,
-  }),
-
-  /** Plan requires user approval */
-  approvalRequest: (sessionId: string, plan: ExecutionPlan) => ({
-    ...createBaseEvent('plan', sessionId),
-    type: 'plan_approval_request' as const,
-    plan,
-  }),
-
-  /** Plan approved by user */
-  approved: (sessionId: string, planId: string) => ({
-    ...createBaseEvent('plan', sessionId),
-    type: 'plan_approved' as const,
-    planId,
-  }),
-
-  /** Plan rejected by user */
-  rejected: (sessionId: string, planId: string, reason?: string) => ({
-    ...createBaseEvent('plan', sessionId),
-    type: 'plan_rejected' as const,
-    planId,
-    reason,
-  }),
-
-  /** Plan execution completed */
-  complete: (sessionId: string, planId: string, summary: string) => ({
-    ...createBaseEvent('plan', sessionId),
-    type: 'plan_complete' as const,
-    planId,
-    summary,
-  }),
-};
-
-// ============================================
-// TASK EVENTS
-// ============================================
-
-export const TaskEvents = {
-  /** Task created */
-  created: (sessionId: string, task: PlanTask) => ({
-    ...createBaseEvent('task', sessionId),
-    type: 'task_created' as const,
-    task,
-  }),
-
-  /** Task status updated */
-  update: (
-    sessionId: string,
-    taskId: string,
-    status: TaskStatus,
-    options?: { progress?: number; activeForm?: string }
-  ) => ({
-    ...createBaseEvent('task', sessionId),
-    type: 'task_update' as const,
-    taskId,
-    status,
-    ...options,
-  }),
-
-  /** Task execution started */
-  started: (sessionId: string, taskId: string, agent: AgentName) => ({
-    ...createBaseEvent('task', sessionId),
-    type: 'task_started' as const,
-    taskId,
-    agent,
-  }),
-
-  /** Task completed successfully */
-  completed: (sessionId: string, taskId: string, result?: string) => ({
-    ...createBaseEvent('task', sessionId),
-    type: 'task_completed' as const,
-    taskId,
-    result,
-  }),
-
-  /** Task failed */
-  failed: (sessionId: string, taskId: string, error: string) => ({
-    ...createBaseEvent('task', sessionId),
-    type: 'task_failed' as const,
-    taskId,
-    error,
-  }),
-
-  /** Full task list */
-  list: (sessionId: string, tasks: PlanTask[]) => ({
-    ...createBaseEvent('task', sessionId),
-    type: 'tasks_list' as const,
-    tasks,
-  }),
-};
-
-// ============================================
 // SCOUT EVENTS
 // ============================================
 
@@ -467,6 +338,19 @@ export const InboxEvents = {
 };
 
 // ============================================
+// TODO EVENTS
+// ============================================
+
+export const TodoEvents = {
+  /** Todo list updated */
+  updated: (sessionId: string, todos: Array<{ content: string; status: string }>) => ({
+    ...createBaseEvent('system', sessionId),
+    type: 'todo_updated' as const,
+    todos,
+  }),
+};
+
+// ============================================
 // SYSTEM EVENTS
 // ============================================
 
@@ -506,12 +390,11 @@ export const SystemEvents = {
 export type StreamEvent =
   | ReturnType<(typeof AgentEvents)[keyof typeof AgentEvents]>
   | ReturnType<(typeof ToolEvents)[keyof typeof ToolEvents]>
-  | ReturnType<(typeof PlanEvents)[keyof typeof PlanEvents]>
-  | ReturnType<(typeof TaskEvents)[keyof typeof TaskEvents]>
   | ReturnType<(typeof ScoutEvents)[keyof typeof ScoutEvents]>
   | ReturnType<(typeof UserEvents)[keyof typeof UserEvents]>
   | ReturnType<(typeof ParallelEvents)[keyof typeof ParallelEvents]>
   | ReturnType<(typeof InboxEvents)[keyof typeof InboxEvents]>
+  | ReturnType<(typeof TodoEvents)[keyof typeof TodoEvents]>
   | ReturnType<(typeof SystemEvents)[keyof typeof SystemEvents]>;
 
 // ============================================

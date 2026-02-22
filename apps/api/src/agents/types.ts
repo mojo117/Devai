@@ -36,8 +36,6 @@ export interface ModelTier {
 export type AgentPhase =
   | 'idle'
   | 'qualification'
-  | 'planning'              // Multi-perspective planning phase
-  | 'waiting_plan_approval' // Waiting for user to approve plan
   | 'execution'
   | 'review'
   | 'error'
@@ -185,9 +183,9 @@ export interface UserResponse {
   timestamp: string;
 }
 
-export type ObligationType = 'user_request' | 'delegation' | 'plan_task';
+export type ObligationType = 'user_request' | 'delegation';
 export type ObligationStatus = 'open' | 'satisfied' | 'waived' | 'failed';
-export type ObligationOrigin = 'primary' | 'inbox' | 'delegation' | 'plan';
+export type ObligationOrigin = 'primary' | 'inbox' | 'delegation';
 
 export interface SessionObligation {
   obligationId: string;
@@ -242,6 +240,11 @@ export interface InboxMessage {
   source: 'websocket' | 'telegram';
 }
 
+export interface TodoItem {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}
+
 // Conversation State
 export interface ConversationState {
   sessionId: string;
@@ -253,16 +256,10 @@ export interface ConversationState {
   pendingQuestions: UserQuestion[];
   parallelExecutions: ParallelExecution[];
 
-  // Plan Mode state
-  currentPlan?: ExecutionPlan;
-  planHistory: ExecutionPlan[];
-
-  // Task Tracking state
-  tasks: PlanTask[];
-  taskOrder: string[]; // Ordered list of taskIds
-
   // Lightweight obligation ledger (coverage guard)
   obligations: SessionObligation[];
+
+  todos: TodoItem[];
 
   // Multi-message state
   isLoopRunning: boolean;
@@ -396,21 +393,6 @@ export type AgentStreamEvent =
   | { type: 'parallel_complete'; results: DelegationResult[] }
   | { type: 'agent_complete'; agent: AgentName; result: unknown }
   | { type: 'error'; agent: AgentName; error: string }
-  // Plan Mode events
-  | { type: 'plan_start'; sessionId: string }
-  | { type: 'perspective_start'; agent: AgentName }
-  | { type: 'perspective_complete'; agent: AgentName; perspective: AgentPerspective }
-  | { type: 'plan_ready'; plan: ExecutionPlan }
-  | { type: 'plan_approval_request'; plan: ExecutionPlan }
-  | { type: 'plan_approved'; planId: string }
-  | { type: 'plan_rejected'; planId: string; reason: string }
-  // Task tracking events
-  | { type: 'task_created'; task: PlanTask }
-  | { type: 'task_update'; taskId: string; status: TaskStatus; progress?: number; activeForm?: string }
-  | { type: 'task_started'; taskId: string; agent: AgentName }
-  | { type: 'task_completed'; taskId: string; result?: string }
-  | { type: 'task_failed'; taskId: string; error: string }
-  | { type: 'tasks_list'; tasks: PlanTask[] }
   // SCOUT events
   | { type: 'scout_start'; query: string; scope: ScoutScope }
   | { type: 'scout_tool'; tool: string }
@@ -418,6 +400,7 @@ export type AgentStreamEvent =
   | { type: 'scout_error'; error: string }
   // Intermediate response events
   | { type: 'partial_response'; message: string; inReplyTo?: string }
+  | { type: 'todo_updated'; todos: TodoItem[] }
   // Inbox events
   | { type: 'message_queued'; messageId: string; preview: string }
   | { type: 'inbox_processing'; count: number };
@@ -432,122 +415,6 @@ export interface AgentResponse {
   userQuestion?: UserQuestion;
   approvalRequest?: ApprovalRequest;
   finished: boolean;
-}
-
-// ============================================
-// PLAN MODE TYPES
-// ============================================
-
-export type PlanStatus =
-  | 'draft'
-  | 'pending_approval'
-  | 'approved'
-  | 'rejected'
-  | 'executing'
-  | 'completed';
-
-export type EffortEstimate = 'trivial' | 'small' | 'medium' | 'large';
-
-// Base perspective interface
-export interface AgentPerspective {
-  agent: AgentName;
-  analysis: string;
-  concerns: string[];
-  recommendations: string[];
-  estimatedEffort: EffortEstimate;
-  dependencies?: string[];
-  timestamp: string;
-}
-
-// CHAPO's strategic perspective
-export interface ChapoPerspective extends AgentPerspective {
-  agent: 'chapo';
-  strategicAnalysis: string;
-  riskAssessment: RiskLevel;
-  impactAreas: string[];
-  coordinationNeeds: string[];
-}
-
-// DEVO's ops-focused perspective
-export interface DevoPerspective extends AgentPerspective {
-  agent: 'devo';
-  deploymentImpact: string[];
-  rollbackStrategy: string;
-  servicesAffected: string[];
-  infrastructureChanges: string[];
-}
-
-// Combined execution plan
-export interface ExecutionPlan {
-  planId: string;
-  sessionId: string;
-  status: PlanStatus;
-
-  // Multi-perspective analysis
-  chapoPerspective: ChapoPerspective;
-  devoPerspective?: DevoPerspective;
-
-  // Synthesized plan
-  summary: string;
-  tasks: PlanTask[];
-  estimatedDuration: string;
-  overallRisk: RiskLevel;
-
-  // Approval tracking
-  createdAt: string;
-  approvedAt?: string;
-  rejectedAt?: string;
-  rejectionReason?: string;
-}
-
-// ============================================
-// TASK TRACKING TYPES
-// ============================================
-
-export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
-
-export type TaskPriority = 'critical' | 'high' | 'normal' | 'low';
-
-export interface PlanTask {
-  taskId: string;
-  planId: string;
-
-  // Task definition
-  subject: string;
-  description: string;
-  activeForm: string; // Present continuous for spinner (e.g., "Creating file...")
-
-  // Assignment and ownership
-  assignedAgent: AgentName;
-  priority: TaskPriority;
-
-  // Status tracking
-  status: TaskStatus;
-  progress?: number; // 0-100 percentage
-
-  // Dependencies
-  blockedBy: string[]; // taskIds that must complete first
-  blocks: string[];    // taskIds that are waiting on this
-
-  // Execution details
-  toolsToExecute?: PlannedToolCall[];
-  toolsExecuted?: ExecutedTool[];
-
-  // Timestamps
-  createdAt: string;
-  startedAt?: string;
-  completedAt?: string;
-
-  // Results
-  result?: string;
-  error?: string;
-}
-
-export interface PlannedToolCall {
-  toolName: string;
-  toolArgs: Record<string, unknown>;
-  description: string;
-  requiresApproval: boolean;
 }
 
 // ============================================

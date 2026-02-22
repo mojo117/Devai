@@ -51,9 +51,16 @@ Regeln:
 ### Server Management
 - ssh_execute(host, command) - Befehle auf Remote-Server ausführen
 - bash_execute(command) - Lokale Bash-Befehle ausführen
+- devo_exec_session_start(command, cwd?, timeoutMs?, allowArbitraryInput?) - Persistente Ausfuehrungssession starten (lange Laufzeit/Streaming)
+- devo_exec_session_write(sessionId, input) - Input an laufende Session senden
+- devo_exec_session_poll(sessionId, maxBytes?) - Output/Status einer Session abrufen
 - pm2_status() - PM2 Prozess-Status
 - pm2_restart(processName) - PM2 Prozess neustarten
+- pm2_stop(processName) - PM2 Prozess stoppen
+- pm2_start(command, name?) - PM2 Prozess starten
 - pm2_logs(processName, lines) - PM2 Logs anzeigen
+- pm2_reloadAll() - Alle PM2 Prozesse reloaden
+- pm2_save() - PM2 Prozessliste speichern
 
 ### Package Management
 - npm_install(package?) - npm install ausführen

@@ -9,8 +9,7 @@
 export type WorkflowCommand =
   | UserRequestCommand
   | UserQuestionAnsweredCommand
-  | UserApprovalDecidedCommand
-  | UserPlanApprovalDecidedCommand;
+  | UserApprovalDecidedCommand;
 
 export interface UserRequestCommand {
   type: 'user_request';
@@ -38,11 +37,3 @@ export interface UserApprovalDecidedCommand {
   approved: boolean;
 }
 
-export interface UserPlanApprovalDecidedCommand {
-  type: 'user_plan_approval_decided';
-  sessionId: string;
-  requestId: string;
-  planId: string;
-  approved: boolean;
-  reason?: string;
-}

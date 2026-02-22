@@ -1,6 +1,6 @@
 # DevAI Agents Reference
 
-Last updated: 2026-02-21
+Last updated: 2026-02-22
 
 This document is the canonical reference for the DevAI multi-agent system. It covers agent definitions, the CHAPO decision loop, tools, delegation, and operational commands.
 
@@ -79,6 +79,9 @@ Runtime integration:
 - File reads and codebase search (`fs_listFiles`, `fs_readFile`, `fs_glob`, `fs_grep`)
 - Git status checks (`git_status`, `git_diff`)
 - Memory management (`memory_remember`, `memory_search`, `memory_readToday`)
+- Inbox/obligation control (`chapo_inbox_list_open`, `chapo_inbox_resolve`)
+- Lightweight execution planning (`chapo_plan_set`)
+- Draft quality gate (`chapo_answer_preflight`, mandatory before final answer when multiple blocking obligations are open)
 - Web search via delegation or directly
 - Delegation to DEVO for code/devops work
 - Delegation to SCOUT for exploration/research
@@ -93,7 +96,8 @@ git_status, git_diff
 github_getWorkflowRunStatus
 logs_getStagingLogs
 memory_remember, memory_search, memory_readToday
-delegateToDevo, delegateToCaio, delegateParallel, delegateToScout, askUser, requestApproval
+chapo_inbox_list_open, chapo_inbox_resolve, chapo_plan_set, chapo_answer_preflight
+delegateToDevo, delegateToCaio, delegateParallel, delegateToScout, askUser, requestApproval, respondToUser
 ```
 
 ---
@@ -116,8 +120,9 @@ delegateToDevo, delegateToCaio, delegateParallel, delegateToScout, askUser, requ
 - Full file system operations (read, write, edit, delete, mkdir, move)
 - Git operations (status, diff, commit, push, pull, add)
 - Bash execution (local commands)
+- Persistent exec sessions for long-running commands (`devo_exec_session_start`, `devo_exec_session_write`, `devo_exec_session_poll`)
 - SSH execution (remote server commands)
-- PM2 management (status, restart, logs)
+- PM2 management (status, restart, stop/start, reload, save, logs)
 - NPM operations (install, run scripts)
 - GitHub Actions (trigger workflows, check status)
 - Can delegate to SCOUT for research
@@ -128,8 +133,8 @@ delegateToDevo, delegateToCaio, delegateParallel, delegateToScout, askUser, requ
 fs_listFiles, fs_readFile, fs_writeFile, fs_edit, fs_mkdir, fs_move, fs_delete, fs_glob, fs_grep
 web_search, web_fetch
 git_status, git_diff, git_commit, git_push, git_pull, git_add
-bash_execute, ssh_execute
-pm2_status, pm2_restart, pm2_logs
+bash_execute, devo_exec_session_start, devo_exec_session_write, devo_exec_session_poll, ssh_execute
+pm2_status, pm2_restart, pm2_stop, pm2_start, pm2_logs, pm2_reloadAll, pm2_save
 npm_install, npm_run
 github_triggerWorkflow, github_getWorkflowRunStatus
 logs_getStagingLogs
@@ -159,10 +164,19 @@ delegateToScout, escalateToChapo
 
 **Identity:** Research expert. Explores codebases and searches the web. Never modifies files. Can be spawned by CHAPO or DEVO for research tasks. Max 5 tool calls per invocation.
 
+Web API requirements:
+- `web_search` requires `PERPLEXITY_API_KEY`
+- `scout_*` Firecrawl tools require `FIRECRAWL_API_KEY`
+
 **Capabilities:**
 - Codebase exploration (`fs_readFile`, `fs_glob`, `fs_grep`, `fs_listFiles`)
+- Workspace document search (`context_searchDocuments`)
 - Git inspection (`git_status`, `git_diff`)
 - Web search (`web_search` via Perplexity)
+- Firecrawl fast/deep research (`scout_search_fast`, `scout_search_deep`)
+- Firecrawl domain exploration (`scout_site_map`, `scout_crawl_focused`)
+- Firecrawl structured extraction (`scout_extract_schema`)
+- Firecrawl bundled research synthesis (`scout_research_bundle`)
 - URL fetching (`web_fetch`)
 - Memory operations
 - Escalation to CHAPO
@@ -172,7 +186,9 @@ delegateToScout, escalateToChapo
 fs_listFiles, fs_readFile, fs_glob, fs_grep
 git_status, git_diff
 github_getWorkflowRunStatus
+context_searchDocuments
 web_search, web_fetch
+scout_search_fast, scout_search_deep, scout_site_map, scout_crawl_focused, scout_extract_schema, scout_research_bundle
 memory_remember, memory_search, memory_readToday
 escalateToChapo
 ```
@@ -183,7 +199,16 @@ escalateToChapo
   "summary": "...",
   "relevantFiles": ["path/to/file.ts"],
   "codePatterns": { "patternName": "description" },
-  "webFindings": [{ "title": "...", "url": "...", "relevance": "..." }],
+  "webFindings": [{
+    "title": "...",
+    "url": "...",
+    "claim": "...",
+    "relevance": "...",
+    "evidence": [{ "url": "...", "snippet": "...", "publishedAt": "optional" }],
+    "freshness": "published:YYYY-MM-DD | unknown",
+    "confidence": "high | medium | low",
+    "gaps": ["..."]
+  }],
   "recommendations": ["..."],
   "confidence": "high" | "medium" | "low"
 }
@@ -207,6 +232,7 @@ escalateToChapo
 
 **Capabilities:**
 - Read-only filesystem access (`fs_readFile`, `fs_listFiles`, `fs_glob`)
+- Read-only workspace context docs (`context_listDocuments`, `context_readDocument`, `context_searchDocuments`)
 - TaskForge ticket management (list, get, create, move, comment, search)
 - Email sending (`send_email`)
 - Scheduler/reminder management
@@ -218,6 +244,7 @@ escalateToChapo
 **Tools:**
 ```
 fs_readFile, fs_listFiles, fs_glob
+context_listDocuments, context_readDocument, context_searchDocuments
 taskforge_list_tasks, taskforge_get_task, taskforge_create_task, taskforge_move_task, taskforge_add_comment, taskforge_search
 scheduler_create, scheduler_list, scheduler_update, scheduler_delete, reminder_create
 notify_user, send_email
@@ -248,16 +275,32 @@ delegateToScout, escalateToChapo
 | `git_pull` | | x | | |
 | `git_add` | | x | | |
 | `bash_execute` | | x | | |
+| `devo_exec_session_start` | | x | | |
+| `devo_exec_session_write` | | x | | |
+| `devo_exec_session_poll` | | x | | |
 | `ssh_execute` | | x | | |
 | `pm2_status` | | x | | |
 | `pm2_restart` | | x | | |
+| `pm2_stop` | | x | | |
+| `pm2_start` | | x | | |
 | `pm2_logs` | | x | | |
+| `pm2_reloadAll` | | x | | |
+| `pm2_save` | | x | | |
 | `npm_install` | | x | | |
 | `npm_run` | | x | | |
 | `github_triggerWorkflow` | | x | | |
 | `github_getWorkflowRunStatus` | x | x | x | |
 | `web_search` | x | x | x | |
 | `web_fetch` | x | x | x | |
+| `scout_search_fast` | | | x | |
+| `scout_search_deep` | | | x | |
+| `scout_site_map` | | | x | |
+| `scout_crawl_focused` | | | x | |
+| `scout_extract_schema` | | | x | |
+| `scout_research_bundle` | | | x | |
+| `context_listDocuments` | | | | x |
+| `context_readDocument` | | | | x |
+| `context_searchDocuments` | | | x | x |
 | `taskforge_*` | | | | x |
 | `scheduler_*` | | | | x |
 | `memory_remember` | x | x | x | x |
@@ -267,17 +310,26 @@ delegateToScout, escalateToChapo
 | `skill_*` | list | full | | |
 | `notify_user` | | | | x |
 | `send_email` | | | | x |
+| `chapo_inbox_list_open` | x | | | |
+| `chapo_inbox_resolve` | x | | | |
+| `chapo_plan_set` | x | | | |
+| `chapo_answer_preflight` | x | | | |
 
 ## Coordination Meta-Tools
 
 | Tool | Available to | Purpose |
 |------|-------------|---------|
+| `chapo_inbox_list_open` | CHAPO | List unresolved inbox/obligation items for current task or session |
+| `chapo_inbox_resolve` | CHAPO | Resolve one obligation (`done`/`blocked`/`wont_do`/`superseded`) |
+| `chapo_plan_set` | CHAPO | Persist a short execution plan with owners and statuses |
+| `chapo_answer_preflight` | CHAPO | Preflight-check a draft answer for coverage, contradictions, and unsupported claims |
 | `delegateToDevo` | CHAPO | Delegate dev/devops task to DEVO sub-loop |
 | `delegateToCaio` | CHAPO | Delegate communication/admin task to CAIO sub-loop |
 | `delegateParallel` | CHAPO | Run multiple delegations in parallel |
 | `delegateToScout` | CHAPO, DEVO, CAIO | Delegate exploration/research to SCOUT |
 | `askUser` | CHAPO | Pause loop and ask user a question |
 | `requestApproval` | CHAPO | Request user approval for risky action |
+| `respondToUser` | CHAPO | Send an intermediate user-visible response without ending the loop |
 | `escalateToChapo` | DEVO, SCOUT, CAIO | Escalate issue back to CHAPO |
 
 ---

@@ -11,7 +11,7 @@
 import type { SelfValidator } from './self-validation.js';
 import type { SessionLogger } from '../audit/sessionLogger.js';
 import type { AgentErrorHandler } from './error-handler.js';
-import type { ChapoLoopResult, ValidationResult } from './types.js';
+import type { ChapoLoopResult, SessionObligation, ValidationResult } from './types.js';
 
 export interface DecisionPathInsights {
   path: 'answer' | 'delegate_devo' | 'delegate_caio' | 'delegate_scout' | 'tool';
@@ -32,6 +32,13 @@ const EXTERNAL_ACTION_TOOLS = new Set([
   'notify_user',
 ]);
 
+const OBLIGATION_STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'from', 'that', 'this', 'into', 'about', 'then', 'also',
+  'und', 'oder', 'dann', 'aber', 'eine', 'einen', 'einem', 'einer', 'dies', 'diese',
+  'bitte', 'sowie', 'bzw', 'oder', 'der', 'die', 'das', 'den', 'dem',
+  'task', 'tasks', 'request', 'delegation', 'to', 'von',
+]);
+
 export class AnswerValidator {
   private successfulExternalTools = new Set<string>();
 
@@ -45,6 +52,43 @@ export class AnswerValidator {
     if (EXTERNAL_ACTION_TOOLS.has(toolName)) {
       this.successfulExternalTools.add(toolName);
     }
+  }
+
+  async evaluateObligationCoverage(
+    obligations: SessionObligation[],
+    answer: string,
+  ): Promise<{
+    resolvedIds: string[];
+    unresolved: SessionObligation[];
+    confidence: number;
+  }> {
+    if (obligations.length === 0) {
+      return { resolvedIds: [], unresolved: [], confidence: 1 };
+    }
+
+    const resolvedIds: string[] = [];
+    const unresolved: SessionObligation[] = [];
+    const answerLower = answer.toLowerCase();
+
+    for (const obligation of obligations) {
+      // Delegation obligations must be resolved by delegation results,
+      // not by optimistic final-answer wording.
+      if (obligation.type === 'delegation') {
+        unresolved.push(obligation);
+        continue;
+      }
+
+      if (this.obligationLooksAddressed(obligation, answerLower)) {
+        resolvedIds.push(obligation.obligationId);
+      } else {
+        unresolved.push(obligation);
+      }
+    }
+
+    const confidence = obligations.length > 0
+      ? Math.max(0.1, Math.min(1, resolvedIds.length / obligations.length))
+      : 1;
+    return { resolvedIds, unresolved, confidence };
   }
 
   async validateAndNormalize(
@@ -211,6 +255,26 @@ export class AnswerValidator {
       'ist beim Provider in der Zustellung',
     );
     return normalized;
+  }
+
+  private obligationLooksAddressed(obligation: SessionObligation, answerLower: string): boolean {
+    const source = (obligation.requiredOutcome || obligation.description || '').toLowerCase();
+    const keywords = source
+      .split(/[^a-z0-9äöüß]+/i)
+      .map((word) => word.trim())
+      .filter((word) => word.length >= 4)
+      .filter((word) => !OBLIGATION_STOPWORDS.has(word))
+      .slice(0, 8);
+
+    if (keywords.length === 0) {
+      return false;
+    }
+
+    const matched = keywords.filter((keyword) => answerLower.includes(keyword)).length;
+    if (keywords.length <= 2) {
+      return matched >= 1;
+    }
+    return matched >= Math.max(2, Math.ceil(keywords.length * 0.4));
   }
 
   private isAmbiguousRequest(userMessage: string): boolean {

@@ -22,15 +22,6 @@ import {
   TOOL_ACTION_PENDING,
   GATE_QUESTION_QUEUED,
   GATE_APPROVAL_QUEUED,
-  PLAN_STARTED,
-  PLAN_READY,
-  PLAN_APPROVAL_REQUESTED,
-  PLAN_APPROVED,
-  PLAN_REJECTED,
-  TASK_CREATED,
-  TASK_UPDATED,
-  TASK_COMPLETED,
-  TASK_FAILED,
   WF_COMPLETED,
   WF_FAILED,
 } from '../events/catalog.js';
@@ -49,6 +40,10 @@ function normalizeUserQuestionPayload(payload: PayloadMap): Record<string, unkno
   if (typeof payload.question === 'string') normalized.question = payload.question;
   if (typeof payload.fromAgent === 'string') normalized.fromAgent = payload.fromAgent;
   if (typeof payload.timestamp === 'string') normalized.timestamp = payload.timestamp;
+  if (typeof payload.turnId === 'string') normalized.turnId = payload.turnId;
+  if (typeof payload.questionKind === 'string') normalized.questionKind = payload.questionKind;
+  if (typeof payload.fingerprint === 'string') normalized.fingerprint = payload.fingerprint;
+  if (typeof payload.expiresAt === 'string') normalized.expiresAt = payload.expiresAt;
   return normalized;
 }
 
@@ -76,15 +71,6 @@ const EVENT_TO_STREAM: Record<string, StreamMapper> = {
   [TOOL_ACTION_PENDING]: (p) => ({ type: 'action_pending', actionId: p.actionId, toolName: p.toolName, toolArgs: p.toolArgs, description: p.description, preview: p.preview }),
   [GATE_QUESTION_QUEUED]: (p) => ({ type: 'user_question', question: normalizeUserQuestionPayload(p) }),
   [GATE_APPROVAL_QUEUED]: (p) => ({ type: 'approval_request', request: p, sessionId: p.sessionId }),
-  [PLAN_STARTED]: (p) => ({ type: 'plan_start', sessionId: p.sessionId }),
-  [PLAN_READY]: (p) => ({ type: 'plan_ready', plan: p.plan }),
-  [PLAN_APPROVAL_REQUESTED]: (p) => ({ type: 'plan_approval_request', plan: p.plan }),
-  [PLAN_APPROVED]: (p) => ({ type: 'plan_approved', planId: p.planId }),
-  [PLAN_REJECTED]: (p) => ({ type: 'plan_rejected', planId: p.planId, reason: p.reason }),
-  [TASK_CREATED]: (p) => ({ type: 'task_created', task: p.task }),
-  [TASK_UPDATED]: (p) => ({ type: 'task_update', taskId: p.taskId, status: p.status, progress: p.progress, activeForm: p.activeForm }),
-  [TASK_COMPLETED]: (p) => ({ type: 'task_completed', taskId: p.taskId, result: p.result }),
-  [TASK_FAILED]: (p) => ({ type: 'task_failed', taskId: p.taskId, error: p.error }),
 };
 
 export class StreamProjection implements Projection {

@@ -39,6 +39,9 @@ export {
   setQualificationResult,
   addGatheredFile,
   setGatheredInfo,
+  setActiveTurnId,
+  getActiveTurnId,
+  ensureActiveTurnId,
   setLoopRunning,
   isLoopActive,
   grantApproval,
@@ -61,29 +64,15 @@ export {
 } from './state-manager/sessionState.js';
 
 export {
-  createPlan,
-  addDevoPerspective,
-  finalizePlan,
-  approvePlan,
-  rejectPlan,
-  getCurrentPlan,
-  getPlanHistory,
-  startPlanExecution,
-  completePlan,
-} from './state-manager/planState.js';
-
-export {
-  createTask,
-  getTask,
-  getTasks,
-  getTasksInOrder,
-  getNextTask,
-  updateTaskStatus,
-  addTaskDependency,
-  addExecutedTool,
-  getTasksByStatus,
-  getTasksByAgent,
-  areAllTasksCompleted,
-  getTaskProgress,
-  skipBlockedTasks,
-} from './state-manager/taskState.js';
+  resetObligations,
+  addUserRequestObligations,
+  addOrReuseDelegationObligation,
+  satisfyObligation,
+  failObligation,
+  waiveObligation,
+  getObligations,
+  getUnresolvedObligations,
+  getUnresolvedObligationsForTurn,
+  waiveObligationsExceptTurn,
+  summarizeUnresolvedObligations,
+} from './state-manager/obligationState.js';

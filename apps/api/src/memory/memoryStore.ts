@@ -1,6 +1,11 @@
 import { getSupabase } from '../db/index.js';
 import { generateEmbedding } from './embeddings.js';
 import type { StoredMemory, MemoryInsert } from './types.js';
+import {
+  normalizeMemoryNamespace,
+  normalizeNamespacePrefix,
+  uniqueNormalizedNamespaces,
+} from './namespace.js';
 
 // ---------------------------------------------------------------------------
 // 1. searchMemories — vector search across one or more namespaces
@@ -13,13 +18,16 @@ export async function searchMemories(
   threshold: number = 0.5,
 ): Promise<StoredMemory[]> {
   try {
+    const normalizedNamespaces = uniqueNormalizedNamespaces(namespaces);
+    if (normalizedNamespaces.length === 0) return [];
+
     const embedding = await generateEmbedding(query);
     const embeddingJson = JSON.stringify(embedding);
     const supabase = getSupabase();
 
     const allResults: StoredMemory[] = [];
 
-    for (const ns of namespaces) {
+    for (const ns of normalizedNamespaces) {
       const { data, error } = await supabase.rpc('match_memories', {
         query_embedding: embeddingJson,
         match_namespace: ns,
@@ -103,6 +111,7 @@ export async function reinforceMemory(id: string): Promise<void> {
 export async function insertMemory(memory: MemoryInsert): Promise<string | null> {
   try {
     const supabase = getSupabase();
+    const normalizedNamespace = normalizeMemoryNamespace(memory.namespace);
 
     const { data, error } = await supabase
       .from('devai_memories')
@@ -110,7 +119,7 @@ export async function insertMemory(memory: MemoryInsert): Promise<string | null>
         content: memory.content,
         embedding: JSON.stringify(memory.embedding),
         memory_type: memory.memory_type,
-        namespace: memory.namespace,
+        namespace: normalizedNamespace,
         priority: memory.priority,
         source: memory.source,
         session_id: memory.session_id ?? null,
@@ -139,13 +148,16 @@ export async function findSimilarMemories(
   namespace: string,
 ): Promise<StoredMemory[]> {
   try {
+    const normalizedNamespace = normalizeNamespacePrefix(namespace);
+    if (!normalizedNamespace) return [];
+
     const embedding = await generateEmbedding(content);
     const embeddingJson = JSON.stringify(embedding);
     const supabase = getSupabase();
 
     const { data, error } = await supabase.rpc('match_memories', {
       query_embedding: embeddingJson,
-      match_namespace: namespace,
+      match_namespace: normalizedNamespace,
       match_count: 5,
       similarity_threshold: 0.8,
     });

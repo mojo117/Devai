@@ -364,6 +364,221 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     },
     requiresConfirmation: false,
   },
+  {
+    name: 'scout_search_fast',
+    description: 'Fast Firecrawl search for quick orientation and source discovery.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search query string',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max number of results (1-10, default: 5)',
+        },
+        country: {
+          type: 'string',
+          description: 'Country hint for localized search results (optional, e.g. "de", "us")',
+        },
+        location: {
+          type: 'string',
+          description: 'Location hint for localized search results (optional, e.g. "Berlin, Germany")',
+        },
+        sources: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional source buckets: web, news',
+        },
+        categories: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional categories: research, github, pdf',
+        },
+      },
+      required: ['query'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'scout_search_deep',
+    description: 'Deep Firecrawl search with markdown extraction for evidence-rich findings.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search query string',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max number of results (1-10, default: 5)',
+        },
+        country: {
+          type: 'string',
+          description: 'Country hint for localized search results (optional, e.g. "de", "us")',
+        },
+        location: {
+          type: 'string',
+          description: 'Location hint for localized search results (optional)',
+        },
+        sources: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional source buckets: web, news',
+        },
+        categories: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional categories: research, github, pdf',
+        },
+        recency: {
+          type: 'string',
+          description: 'Optional freshness filter: day, week, month, year',
+          enum: ['day', 'week', 'month', 'year'],
+        },
+      },
+      required: ['query'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'scout_site_map',
+    description: 'Map URLs of a target website using Firecrawl map endpoint.',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          description: 'Target site URL',
+        },
+        search: {
+          type: 'string',
+          description: 'Optional substring filter for mapped URLs',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max number of mapped URLs (1-10, default: 10)',
+        },
+        includeSubdomains: {
+          type: 'boolean',
+          description: 'Whether to include subdomains',
+        },
+        ignoreSitemap: {
+          type: 'boolean',
+          description: 'Ignore sitemap and discover URLs via crawling only',
+        },
+        sitemapOnly: {
+          type: 'boolean',
+          description: 'Use only sitemap-based URL discovery',
+        },
+      },
+      required: ['url'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'scout_crawl_focused',
+    description: 'Start a bounded Firecrawl crawl job for focused domain exploration.',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          description: 'Target site URL',
+        },
+        prompt: {
+          type: 'string',
+          description: 'Optional natural-language crawl objective',
+        },
+        includePaths: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional include path patterns',
+        },
+        excludePaths: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional exclude path patterns',
+        },
+        maxPages: {
+          type: 'number',
+          description: 'Max pages to crawl (1-10, default: 5)',
+        },
+        maxDepth: {
+          type: 'number',
+          description: 'Max discovery depth (1-5, default: 2)',
+        },
+        includeSubdomains: {
+          type: 'boolean',
+          description: 'Whether to include subdomains',
+        },
+        allowExternalLinks: {
+          type: 'boolean',
+          description: 'Whether Firecrawl may traverse external links',
+        },
+      },
+      required: ['url'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'scout_extract_schema',
+    description: 'Extract structured JSON from URLs using Firecrawl extract endpoint.',
+    parameters: {
+      type: 'object',
+      properties: {
+        urls: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'List of URLs to extract from (max 25)',
+        },
+        prompt: {
+          type: 'string',
+          description: 'Optional extraction objective/instructions',
+        },
+        schema: {
+          type: 'object',
+          description: 'Optional JSON schema for structured extraction',
+        },
+        enableWebSearch: {
+          type: 'boolean',
+          description: 'Allow Firecrawl to augment extraction with web search',
+        },
+      },
+      required: ['urls'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'scout_research_bundle',
+    description: 'Run a bundled Firecrawl research pass (fast + deep), merge/dedupe findings, and return confidence-ranked evidence.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Research query string',
+        },
+        domains: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional domain filters (e.g. docs.example.com, github.com)',
+        },
+        recencyDays: {
+          type: 'number',
+          description: 'Optional recency window in days (mapped internally to Firecrawl day/week/month/year)',
+        },
+        maxFindings: {
+          type: 'number',
+          description: 'Maximum number of merged findings (1-10, default: 5)',
+        },
+      },
+      required: ['query'],
+    },
+    requiresConfirmation: false,
+  },
 
   // DevOps Tools (DEVO agent)
   {
@@ -388,6 +603,71 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
       required: ['command'],
     },
     requiresConfirmation: true,
+  },
+  {
+    name: 'devo_exec_session_start',
+    description: 'Start a persistent DEVO execution session for long-running command output and incremental polling. This action requires user confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: {
+          type: 'string',
+          description: 'Shell command to start (non-interactive shell startup is blocked)',
+        },
+        cwd: {
+          type: 'string',
+          description: 'Working directory for the command',
+        },
+        timeoutMs: {
+          type: 'number',
+          description: 'Session timeout in milliseconds (default: 600000, max: 1800000)',
+        },
+        allowArbitraryInput: {
+          type: 'boolean',
+          description: 'If true, devo_exec_session_write accepts arbitrary text input; otherwise only control/whitespace input is allowed.',
+        },
+      },
+      required: ['command'],
+    },
+    requiresConfirmation: true,
+  },
+  {
+    name: 'devo_exec_session_write',
+    description: 'Write to a running DEVO execution session stdin (e.g. control sequences or interactive replies).',
+    parameters: {
+      type: 'object',
+      properties: {
+        sessionId: {
+          type: 'string',
+          description: 'Session ID returned by devo_exec_session_start',
+        },
+        input: {
+          type: 'string',
+          description: 'Input to write to stdin',
+        },
+      },
+      required: ['sessionId', 'input'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'devo_exec_session_poll',
+    description: 'Poll output/status from a running or completed DEVO execution session.',
+    parameters: {
+      type: 'object',
+      properties: {
+        sessionId: {
+          type: 'string',
+          description: 'Session ID returned by devo_exec_session_start',
+        },
+        maxBytes: {
+          type: 'number',
+          description: 'Maximum output bytes to return in this poll (default: 8192)',
+        },
+      },
+      required: ['sessionId'],
+    },
+    requiresConfirmation: false,
   },
   {
     name: 'ssh_execute',

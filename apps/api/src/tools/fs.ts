@@ -81,7 +81,7 @@ async function resolvePathCaseInsensitive(basePath: string, relativePath: string
 }
 
 // Resolve symlinks and verify the real path is still within allowed roots
-async function validateRealPath(filePath: string, allowedRoots: string[]): Promise<string> {
+async function validateRealPath(filePath: string, allowedRoots: readonly string[]): Promise<string> {
   try {
     const realPath = await fsRealpath(filePath);
     // Check the real path is still within allowed roots

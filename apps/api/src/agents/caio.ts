@@ -31,6 +31,10 @@ export const CAIO_AGENT: AgentDefinition = {
     'fs_readFile',
     'fs_listFiles',
     'fs_glob',
+    // Read-only context documents
+    'context_listDocuments',
+    'context_readDocument',
+    'context_searchDocuments',
     // TaskForge tools
     'taskforge_list_tasks',
     'taskforge_get_task',

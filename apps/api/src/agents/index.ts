@@ -59,6 +59,9 @@ export {
   setQualificationResult,
   addGatheredFile,
   setGatheredInfo,
+  setActiveTurnId,
+  getActiveTurnId,
+  ensureActiveTurnId,
   grantApproval,
   isApprovalGranted,
   getStateSummary,
@@ -75,8 +78,6 @@ export {
   // Event factories
   AgentEvents,
   ToolEvents,
-  PlanEvents,
-  TaskEvents,
   ScoutEvents,
   UserEvents,
   ParallelEvents,

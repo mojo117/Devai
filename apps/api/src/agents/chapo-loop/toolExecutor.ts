@@ -22,6 +22,12 @@ import {
   resolveDelegationTarget,
   type DelegationRunnerDeps,
 } from './delegationRunner.js';
+import {
+  listOpenInboxItems,
+  preflightAnswer,
+  resolveInboxItem,
+  setChapoPlan,
+} from './chapoControlTools.js';
 
 interface ToolCallLike {
   id: string;
@@ -68,6 +74,108 @@ export class ChapoToolExecutor {
   constructor(private deps: ToolExecutorDeps) {}
 
   async execute(toolCall: ToolCallLike): Promise<ToolCallOutcome> {
+    // CHAPO control tools (state-aware meta utilities)
+    if (toolCall.name === 'chapo_inbox_list_open') {
+      const result = listOpenInboxItems(this.deps.sessionId, {
+        scope: toolCall.arguments.scope as 'all' | 'current_task' | undefined,
+        limit: toolCall.arguments.limit as number | undefined,
+      });
+      return {
+        toolResult: {
+          toolUseId: toolCall.id,
+          result: JSON.stringify(result),
+          isError: false,
+        },
+      };
+    }
+
+    if (toolCall.name === 'chapo_inbox_resolve') {
+      const result = resolveInboxItem(this.deps.sessionId, {
+        id: toolCall.arguments.id as string,
+        resolution: toolCall.arguments.resolution as 'done' | 'wont_do' | 'superseded' | 'blocked',
+        note: toolCall.arguments.note as string | undefined,
+      });
+      return {
+        toolResult: {
+          toolUseId: toolCall.id,
+          result: JSON.stringify(result),
+          isError: !result.success,
+        },
+      };
+    }
+
+    if (toolCall.name === 'chapo_plan_set') {
+      const result = setChapoPlan(this.deps.sessionId, {
+        title: toolCall.arguments.title as string,
+        steps: toolCall.arguments.steps as Array<{
+          id: string;
+          text: string;
+          owner: 'chapo' | 'devo' | 'scout' | 'caio';
+          status: 'todo' | 'doing' | 'done' | 'blocked';
+        }>,
+      });
+      return {
+        toolResult: {
+          toolUseId: toolCall.id,
+          result: JSON.stringify(result),
+          isError: !result.success,
+        },
+      };
+    }
+
+    if (toolCall.name === 'chapo_answer_preflight') {
+      const result = preflightAnswer(this.deps.sessionId, {
+        draft: toolCall.arguments.draft as string,
+        mustAddress: toolCall.arguments.mustAddress as string[] | undefined,
+        strict: toolCall.arguments.strict as boolean | undefined,
+      });
+      stateManager.setGatheredInfo(this.deps.sessionId, 'chapoAnswerPreflight', {
+        turnId: stateManager.getActiveTurnId(this.deps.sessionId) || undefined,
+        checkedAt: new Date().toISOString(),
+        ok: result.ok,
+        score: result.score,
+        issues: result.issues.slice(0, 8),
+        checkedItems: result.checkedItems.slice(0, 10),
+        strict: toolCall.arguments.strict === true,
+      });
+      return {
+        toolResult: {
+          toolUseId: toolCall.id,
+          result: JSON.stringify(result),
+          isError: false,
+        },
+      };
+    }
+
+    // ACTION: TODO — update self-managed todo list
+    if (toolCall.name === 'todoWrite') {
+      const todos = (toolCall.arguments.todos as Array<{ content: string; status: string }>) || [];
+      const normalized = todos.map((t) => ({
+        content: String(t.content || ''),
+        status: (t.status === 'in_progress' || t.status === 'completed' ? t.status : 'pending') as 'pending' | 'in_progress' | 'completed',
+      }));
+
+      // Store in session state
+      const state = stateManager.getOrCreateState(this.deps.sessionId);
+      state.todos = normalized;
+
+      // Emit todo_updated event for frontend
+      this.deps.sendEvent({
+        type: 'todo_updated',
+        todos: normalized,
+      });
+
+      const completed = normalized.filter((t) => t.status === 'completed').length;
+      const total = normalized.length;
+      return {
+        toolResult: {
+          toolUseId: toolCall.id,
+          result: `Todo-Liste aktualisiert: ${completed}/${total} erledigt.`,
+          isError: false,
+        },
+      };
+    }
+
     // ACTION: RESPOND — send intermediate response, continue loop
     if (toolCall.name === 'respondToUser') {
       const message = (toolCall.arguments.message as string) || '';

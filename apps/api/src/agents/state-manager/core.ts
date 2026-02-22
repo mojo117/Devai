@@ -29,12 +29,8 @@ function buildDefaultState(sessionId: string): ConversationState {
     pendingApprovals: [],
     pendingQuestions: [],
     parallelExecutions: [],
-    // Plan Mode state
-    currentPlan: undefined,
-    planHistory: [],
-    // Task Tracking state
-    tasks: [],
-    taskOrder: [],
+    obligations: [],
+    todos: [],
     // Multi-message state
     isLoopRunning: false,
   };
@@ -87,9 +83,8 @@ function normalizeLoadedState(sessionId: string, raw: unknown): ConversationStat
     pendingApprovals: Array.isArray(r.pendingApprovals) ? r.pendingApprovals : base.pendingApprovals,
     pendingQuestions: Array.isArray(r.pendingQuestions) ? r.pendingQuestions : base.pendingQuestions,
     parallelExecutions: Array.isArray(r.parallelExecutions) ? r.parallelExecutions : base.parallelExecutions,
-    planHistory: Array.isArray(r.planHistory) ? r.planHistory : base.planHistory,
-    tasks: Array.isArray(r.tasks) ? r.tasks : base.tasks,
-    taskOrder: Array.isArray(r.taskOrder) ? r.taskOrder : base.taskOrder,
+    obligations: Array.isArray(r.obligations) ? r.obligations : base.obligations,
+    todos: Array.isArray(r.todos) ? r.todos : base.todos,
     // Loop activity is runtime-only and cannot be restored safely from DB.
     isLoopRunning: false,
   };

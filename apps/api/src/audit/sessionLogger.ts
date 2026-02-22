@@ -210,15 +210,6 @@ export class SessionLogger {
         this.append(`### [${ts()}] Action Pending — ${event.toolName}\n\n${event.description || ''}\n\n`);
         break;
 
-      case 'plan_ready':
-      case 'plan_approval_request':
-        this.append(`### [${ts()}] Plan Ready\n\n\`\`\`json\n${truncate(JSON.stringify(event.plan, null, 2))}\n\`\`\`\n\n`);
-        break;
-
-      case 'task_update':
-        this.append(`### [${ts()}] Task Update: ${event.taskId} → ${event.status}\n\n`);
-        break;
-
       case 'error':
         this.logError(String(event.error || JSON.stringify(event)), event.agent as string | undefined);
         break;

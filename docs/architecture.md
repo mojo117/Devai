@@ -362,10 +362,10 @@ Four agents with distinct roles:
 
 | Agent | Role | Model (Primary / Fallback) | Tools | System Prompt |
 |-------|------|----------------------------|-------|---------------|
-| **CHAPO** | Coordinator | GLM-5 / Opus 4.5 | `fs_read*`, `web_*`, `git_read`, `memory_*`, `skill_list`, meta-tools | `CHAPO_SYSTEM_PROMPT` |
+| **CHAPO** | Coordinator | GLM-5 / Opus 4.5 | `fs_read*`, `web_*`, `git_read`, `memory_*`, `skill_list`, `chapo_*` control tools, meta-tools | `CHAPO_SYSTEM_PROMPT` |
 | **DEVO** | Developer + DevOps | GLM-4.7 / Sonnet 4 | `fs_*`, `git_*`, `bash_execute`, `ssh_execute`, `pm2_*`, `npm_*`, `github_*`, `web_*`, `skill_*` | `DEVO_SYSTEM_PROMPT` |
-| **SCOUT** | Exploration Specialist | GLM-4.7-Flash (free) / Sonnet 4 | `fs_read*`, `git_read`, `github_getWorkflowRunStatus`, `web_*`, `scout_*` (Firecrawl), `memory_*` | `SCOUT_SYSTEM_PROMPT` |
-| **CAIO** | Communications & Admin | GLM-4.5-Air / Sonnet 4 | `fs_readFile`, `fs_listFiles`, `fs_glob`, `taskforge_*`, `scheduler_*`, `send_email`, `notify_user`, `memory_*` | `CAIO_SYSTEM_PROMPT` |
+| **SCOUT** | Exploration Specialist | GLM-4.7-Flash (free) / Sonnet 4 | `fs_read*`, `context_searchDocuments`, `git_read`, `github_getWorkflowRunStatus`, `web_*`, `scout_*` (Firecrawl), `memory_*` | `SCOUT_SYSTEM_PROMPT` |
+| **CAIO** | Communications & Admin | GLM-4.5-Air / Sonnet 4 | `fs_readFile`, `fs_listFiles`, `fs_glob`, `context_*`, `taskforge_*`, `scheduler_*`, `send_email`, `notify_user`, `memory_*` | `CAIO_SYSTEM_PROMPT` |
 
 ### CHAPO (Coordinator)
 
@@ -730,8 +730,8 @@ Tools are defined in `apps/api/src/tools/registry.ts`. Each tool is whitelisted 
 | **Filesystem** | `fs_listFiles`, `fs_readFile`, `fs_writeFile`, `fs_glob`, `fs_grep`, `fs_edit`, `fs_mkdir`, `fs_move`, `fs_delete` |
 | **Git** | `git_status`, `git_diff`, `git_commit`, `git_push`, `git_pull`, `git_add` |
 | **GitHub** | `github_triggerWorkflow`, `github_getWorkflowRunStatus` |
-| **DevOps** | `bash_execute`, `ssh_execute`, `pm2_status`, `pm2_restart`, `pm2_stop`, `pm2_start`, `pm2_logs`, `npm_install`, `npm_run` |
-| **Web** | `web_search`, `web_fetch`, `scout_search_fast`, `scout_search_deep`, `scout_site_map`, `scout_crawl_focused`, `scout_extract_schema` |
+| **DevOps** | `bash_execute`, `devo_exec_session_start`, `devo_exec_session_write`, `devo_exec_session_poll`, `ssh_execute`, `pm2_status`, `pm2_restart`, `pm2_stop`, `pm2_start`, `pm2_logs`, `pm2_reloadAll`, `pm2_save`, `npm_install`, `npm_run` |
+| **Web** | `web_search`, `web_fetch`, `scout_search_fast`, `scout_search_deep`, `scout_site_map`, `scout_crawl_focused`, `scout_extract_schema`, `scout_research_bundle` |
 | **Context** | `context_listDocuments`, `context_readDocument`, `context_searchDocuments` |
 | **Memory** | `memory_remember`, `memory_search`, `memory_readToday` |
 | **Scheduler** | `scheduler_create`, `scheduler_list`, `scheduler_update`, `scheduler_delete`, `reminder_create`, `notify_user` |
@@ -747,10 +747,10 @@ Web tooling notes:
 
 | Agent | Allowed Tools |
 |-------|---------------|
-| **CHAPO** | `fs_read*`, `fs_glob`, `fs_grep`, `web_search`, `web_fetch`, `git_status`, `git_diff`, `github_getWorkflowRunStatus`, `logs_getStagingLogs`, `memory_*`, `skill_list`, `skill_reload` + meta-tools |
-| **DEVO** | `fs_*`, `git_*`, `bash_execute`, `ssh_execute`, `github_*`, `pm2_*`, `npm_*`, `web_search`, `web_fetch`, `logs_getStagingLogs`, `memory_*`, `skill_*` |
-| **SCOUT** | `fs_readFile`, `fs_listFiles`, `fs_glob`, `fs_grep`, `git_status`, `git_diff`, `github_getWorkflowRunStatus`, `web_search`, `web_fetch`, `scout_search_fast`, `scout_search_deep`, `scout_site_map`, `scout_crawl_focused`, `scout_extract_schema`, `memory_*` |
-| **CAIO** | `fs_readFile`, `fs_listFiles`, `fs_glob`, `taskforge_*`, `scheduler_*`, `reminder_create`, `notify_user`, `send_email`, `telegram_send_document`, `deliver_document`, `memory_*` |
+| **CHAPO** | `fs_read*`, `fs_glob`, `fs_grep`, `web_search`, `web_fetch`, `git_status`, `git_diff`, `github_getWorkflowRunStatus`, `logs_getStagingLogs`, `memory_*`, `skill_list`, `skill_reload`, `chapo_inbox_list_open`, `chapo_inbox_resolve`, `chapo_plan_set`, `chapo_answer_preflight` + meta-tools |
+| **DEVO** | `fs_*`, `git_*`, `bash_execute`, `devo_exec_session_*`, `ssh_execute`, `github_*`, `pm2_*`, `npm_*`, `web_search`, `web_fetch`, `logs_getStagingLogs`, `memory_*`, `skill_*` |
+| **SCOUT** | `fs_readFile`, `fs_listFiles`, `fs_glob`, `fs_grep`, `context_searchDocuments`, `git_status`, `git_diff`, `github_getWorkflowRunStatus`, `web_search`, `web_fetch`, `scout_search_fast`, `scout_search_deep`, `scout_site_map`, `scout_crawl_focused`, `scout_extract_schema`, `scout_research_bundle`, `memory_*` |
+| **CAIO** | `fs_readFile`, `fs_listFiles`, `fs_glob`, `context_listDocuments`, `context_readDocument`, `context_searchDocuments`, `taskforge_*`, `scheduler_*`, `reminder_create`, `notify_user`, `send_email`, `telegram_send_document`, `deliver_document`, `memory_*` |
 
 ### Special Tools (Coordination)
 
@@ -758,12 +758,17 @@ These are meta-tools used for coordination within the decision loop:
 
 | Tool | Available to | Purpose |
 |------|-------------|---------|
+| `chapo_inbox_list_open` | CHAPO | List unresolved inbox/obligation items for current task or full session |
+| `chapo_inbox_resolve` | CHAPO | Resolve one obligation (`done`/`blocked`/`wont_do`/`superseded`) |
+| `chapo_plan_set` | CHAPO | Persist a short execution plan (steps + owner + status) |
+| `chapo_answer_preflight` | CHAPO | Check draft coverage, contradictions, and evidence quality before final answer (enforced when multiple blocking obligations are open) |
 | `delegateToDevo` | CHAPO | Delegate a dev/devops task to DEVO sub-loop |
 | `delegateToCaio` | CHAPO | Delegate comms/admin task to CAIO sub-loop |
 | `delegateToScout` | CHAPO, DEVO, CAIO | Delegate exploration/research to SCOUT |
 | `delegateParallel` | CHAPO | Fire multiple agents concurrently (e.g. DEVO + CAIO) |
 | `askUser` | CHAPO | Pause the loop and ask the user a question |
 | `requestApproval` | CHAPO | Request user approval (pause loop) |
+| `respondToUser` | CHAPO | Send an intermediate user-visible response while the loop continues |
 | `escalateToChapo` | DEVO, SCOUT, CAIO | Escalate an issue back to CHAPO from sub-loop |
 
 ---

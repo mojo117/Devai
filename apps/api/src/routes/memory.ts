@@ -5,6 +5,7 @@ import {
   rememberNote,
   searchWorkspaceMemory,
 } from '../memory/workspaceMemory.js';
+import { parseOrReply400 } from './validation.js';
 
 const RememberSchema = z.object({
   content: z.string().min(1).max(4000),
@@ -25,19 +26,14 @@ const DailyParamsSchema = z.object({
 
 export const memoryRoutes: FastifyPluginAsync = async (app) => {
   app.post('/memory/remember', async (request, reply) => {
-    const parsed = RememberSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.status(400).send({
-        error: 'Invalid request',
-        details: parsed.error.issues,
-      });
-    }
+    const parsed = parseOrReply400(reply, RememberSchema, request.body);
+    if (!parsed) return;
 
     try {
-      const result = await rememberNote(parsed.data.content, {
-        promoteToLongTerm: parsed.data.promoteToLongTerm,
-        sessionId: parsed.data.sessionId,
-        source: parsed.data.source || 'api.memory.remember',
+      const result = await rememberNote(parsed.content, {
+        promoteToLongTerm: parsed.promoteToLongTerm,
+        sessionId: parsed.sessionId,
+        source: parsed.source || 'api.memory.remember',
       });
 
       return {
@@ -60,18 +56,13 @@ export const memoryRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get('/memory/search', async (request, reply) => {
-    const parsed = SearchQuerySchema.safeParse(request.query);
-    if (!parsed.success) {
-      return reply.status(400).send({
-        error: 'Invalid query',
-        details: parsed.error.issues,
-      });
-    }
+    const parsed = parseOrReply400(reply, SearchQuerySchema, request.query, 'Invalid query');
+    if (!parsed) return;
 
     try {
-      const result = await searchWorkspaceMemory(parsed.data.query, {
-        limit: parsed.data.limit,
-        includeLongTerm: parsed.data.includeLongTerm,
+      const result = await searchWorkspaceMemory(parsed.query, {
+        limit: parsed.limit,
+        includeLongTerm: parsed.includeLongTerm,
       });
 
       return {
@@ -87,16 +78,11 @@ export const memoryRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get('/memory/daily/:date', async (request, reply) => {
-    const parsed = DailyParamsSchema.safeParse(request.params);
-    if (!parsed.success) {
-      return reply.status(400).send({
-        error: 'Invalid date',
-        details: parsed.error.issues,
-      });
-    }
+    const parsed = parseOrReply400(reply, DailyParamsSchema, request.params, 'Invalid date');
+    if (!parsed) return;
 
     try {
-      const result = await readDailyMemory(parsed.data.date);
+      const result = await readDailyMemory(parsed.date);
       return {
         date: result.date,
         filePath: result.filePath,

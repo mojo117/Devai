@@ -1,4 +1,6 @@
 import { nanoid } from 'nanoid';
+import { appendFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { getSupabase } from './index.js';
 import { createSession } from './queries.js';
 
@@ -21,6 +23,22 @@ export interface ScheduledJobRow {
   last_error_at: string | null;
   created_at: string;
 }
+
+export type SchedulerExecutionType = 'scheduled' | 'internal' | 'watchdog';
+export type SchedulerExecutionPhase = 'start' | 'success' | 'failure' | 'disabled' | 'recovered' | 'info';
+
+export interface SchedulerExecutionLogRow {
+  id: string;
+  job_id: string | null;
+  job_name: string;
+  execution_type: SchedulerExecutionType;
+  phase: SchedulerExecutionPhase;
+  message: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+const SCHEDULER_FALLBACK_LOG_PATH = resolve(process.cwd(), '../../var/scheduler-events-fallback.jsonl');
 
 export async function listScheduledJobs(): Promise<ScheduledJobRow[]> {
   const { data, error } = await getSupabase()
@@ -147,6 +165,107 @@ export async function deleteScheduledJob(id: string): Promise<boolean> {
   return true;
 }
 
+export async function logSchedulerExecution(entry: {
+  jobId?: string | null;
+  jobName: string;
+  executionType?: SchedulerExecutionType;
+  phase: SchedulerExecutionPhase;
+  message?: string | null;
+  metadata?: Record<string, unknown> | null;
+}): Promise<boolean> {
+  const row = {
+    id: nanoid(),
+    job_id: entry.jobId ?? null,
+    job_name: entry.jobName,
+    execution_type: entry.executionType || 'scheduled',
+    phase: entry.phase,
+    message: entry.message ?? null,
+    metadata: entry.metadata ?? null,
+    created_at: new Date().toISOString(),
+  };
+
+  const { error } = await getSupabase()
+    .from('scheduler_execution_logs')
+    .insert(row);
+
+  if (error) {
+    console.error('[Scheduler] Failed to persist execution log:', error);
+    await appendSchedulerFallbackLog(row, error.message);
+    return false;
+  }
+
+  return true;
+}
+
+export async function getRecentSchedulerExecutionLogs(limit: number = 50): Promise<SchedulerExecutionLogRow[]> {
+  const { data, error } = await getSupabase()
+    .from('scheduler_execution_logs')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error('[Scheduler] Failed to fetch scheduler execution logs:', error);
+    return [];
+  }
+
+  return (data || []) as SchedulerExecutionLogRow[];
+}
+
+export async function getLatestSchedulerFailure(): Promise<SchedulerExecutionLogRow | null> {
+  const { data, error } = await getSupabase()
+    .from('scheduler_execution_logs')
+    .select('*')
+    .in('phase', ['failure', 'disabled'])
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (error) {
+    console.error('[Scheduler] Failed to fetch latest scheduler failure:', error);
+    return null;
+  }
+
+  const rows = (data || []) as SchedulerExecutionLogRow[];
+  return rows[0] || null;
+}
+
+export async function getLatestHealthWatchdogEvent(): Promise<SchedulerExecutionLogRow | null> {
+  const { data, error } = await getSupabase()
+    .from('scheduler_execution_logs')
+    .select('*')
+    .eq('job_name', 'system-health-watchdog')
+    .in('phase', ['success', 'failure'])
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (error) {
+    console.error('[Scheduler] Failed to fetch latest health watchdog event:', error);
+    return null;
+  }
+
+  const rows = (data || []) as SchedulerExecutionLogRow[];
+  return rows[0] || null;
+}
+
+async function appendSchedulerFallbackLog(
+  row: Record<string, unknown>,
+  insertError: string,
+): Promise<void> {
+  try {
+    await appendFile(
+      SCHEDULER_FALLBACK_LOG_PATH,
+      `${JSON.stringify({
+        ...row,
+        fallback_reason: insertError,
+        fallback_logged_at: new Date().toISOString(),
+      })}\n`,
+      'utf8',
+    );
+  } catch (fallbackError) {
+    console.error('[Scheduler] Failed to write fallback scheduler log:', fallbackError);
+  }
+}
+
 // ============================================
 // External Sessions (Telegram, etc.)
 // ============================================
@@ -200,6 +319,7 @@ export async function createExternalSession(session: {
     external_chat_id: session.externalChatId,
     session_id: session.sessionId,
     is_default_channel: session.isDefaultChannel || false,
+    pinned_userfile_ids: [],
     created_at: now,
   };
 
