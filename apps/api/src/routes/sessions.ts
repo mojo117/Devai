@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { createSession, getMessages, listSessions, updateSessionTitle, saveMessage } from '../db/queries.js';
+import { parseOrReply400 } from './validation.js';
 
 const CreateSessionSchema = z.object({
   title: z.string().optional(),
@@ -24,15 +25,9 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/sessions', async (request, reply) => {
-    const parseResult = CreateSessionSchema.safeParse(request.body);
-    if (!parseResult.success) {
-      return reply.status(400).send({
-        error: 'Invalid request',
-        details: parseResult.error.issues,
-      });
-    }
-
-    const session = await createSession(parseResult.data.title);
+    const parsed = parseOrReply400(reply, CreateSessionSchema, request.body);
+    if (!parsed) return;
+    const session = await createSession(parsed.title);
     return { session };
   });
 
@@ -50,16 +45,11 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
 
   app.post('/sessions/:id/messages', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const parseResult = SaveMessageSchema.safeParse(request.body);
-    if (!parseResult.success) {
-      return reply.status(400).send({
-        error: 'Invalid message',
-        details: parseResult.error.issues,
-      });
-    }
+    const parsed = parseOrReply400(reply, SaveMessageSchema, request.body, 'Invalid message');
+    if (!parsed) return;
 
     try {
-      const { toolEvents, ...message } = parseResult.data;
+      const { toolEvents, ...message } = parsed;
       await saveMessage(id, message, toolEvents);
       return { success: true };
     } catch (error) {
@@ -72,16 +62,11 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
 
   app.patch('/sessions/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const parseResult = UpdateSessionSchema.safeParse(request.body);
-    if (!parseResult.success) {
-      return reply.status(400).send({
-        error: 'Invalid request',
-        details: parseResult.error.issues,
-      });
-    }
+    const parsed = parseOrReply400(reply, UpdateSessionSchema, request.body);
+    if (!parsed) return;
 
     try {
-      await updateSessionTitle(id, parseResult.data.title);
+      await updateSessionTitle(id, parsed.title);
       return { success: true };
     } catch (error) {
       return reply.status(400).send({

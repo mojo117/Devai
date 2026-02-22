@@ -247,14 +247,58 @@ export function ChatUI({
         }
         break;
       }
+      case 'message_queued': {
+        setToolEvents((prev) => [
+          ...prev,
+          {
+            id: String(event.messageId || crypto.randomUUID()),
+            type: 'status',
+            name: 'inbox',
+            result: String(event.preview || 'Message received'),
+            completed: true,
+            agent: 'chapo' as AgentName,
+          },
+        ]);
+        break;
+      }
+      case 'inbox_processing': {
+        setToolEvents((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            type: 'status',
+            name: 'inbox',
+            result: `Processing ${event.count} follow-up message(s)...`,
+            completed: false,
+            agent: 'chapo' as AgentName,
+          },
+        ]);
+        break;
+      }
+      case 'partial_response': {
+        const partialMessage: ChatMessage = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: String((event as Record<string, unknown>).message || ''),
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, partialMessage]);
+        freezeToolEvents(partialMessage.id);
+        // Keep isLoading true — loop is still running
+        break;
+      }
+      case 'todo_updated': {
+        // Todo events are informational — the frontend can render them but
+        // we keep the approach minimal for now (no separate UI component).
+        // The tool events already show the todoWrite call + result.
+        break;
+      }
     }
   };
 
   // --- Message sending ---
 
   const sendChatMessage = async (content: string) => {
-    if (isLoadingInternal) return;
-
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'user',
@@ -283,9 +327,15 @@ export function ChatUI({
         session.setSessionId(response.sessionId);
         await saveSetting('lastSessionId', response.sessionId);
       }
-      setMessages((prev) => [...prev, response.message]);
       await session.refreshSessions(response.sessionId);
-      return { message: response.message, sessionId: response.sessionId };
+
+      const responseMessage = response.message;
+      if (!responseMessage) {
+        return null;
+      }
+
+      setMessages((prev) => [...prev, responseMessage]);
+      return { message: responseMessage, sessionId: response.sessionId };
     };
 
     try {
@@ -321,7 +371,7 @@ export function ChatUI({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoadingInternal) return;
+    if (!input.trim()) return;
     const content = input.trim();
     setInput('');
     await sendChatMessage(content);

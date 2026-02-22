@@ -198,7 +198,7 @@ export function InputArea({
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onInputKeyDown}
             placeholder="Message... (@ for files)"
-            disabled={isLoading || isRecording}
+            disabled={isRecording}
             className="w-full bg-devai-card border border-devai-border rounded-xl px-3 sm:px-4 py-2.5 text-sm text-devai-text placeholder-devai-text-muted focus:outline-none focus:border-devai-border-light focus:ring-1 focus:ring-devai-accent/30 disabled:opacity-50"
           />
           {fileHints.length > 0 && (
@@ -232,7 +232,7 @@ export function InputArea({
         {/* Send button — icon only */}
         <button
           type="submit"
-          disabled={isLoading || !input.trim()}
+          disabled={!input.trim()}
           className="flex items-center justify-center w-10 h-10 rounded-xl bg-devai-accent hover:bg-devai-accent-hover text-white transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
           title="Send message"
         >

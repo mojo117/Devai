@@ -2,10 +2,42 @@ import { resolve, join } from 'path';
 import { readFile as fsReadFile, writeFile as fsWriteFile, access } from 'fs/promises';
 import { config } from '../config.js';
 import { getSkillById } from './registry.js';
-import type { SkillContext, SkillResult } from '@devai/shared';
+import type { ApiClient, SkillContext, SkillResult } from '@devai/shared';
 
 /** Execution timeout for skills (30 seconds) */
 const SKILL_TIMEOUT_MS = 30_000;
+
+/** Create a lightweight API client with pre-configured auth */
+function createApiClient(baseUrl: string, apiKey: string | undefined): ApiClient {
+  const available = !!apiKey;
+
+  async function request(path: string, options?: RequestInit): Promise<Response> {
+    if (!available) throw new Error(`API not configured — missing API key for ${baseUrl}`);
+    return globalThis.fetch(`${baseUrl}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        ...(options?.headers as Record<string, string> | undefined),
+      },
+    });
+  }
+
+  return {
+    available,
+    request,
+    async get<T>(path: string): Promise<T> {
+      const res = await request(path, { method: 'GET' });
+      if (!res.ok) throw new Error(`API GET ${path} failed (${res.status}): ${await res.text()}`);
+      return res.json() as Promise<T>;
+    },
+    async post<T>(path: string, body: unknown): Promise<T> {
+      const res = await request(path, { method: 'POST', body: JSON.stringify(body) });
+      if (!res.ok) throw new Error(`API POST ${path} failed (${res.status}): ${await res.text()}`);
+      return res.json() as Promise<T>;
+    },
+  };
+}
 
 /** Check if an absolute path is within allowed roots and not in denied paths */
 function isPathAllowed(absolutePath: string): boolean {
@@ -27,6 +59,10 @@ function buildContext(skillId: string): SkillContext {
   return {
     fetch: globalThis.fetch,
     env: Object.freeze({ ...process.env }) as Readonly<Record<string, string | undefined>>,
+    apis: {
+      openai: createApiClient('https://api.openai.com', process.env.OPENAI_API_KEY),
+      firecrawl: createApiClient('https://api.firecrawl.dev', process.env.FIRECRAWL_API_KEY),
+    },
 
     async readFile(path: string): Promise<string> {
       const absolutePath = resolve(path);

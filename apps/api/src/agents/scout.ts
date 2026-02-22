@@ -27,8 +27,12 @@ export const SCOUT_AGENT: AgentDefinition = {
     'fs_readFile',
     'fs_glob',
     'fs_grep',
+    // Read-only context documents
+    'context_searchDocuments',
     'git_status',
     'git_diff',
+    // GitHub (read-only)
+    'github_getWorkflowRunStatus',
     // Workspace memory
     'memory_remember',
     'memory_search',
@@ -36,6 +40,12 @@ export const SCOUT_AGENT: AgentDefinition = {
     // Web tools
     'web_search',
     'web_fetch',
+    'scout_search_fast',
+    'scout_search_deep',
+    'scout_site_map',
+    'scout_crawl_focused',
+    'scout_extract_schema',
+    'scout_research_bundle',
     // Escalation
     'escalateToChapo',
   ],

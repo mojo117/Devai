@@ -99,6 +99,9 @@ async function resolveWorkspaceRoot(override?: string | null): Promise<string> {
 }
 
 function formatFileSection(file: WorkspaceMdFile): string {
+  if (file.role === 'SOUL') {
+    return `\n\n<!-- Role: ${file.role} | From: ${file.path} -->\n\n**This defines who you are. Embody it naturally — don't recite or list it when asked. Live the personality, don't describe it.**\n\n${file.content}`;
+  }
   return `\n\n<!-- Role: ${file.role} | From: ${file.path} -->\n\n${file.content}`;
 }
 

@@ -15,10 +15,28 @@ interface TaskForgeResponse {
   error?: string;
 }
 
-async function callTaskForgeApi(body: Record<string, unknown>): Promise<TaskForgeResponse> {
-  const apiKey = config.taskforgeApiKey;
+function resolveApiKey(project?: string): { apiKey: string; resolvedProject: string } | { error: string } {
+  const keys = config.taskforgeApiKeys;
+  const available = Object.keys(keys);
+
+  if (available.length === 0) {
+    return { error: 'Keine TaskForge API-Keys konfiguriert. Setze TASKFORGE_KEY_<PROJECT> Umgebungsvariablen.' };
+  }
+
+  const target = project?.toLowerCase().replace(/[_ ]/g, '-') || config.taskforgeDefaultProject;
+  const apiKey = keys[target];
+
   if (!apiKey) {
-    return { success: false, error: 'DEVAI_TASKBOARD_API_KEY not configured' };
+    return { error: `Kein API-Key fuer Projekt "${target}". Verfuegbare Projekte: ${available.join(', ')}` };
+  }
+
+  return { apiKey, resolvedProject: target };
+}
+
+async function callTaskForgeApi(body: Record<string, unknown>, project?: string): Promise<TaskForgeResponse> {
+  const resolved = resolveApiKey(project);
+  if ('error' in resolved) {
+    return { success: false, error: resolved.error };
   }
 
   const response = await fetch(
@@ -30,8 +48,8 @@ async function callTaskForgeApi(body: Record<string, unknown>): Promise<TaskForg
         'X-Appwrite-Project': APPWRITE_PROJECT_ID,
       },
       body: JSON.stringify({
-        body: JSON.stringify({ apiKey, ...body }),
-        async: false,
+        body: JSON.stringify({ apiKey: resolved.apiKey, ...body }),
+        async: 'false',
       }),
     },
   );
@@ -55,55 +73,68 @@ async function callTaskForgeApi(body: Record<string, unknown>): Promise<TaskForg
   }
 }
 
+/** Returns available project names for tool descriptions */
+export function getAvailableTaskForgeProjects(): string[] {
+  return Object.keys(config.taskforgeApiKeys);
+}
+
 export async function taskforgeListTasks(
   project?: string,
   status?: string,
 ): Promise<TaskForgeResponse> {
   const body: Record<string, unknown> = {};
-  if (project) body.project = project;
   if (status) body.status = status;
-  return callTaskForgeApi(body);
+  return callTaskForgeApi(body, project);
 }
 
-export async function taskforgeGetTask(taskId: string): Promise<TaskForgeResponse> {
-  return callTaskForgeApi({ task: taskId });
+export async function taskforgeGetTask(taskId: string, project?: string): Promise<TaskForgeResponse> {
+  return callTaskForgeApi({ task: taskId }, project);
 }
 
 export async function taskforgeCreateTask(
   title: string,
   description: string,
   status?: string,
+  project?: string,
 ): Promise<TaskForgeResponse> {
   return callTaskForgeApi({
-    action: 'create',
-    title,
-    description,
-    status: status || 'initiierung',
-  });
+    action: 'create_task',
+    data: {
+      title,
+      description,
+      state: status || 'initiierung',
+    },
+  }, project);
 }
 
 export async function taskforgeMoveTask(
   taskId: string,
   newStatus: string,
+  project?: string,
 ): Promise<TaskForgeResponse> {
   return callTaskForgeApi({
-    action: 'move',
-    task: taskId,
-    status: newStatus,
-  });
+    action: 'update_task',
+    data: {
+      taskId,
+      state: newStatus,
+    },
+  }, project);
 }
 
 export async function taskforgeAddComment(
   taskId: string,
   comment: string,
+  project?: string,
 ): Promise<TaskForgeResponse> {
   return callTaskForgeApi({
-    action: 'comment',
-    task: taskId,
-    comment,
-  });
+    action: 'create_comment',
+    data: {
+      taskId,
+      content: comment,
+    },
+  }, project);
 }
 
-export async function taskforgeSearch(query: string): Promise<TaskForgeResponse> {
-  return callTaskForgeApi({ search: query });
+export async function taskforgeSearch(query: string, project?: string): Promise<TaskForgeResponse> {
+  return callTaskForgeApi({ search: query }, project);
 }

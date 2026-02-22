@@ -19,7 +19,7 @@ const MODEL_TIERS: Record<string, ModelTier[]> = {
   ],
   // Tier 2: Balanced - most code tasks
   balanced: [
-    { provider: 'zai', model: 'glm-4.7' },                       // $0.60/$2.20
+    { provider: 'zai', model: 'glm-5' },                          // $1.00/$3.20
     { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
     { provider: 'openai', model: 'gpt-4o' },
     { provider: 'gemini', model: 'gemini-1.5-pro' },

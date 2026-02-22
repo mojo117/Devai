@@ -3,6 +3,7 @@ import type { LLMProvider } from '../llm/types.js';
 import type { MemoryCandidate, MemoryPriority } from './types.js';
 import { generateEmbedding } from './embeddings.js';
 import { findSimilarMemories, insertMemory, supersedeMemory } from './memoryStore.js';
+import { normalizeMemoryNamespace } from './namespace.js';
 
 // ---------------------------------------------------------------------------
 // Extraction prompt (German) — instructs the LLM to distill learnings
@@ -112,7 +113,10 @@ export async function extractMemoryCandidates(
       candidates.push({
         content: String(raw.content),
         type,
-        namespace: typeof raw.namespace === 'string' ? raw.namespace : 'devai/general',
+        namespace: normalizeMemoryNamespace(
+          typeof raw.namespace === 'string' ? raw.namespace : undefined,
+          'devai/general',
+        ),
         source,
         priority,
       });

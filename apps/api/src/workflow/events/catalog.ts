@@ -6,9 +6,7 @@
  *   workflow.*   — domain lifecycle
  *   agent.*      — agent lifecycle
  *   tool.*       — tool execution
- *   gate.*       — ASK/approval/plan gates
- *   plan.*       — plan mode
- *   task.*       — plan tasks
+ *   gate.*       — ASK/approval gates
  *   system.*     — infrastructure
  */
 
@@ -17,7 +15,6 @@
 export const CMD_USER_REQUEST_SUBMITTED = 'command.user.request_submitted' as const;
 export const CMD_USER_QUESTION_ANSWERED = 'command.user.question_answered' as const;
 export const CMD_USER_APPROVAL_DECIDED = 'command.user.approval_decided' as const;
-export const CMD_USER_PLAN_APPROVAL_DECIDED = 'command.user.plan_approval_decided' as const;
 
 // ── Workflow events ─────────────────────────────────────────────
 
@@ -50,23 +47,6 @@ export const GATE_QUESTION_QUEUED = 'gate.question.queued' as const;
 export const GATE_QUESTION_RESOLVED = 'gate.question.resolved' as const;
 export const GATE_APPROVAL_QUEUED = 'gate.approval.queued' as const;
 export const GATE_APPROVAL_RESOLVED = 'gate.approval.resolved' as const;
-export const GATE_PLAN_APPROVAL_QUEUED = 'gate.plan_approval.queued' as const;
-export const GATE_PLAN_APPROVAL_RESOLVED = 'gate.plan_approval.resolved' as const;
-
-// ── Plan events ─────────────────────────────────────────────────
-
-export const PLAN_STARTED = 'plan.started' as const;
-export const PLAN_READY = 'plan.ready' as const;
-export const PLAN_APPROVAL_REQUESTED = 'plan.approval_requested' as const;
-export const PLAN_APPROVED = 'plan.approved' as const;
-export const PLAN_REJECTED = 'plan.rejected' as const;
-
-// ── Task events ─────────────────────────────────────────────────
-
-export const TASK_CREATED = 'task.created' as const;
-export const TASK_UPDATED = 'task.updated' as const;
-export const TASK_COMPLETED = 'task.completed' as const;
-export const TASK_FAILED = 'task.failed' as const;
 
 // ── System events ───────────────────────────────────────────────
 
@@ -149,6 +129,10 @@ export interface GateQuestionQueuedPayload {
   questionId: string;
   question: string;
   fromAgent: string;
+  turnId?: string;
+  questionKind?: string;
+  fingerprint?: string;
+  expiresAt?: string;
 }
 
 export interface GateQuestionResolvedPayload {
@@ -165,12 +149,6 @@ export interface GateApprovalQueuedPayload {
 export interface GateApprovalResolvedPayload {
   approvalId: string;
   approved: boolean;
-}
-
-export interface GatePlanApprovalResolvedPayload {
-  planId: string;
-  approved: boolean;
-  reason?: string;
 }
 
 export interface WorkflowTurnStartedPayload {
@@ -191,35 +169,6 @@ export interface WorkflowFailedPayload {
   recoverable: boolean;
 }
 
-export interface PlanStartedPayload {
-  sessionId: string;
-}
-
-export interface PlanReadyPayload {
-  plan: unknown;
-}
-
-export interface TaskCreatedPayload {
-  task: unknown;
-}
-
-export interface TaskUpdatedPayload {
-  taskId: string;
-  status: string;
-  progress?: number;
-  activeForm?: string;
-}
-
-export interface TaskCompletedPayload {
-  taskId: string;
-  result: unknown;
-}
-
-export interface TaskFailedPayload {
-  taskId: string;
-  error: string;
-}
-
 /**
  * Maps legacy stream event type strings to domain event types.
  * Used during incremental migration (Phase 5).
@@ -237,14 +186,4 @@ export const LEGACY_TYPE_MAP: Record<string, string> = {
   action_pending: TOOL_ACTION_PENDING,
   user_question: GATE_QUESTION_QUEUED,
   approval_request: GATE_APPROVAL_QUEUED,
-  plan_start: PLAN_STARTED,
-  plan_ready: PLAN_READY,
-  plan_approval_request: PLAN_APPROVAL_REQUESTED,
-  plan_approved: PLAN_APPROVED,
-  plan_rejected: PLAN_REJECTED,
-  task_created: TASK_CREATED,
-  task_update: TASK_UPDATED,
-  task_started: TASK_UPDATED,
-  task_completed: TASK_COMPLETED,
-  task_failed: TASK_FAILED,
 };

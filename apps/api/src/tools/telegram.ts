@@ -1,5 +1,5 @@
 /**
- * Telegram tool — sends documents via Telegram Bot API.
+ * Document delivery tools — Telegram + Web (Supabase Storage).
  * Supports filesystem, Supabase storage, and URL sources.
  */
 
@@ -9,6 +9,7 @@ import { getDefaultNotificationChannel } from '../db/schedulerQueries.js';
 import { getUserfileById } from '../db/userfileQueries.js';
 import { getSupabase } from '../db/index.js';
 import { sendTelegramDocument } from '../external/telegram.js';
+import { uploadUserfileFromBuffer, isUploadError } from '../services/userfileService.js';
 import { config } from '../config.js';
 import type { ToolExecutionResult } from './executor.js';
 
@@ -205,6 +206,119 @@ export async function telegramSendDocument(
     return {
       success: true,
       result: successResult,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Resolve a file from source and upload it to Supabase Storage as a userfile,
+ * making it downloadable via the web UI at /api/userfiles/:id/download.
+ *
+ * Never throws — always returns a ToolExecutionResult.
+ */
+export async function deliverDocument(
+  source: 'filesystem' | 'supabase' | 'url',
+  path: string,
+  description?: string,
+  overrideFilename?: string,
+): Promise<ToolExecutionResult> {
+  try {
+    // 1. If source is already supabase, the file is already available — just return its metadata
+    if (source === 'supabase') {
+      const existing = await getUserfileById(path);
+      if (!existing) {
+        return { success: false, error: `Userfile not found: ${path}` };
+      }
+      return {
+        success: true,
+        result: {
+          fileId: existing.id,
+          filename: existing.original_name || existing.filename,
+          mimeType: existing.mime_type,
+          sizeBytes: existing.size_bytes,
+          downloadUrl: `/api/userfiles/${existing.id}/download`,
+          source,
+          description: description || undefined,
+        },
+      };
+    }
+
+    // 2. Resolve file buffer + filename
+    let buffer: Buffer;
+    let filename: string;
+
+    switch (source) {
+      case 'filesystem': {
+        const result = await resolveFilesystem(path);
+        buffer = result.buffer;
+        filename = result.filename;
+        break;
+      }
+      case 'url': {
+        const result = await resolveUrl(path);
+        buffer = result.buffer;
+        filename = result.filename;
+        break;
+      }
+      default: {
+        const exhaustive: never = source;
+        return { success: false, error: `Unknown source type: ${String(exhaustive)}` };
+      }
+    }
+
+    if (overrideFilename) {
+      filename = overrideFilename;
+    }
+
+    // 3. Detect mime type from extension
+    const ext = filename.slice(filename.lastIndexOf('.')).toLowerCase();
+    const MIME_MAP: Record<string, string> = {
+      '.pdf': 'application/pdf',
+      '.doc': 'application/msword',
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.xls': 'application/vnd.ms-excel',
+      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.ppt': 'application/vnd.ms-powerpoint',
+      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      '.txt': 'text/plain',
+      '.md': 'text/markdown',
+      '.csv': 'text/csv',
+      '.json': 'application/json',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.zip': 'application/zip',
+      '.msg': 'application/vnd.ms-outlook',
+      '.eml': 'message/rfc822',
+    };
+    const mimeType = MIME_MAP[ext] || 'application/octet-stream';
+
+    // 4. Upload to Supabase Storage via userfileService
+    const uploadResult = await uploadUserfileFromBuffer(buffer, filename, mimeType);
+
+    if (isUploadError(uploadResult)) {
+      return { success: false, error: uploadResult.error };
+    }
+
+    // 5. Return metadata for frontend rendering
+    return {
+      success: true,
+      result: {
+        fileId: uploadResult.file.id,
+        filename: uploadResult.file.originalName,
+        mimeType: uploadResult.file.mimeType,
+        sizeBytes: uploadResult.file.sizeBytes,
+        downloadUrl: `/api/userfiles/${uploadResult.file.id}/download`,
+        source,
+        description: description || undefined,
+      },
     };
   } catch (error) {
     return {

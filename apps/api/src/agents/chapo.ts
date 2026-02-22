@@ -30,6 +30,9 @@ export const CHAPO_AGENT: AgentDefinition = {
     'fs_readFile',
     'fs_glob',
     'fs_grep',
+    // Web tools (read-only research)
+    'web_search',
+    'web_fetch',
     // Git status (read-only)
     'git_status',
     'git_diff',
@@ -44,6 +47,8 @@ export const CHAPO_AGENT: AgentDefinition = {
     // Skill tools (read-only management)
     'skill_list',
     'skill_reload',
+    // CHAPO control tools
+    'chapo_plan_set',
     // Meta-tools for coordination
     'delegateToDevo',
     'delegateToCaio',
@@ -51,6 +56,8 @@ export const CHAPO_AGENT: AgentDefinition = {
     'delegateToScout',
     'askUser',
     'requestApproval',
+    'todoWrite',
+    'respondToUser',
   ],
 
   systemPrompt: CHAPO_SYSTEM_PROMPT,
@@ -58,6 +65,79 @@ export const CHAPO_AGENT: AgentDefinition = {
 
 // Tool definitions for CHAPO-specific meta-tools
 export const CHAPO_META_TOOLS = [
+  {
+    name: 'chapo_plan_set',
+    description: 'Setzt einen kurzen Ausfuehrungsplan mit Schritten, Owner und Status fuer die laufende Aufgabe.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Plan-Titel.',
+        },
+        steps: {
+          type: 'array',
+          description: 'Plan-Schritte (genau 1 Schritt darf status=doing haben).',
+          items: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+                description: 'Stabile Schritt-ID (z.B. s1).',
+              },
+              text: {
+                type: 'string',
+                description: 'Kurze Aktionsbeschreibung.',
+              },
+              owner: {
+                type: 'string',
+                enum: ['chapo', 'devo', 'scout', 'caio'],
+                description: 'Zustaendiger Agent.',
+              },
+              status: {
+                type: 'string',
+                enum: ['todo', 'doing', 'done', 'blocked'],
+                description: 'Aktueller Schrittstatus.',
+              },
+            },
+            required: ['id', 'text', 'owner', 'status'],
+          },
+        },
+      },
+      required: ['title', 'steps'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'todoWrite',
+    description: 'Schreibe oder aktualisiere deine persoenliche Todo-Liste. Sende immer die KOMPLETTE Liste — sie wird jedes Mal ueberschrieben.',
+    parameters: {
+      type: 'object',
+      properties: {
+        todos: {
+          type: 'array',
+          description: 'Die komplette Todo-Liste.',
+          items: {
+            type: 'object',
+            properties: {
+              content: {
+                type: 'string',
+                description: 'Was zu tun ist.',
+              },
+              status: {
+                type: 'string',
+                enum: ['pending', 'in_progress', 'completed'],
+                description: 'Aktueller Status.',
+              },
+            },
+            required: ['content', 'status'],
+          },
+        },
+      },
+      required: ['todos'],
+    },
+    requiresConfirmation: false,
+  },
   {
     name: 'delegateToDevo',
     description: 'Delegiere Entwicklungs-/DevOps-Aufgaben an DEVO. Entscheide nur die Domäne und das Ziel; DEVO wählt die konkreten Tools.',
@@ -238,13 +318,18 @@ export const CHAPO_META_TOOLS = [
   },
   {
     name: 'askUser',
-    description: 'Stelle dem User eine Frage bei Unklarheiten. Nutze dies BEVOR du Freigabe einholst.',
+    description: 'Stelle dem User eine Frage bei Unklarheiten. Nutze dies BEVOR du Freigabe einholst. Mit blocking=false kannst du eine Frage stellen und gleichzeitig an anderen Aufgaben weiterarbeiten.',
     parameters: {
       type: 'object',
       properties: {
         question: {
           type: 'string',
           description: 'Die Frage an den User',
+        },
+        blocking: {
+          type: 'boolean',
+          description: 'Wenn false, laueft die Loop weiter waehrend auf Antwort gewartet wird. Antwort kommt via Inbox. Default: true.',
+          default: true,
         },
         options: {
           type: 'array',
@@ -282,6 +367,25 @@ export const CHAPO_META_TOOLS = [
         },
       },
       required: ['description', 'riskLevel'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'respondToUser',
+    description: 'Sende eine Zwischenantwort an den User waehrend du an weiteren Aufgaben arbeitest. Nutze dies wenn du eine Aufgabe abgeschlossen hast aber noch andere Aufgaben bearbeiten musst.',
+    parameters: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          description: 'Der Antworttext fuer den User.',
+        },
+        inReplyTo: {
+          type: 'string',
+          description: 'Optional: Zitat oder Referenz auf welche User-Nachricht sich diese Antwort bezieht.',
+        },
+      },
+      required: ['message'],
     },
     requiresConfirmation: false,
   },

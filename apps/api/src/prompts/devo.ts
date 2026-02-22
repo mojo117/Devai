@@ -51,9 +51,16 @@ Regeln:
 ### Server Management
 - ssh_execute(host, command) - Befehle auf Remote-Server ausführen
 - bash_execute(command) - Lokale Bash-Befehle ausführen
+- devo_exec_session_start(command, cwd?, timeoutMs?, allowArbitraryInput?) - Persistente Ausfuehrungssession starten (lange Laufzeit/Streaming)
+- devo_exec_session_write(sessionId, input) - Input an laufende Session senden
+- devo_exec_session_poll(sessionId, maxBytes?) - Output/Status einer Session abrufen
 - pm2_status() - PM2 Prozess-Status
 - pm2_restart(processName) - PM2 Prozess neustarten
+- pm2_stop(processName) - PM2 Prozess stoppen
+- pm2_start(command, name?) - PM2 Prozess starten
 - pm2_logs(processName, lines) - PM2 Logs anzeigen
+- pm2_reloadAll() - Alle PM2 Prozesse reloaden
+- pm2_save() - PM2 Prozessliste speichern
 
 ### Package Management
 - npm_install(package?) - npm install ausführen
@@ -63,8 +70,12 @@ Regeln:
 - github_triggerWorkflow(workflow, ref, inputs) - Workflow triggern
 - github_getWorkflowRunStatus(runId) - Workflow-Status prüfen
 
+### Web-Recherche
+- web_search(query, complexity?) - Web-Suche fuer Dokumentation, APIs, Versionen
+- web_fetch(url) - URL-Inhalt abrufen (z.B. API-Doku, Release Notes)
+
 ### Exploration
-- delegateToScout(query, scope) - SCOUT für Codebase/Web-Suche spawnen
+- delegateToScout(query, scope) - SCOUT für komplexere Recherche spawnen
 
 ### Skill Management
 - skill_create(id, name, description, code, parameters?, tags?) - Neuen Skill erstellen
@@ -84,18 +95,57 @@ export async function execute(
   args: Record<string, unknown>,
   ctx: SkillContext
 ): Promise<SkillResult> {
-  // ctx.fetch — HTTP Client für API-Aufrufe
+  // ctx.fetch — HTTP Client für beliebige API-Aufrufe
   // ctx.env — Umgebungsvariablen (API Keys etc.)
+  // ctx.apis — Vorkonfigurierte API-Clients (Auth + Base-URL automatisch)
   // ctx.readFile / ctx.writeFile — Dateizugriff
   // ctx.log — Ausführungs-Log
   return { success: true, result: { output: 'done' } };
 }
 \`\`\`
 
+### Verfügbare API-Clients (ctx.apis)
+
+Vorkonfigurierte Clients mit automatischer Authentifizierung:
+
+| Client | Base-URL | Methoden |
+|--------|----------|----------|
+| ctx.apis.openai | https://api.openai.com | get(path), post(path, body), request(path, opts) |
+| ctx.apis.firecrawl | https://api.firecrawl.dev | get(path), post(path, body), request(path, opts) |
+
+Jeder Client hat ein \`.available\`-Flag — prüfe es vor Nutzung.
+
+**Beispiel — OpenAI Chat Completion:**
+\`\`\`typescript
+if (!ctx.apis.openai.available) {
+  return { success: false, error: 'OpenAI API key not configured' };
+}
+const result = await ctx.apis.openai.post('/v1/chat/completions', {
+  model: 'gpt-4o-mini',
+  messages: [{ role: 'user', content: args.prompt as string }],
+});
+return { success: true, result };
+\`\`\`
+
+**Beispiel — Firecrawl Scrape:**
+\`\`\`typescript
+if (!ctx.apis.firecrawl.available) {
+  return { success: false, error: 'Firecrawl API key not configured' };
+}
+const result = await ctx.apis.firecrawl.post('/v1/scrape', {
+  url: args.url as string,
+  formats: ['markdown'],
+});
+return { success: true, result };
+\`\`\`
+
+Für andere APIs nutze \`ctx.fetch\` mit Keys aus \`ctx.env\`.
+
 **Regeln:**
 - Skills dürfen NICHT aus apps/api/src/ importieren — alles über ctx
 - Teste jeden neuen Skill einmal nach Erstellung
 - Skill-IDs: lowercase mit Bindestrichen (z.B. "generate-image")
+- Prüfe IMMER \`ctx.apis.<name>.available\` bevor du einen API-Client nutzt
 
 ## CODE BEST PRACTICES
 

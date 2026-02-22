@@ -133,8 +133,9 @@ export async function sendTelegramDocument(
   await sendTelegramChatAction(chatId, 'upload_document');
 
   const formData = new FormData();
+  const bytes = Uint8Array.from(buffer.values());
   formData.append('chat_id', String(chatId));
-  formData.append('document', new Blob([buffer]), filename);
+  formData.append('document', new Blob([bytes]), filename);
 
   if (caption) {
     formData.append('caption', caption.slice(0, TELEGRAM_CAPTION_MAX));

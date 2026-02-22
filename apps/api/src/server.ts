@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import { nanoid } from 'nanoid';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
@@ -26,8 +27,10 @@ import { registerProjections } from './workflow/projections/index.js';
 import { refreshSkills } from './skills/registry.js';
 import { schedulerService } from './scheduler/schedulerService.js';
 import { processRequest } from './agents/router.js';
+import { loadRecentConversationHistory } from './agents/router/requestUtils.js';
 import { sendTelegramMessage } from './external/telegram.js';
 import { getAgentSoulStatusReport } from './prompts/agentSoul.js';
+import { ensureSessionExists, saveMessage } from './db/queries.js';
 import { getDefaultNotificationChannel, logSchedulerExecution } from './db/schedulerQueries.js';
 import {
   backupLocalDbJob,
@@ -35,6 +38,7 @@ import {
   collectSystemHealthSnapshot,
   formatHealthAlert,
   memoryDecayJob,
+  recentTopicDecayJob,
 } from './services/systemReliability.js';
 
 const envValidation = validateRequiredEnv(config);
@@ -81,7 +85,7 @@ await app.register(cors, {
 });
 
 // Security headers (CSP handled by Caddy + frontend meta tag)
-await app.register(helmet, {
+await app.register(helmet as any, {
   contentSecurityPolicy: false,
 });
 
@@ -96,10 +100,10 @@ await app.register(rateLimit, {
 await app.register(fastifyWebsocket);
 
 // Register multipart support for file uploads (10MB limit)
-await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
+await app.register(multipart as any, { limits: { fileSize: 10 * 1024 * 1024 } });
 
 // Register cookie parsing (needed for httpOnly auth cookies)
-await app.register(cookie);
+await app.register(cookie as any);
 
 // Global error handler — sanitize unexpected errors
 app.setErrorHandler((error: { statusCode?: number; message: string }, _request, reply) => {
@@ -208,15 +212,46 @@ const start = async () => {
     // Initialize scheduler (loads DB jobs, registers cron schedules, enables recovery loop)
     schedulerService.configure(
       async (instruction: string, jobId: string) => {
-        const sessionId = `scheduler-${jobId}-${Date.now()}`;
-        const result = await processRequest(
-          sessionId,
-          instruction,
-          [],
-          null,
-          () => {},
-        );
-        return result;
+        const sessionId = `scheduler-${jobId}`;
+        const now = () => new Date().toISOString();
+
+        await ensureSessionExists(sessionId, `Scheduler ${jobId}`);
+        const history = await loadRecentConversationHistory(sessionId);
+
+        await saveMessage(sessionId, {
+          id: nanoid(),
+          role: 'user',
+          content: instruction,
+          timestamp: now(),
+        });
+
+        try {
+          const result = await processRequest(
+            sessionId,
+            instruction,
+            history,
+            null,
+            () => {},
+          );
+
+          await saveMessage(sessionId, {
+            id: nanoid(),
+            role: 'assistant',
+            content: result,
+            timestamp: now(),
+          });
+
+          return result;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          await saveMessage(sessionId, {
+            id: nanoid(),
+            role: 'assistant',
+            content: `Error: ${message}`,
+            timestamp: now(),
+          });
+          throw error;
+        }
       },
       sendSchedulerNotification,
     );
@@ -271,6 +306,15 @@ const start = async () => {
       name: 'Maintenance: Memory Decay',
       cronExpression: '30 3 * * *',
       run: memoryDecayJob,
+      runOnStart: true,
+      notifyOnFailure: false,
+    });
+
+    schedulerService.registerInternalJob({
+      id: 'maintenance-recent-topic-decay',
+      name: 'Maintenance: Recent Topic Decay',
+      cronExpression: '35 3 * * *',
+      run: recentTopicDecayJob,
       runOnStart: true,
       notifyOnFailure: false,
     });

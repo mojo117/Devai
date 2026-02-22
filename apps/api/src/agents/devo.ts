@@ -13,7 +13,7 @@ import { registerMetaTools, registerAgentTools } from '../tools/registry.js';
 export const DEVO_AGENT: AgentDefinition = {
   name: 'devo',
   role: 'Developer & DevOps Engineer',
-  model: 'glm-4.7', // ZAI GLM-4.7 - primary (cost-optimized)
+  model: 'glm-5', // ZAI GLM-5 - primary
   fallbackModel: 'claude-sonnet-4-20250514',
 
   capabilities: {
@@ -42,8 +42,14 @@ export const DEVO_AGENT: AgentDefinition = {
     'fs_delete',
     'fs_glob',
     'fs_grep',
+    // Web tools (documentation lookup)
+    'web_search',
+    'web_fetch',
     // DevOps tools
     'bash_execute',
+    'devo_exec_session_start',
+    'devo_exec_session_write',
+    'devo_exec_session_poll',
     'ssh_execute',
     // Git tools
     'git_status',
@@ -58,7 +64,11 @@ export const DEVO_AGENT: AgentDefinition = {
     // PM2 tools
     'pm2_status',
     'pm2_restart',
+    'pm2_stop',
+    'pm2_start',
     'pm2_logs',
+    'pm2_reloadAll',
+    'pm2_save',
     // NPM tools
     'npm_install',
     'npm_run',

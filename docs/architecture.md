@@ -1,5 +1,5 @@
 # DevAI Architecture
-Last updated 2026-02-20
+Last updated 2026-02-22
 
 This document describes the architecture of DevAI, including the CHAPO Decision Loop and the multi-agent system.
 
@@ -73,7 +73,8 @@ apps/
 +-- api/                          # Fastify API server
 |   +-- src/
 |       +-- agents/               # Multi-agent system
-|       |   +-- chapo-loop.ts     # ChapoLoop -- core decision loop (~400 lines)
+|       |   +-- chapo-loop.ts     # ChapoLoop -- core decision loop + inbox check
+|       |   +-- inbox.ts          # SessionInbox queue + event bus (multi-message)
 |       |   +-- router.ts         # processRequest() entry point + Plan Mode
 |       |   +-- chapo.ts          # CHAPO agent definition
 |       |   +-- devo.ts           # DEVO agent definition
@@ -82,10 +83,10 @@ apps/
 |       |   +-- error-handler.ts  # AgentErrorHandler (resilient error wrapping)
 |       |   +-- self-validation.ts# SelfValidator (LLM reviews its own answers)
 |       |   +-- conversation-manager.ts # 180k token sliding window + compaction
-|       |   +-- stateManager.ts   # Session state (phases, approvals, questions)
+|       |   +-- stateManager.ts   # Session state (phases, approvals, questions, isLoopRunning)
 |       |   +-- systemContext.ts  # System context assembly
 |       |   +-- events.ts         # Typed event factory functions
-|       |   +-- types.ts          # All agent/plan/task/scout types
+|       |   +-- types.ts          # All agent/plan/task/scout/inbox types
 |       |   +-- index.ts          # Re-exports
 |       +-- prompts/              # Central prompt directory (all German)
 |       |   +-- index.ts          # Re-exports all prompts
@@ -278,6 +279,70 @@ runLoop() -- max N iterations:
   +-- return { status: 'waiting_for_user', question: 'Loop exhausted...' }
 ```
 
+### Multi-Message Inbox System
+
+Users can send follow-up messages while CHAPO is working. These are queued in a per-session inbox and processed between loop iterations.
+
+```
+WebSocket/Telegram message arrives
+      |
+      v
+CommandDispatcher / Telegram webhook
+      |
+      v
+  isLoopRunning for this session?
+      |--- NO  --> Start new ChapoLoop normally
+      |--- YES --> Push into SessionInbox
+                --> Fire inbox event handlers (immediate acknowledgment)
+                --> Return { type: 'queued' }
+```
+
+**SessionInbox** (`agents/inbox.ts`): Per-session in-memory queue with event bus.
+
+```typescript
+pushToInbox(sessionId, message)   // Queue + fire handlers
+drainInbox(sessionId)             // Return all + clear
+peekInbox(sessionId)              // Return all (non-destructive)
+clearInbox(sessionId)             // Delete queue + handlers
+onInboxMessage(sessionId, handler)  // Subscribe to new messages
+offInboxMessage(sessionId, handler) // Unsubscribe
+```
+
+**ChapoLoop integration**: The loop subscribes to inbox events on construction. Between each iteration (after tool results, before next LLM call), `checkInbox()` drains the queue and injects messages as a system prompt with classification instructions:
+
+```
+runLoop() iteration:
+  1. Execute tools / delegation / answer
+  2. Feed results back to conversation
+  3. --> checkInbox() <-- drains inbox, injects classification prompt
+  4. Next LLM call (with inbox context if any)
+```
+
+**Classification** (done by CHAPO within its own context):
+- **PARALLEL**: Independent task -- delegate or handle after current task
+- **AMENDMENT**: Changes current task -- abort early (iteration < 5) or finish-then-pivot
+- **EXPANSION**: Extends current task -- integrate into running plan
+
+**Lifecycle**: `setLoopRunning(true)` before `runLoop()`, `setLoopRunning(false) + dispose()` in `finally` block.
+
+### Multi-Message v2 (Planned)
+
+> Full design: `docs/plans/2026-02-22-multi-message-v2-design.md`
+
+The current inbox system has limitations: messages are injected as system hints (not `user` role), the loop can only produce one final answer, and `checkInbox()` doesn't run on the answer path (timing gap). v2 addresses these with:
+
+1. **`respondToUser` tool** — CHAPO sends intermediate chat bubbles without exiting the loop. Backend emits `partial_response` WebSocket event.
+2. **Non-blocking `askUser`** — `askUser(blocking: false)` continues the loop while waiting for user reply. Reply arrives via inbox.
+3. **Inbox as `user` role messages** — Replace system-hint injection with real user messages. Remove classification labels (PARALLEL/AMENDMENT/EXPANSION) — GLM-5 classifies in-context.
+4. **Timing fix** — `checkInbox()` before answer exit to catch late-arriving messages.
+5. **Obligation adjustment** — Inbox obligations become `blocking: true`; `respondToUser` results satisfy them.
+
+**Design decisions:**
+- Trust the model (GLM-5) for routing, not heuristics or classifiers
+- CHAPO tracks multiple tasks via conversation context + `respondToUser` (no formal task list needed)
+- Intake classifier may become redundant — kept for now as cheap pre-filter
+- CAIO as inbox task manager is architecturally possible if model self-tracking proves insufficient at high volumes (uses existing delegation, no new systems)
+
 ### ChapoLoopResult
 
 ```typescript
@@ -295,21 +360,22 @@ interface ChapoLoopResult {
 
 Four agents with distinct roles:
 
-| Agent | Role | Tools | System Prompt |
-|-------|------|-------|---------------|
-| **CHAPO** | Coordinator | All tools (via ChapoLoop) | `CHAPO_SYSTEM_PROMPT` |
-| **DEVO** | Developer + DevOps | `fs_*`, `git_*`, `bash_execute`, `ssh_execute`, `pm2_*`, `npm_*`, `github_*` | `DEVO_SYSTEM_PROMPT` |
-| **SCOUT** | Exploration Specialist | `fs_readFile`, `fs_glob`, `fs_grep`, `web_search`, `web_fetch`, `context_*` | `SCOUT_SYSTEM_PROMPT` |
-| **CAIO** | Communications & Admin | `taskforge_*`, `scheduler_*`, `send_email`, `reminder_create`, `notify_user`, `memory_*` | `CAIO_SYSTEM_PROMPT` |
+| Agent | Role | Model (Primary / Fallback) | Tools | System Prompt |
+|-------|------|----------------------------|-------|---------------|
+| **CHAPO** | Coordinator | GLM-5 / Opus 4.5 | `fs_read*`, `web_*`, `git_read`, `memory_*`, `skill_list`, `chapo_*` control tools, meta-tools | `CHAPO_SYSTEM_PROMPT` |
+| **DEVO** | Developer + DevOps | GLM-4.7 / Sonnet 4 | `fs_*`, `git_*`, `bash_execute`, `ssh_execute`, `pm2_*`, `npm_*`, `github_*`, `web_*`, `skill_*` | `DEVO_SYSTEM_PROMPT` |
+| **SCOUT** | Exploration Specialist | GLM-4.7-Flash (free) / Sonnet 4 | `fs_read*`, `context_searchDocuments`, `git_read`, `github_getWorkflowRunStatus`, `web_*`, `scout_*` (Firecrawl), `memory_*` | `SCOUT_SYSTEM_PROMPT` |
+| **CAIO** | Communications & Admin | GLM-4.5-Air / Sonnet 4 | `fs_readFile`, `fs_listFiles`, `fs_glob`, `context_*`, `taskforge_*`, `scheduler_*`, `send_email`, `notify_user`, `memory_*` | `CAIO_SYSTEM_PROMPT` |
 
 ### CHAPO (Coordinator)
 
 CHAPO is the main agent the user interacts with. It runs the decision loop and can:
 - Answer directly (chat, explanations, brainstorming)
-- Use tools itself (memory, file reads, web search)
+- Use tools itself (memory, file reads, web search, git status)
 - Delegate complex work to DEVO, SCOUT, or CAIO
 - Fire multiple agents in parallel via `delegateParallel`
 - Ask the user for clarification
+- Process follow-up messages via the inbox system (classify as parallel/amendment/expansion)
 
 ### DEVO (Developer + DevOps)
 
@@ -321,7 +387,7 @@ SCOUT specializes in codebase exploration and web research. Runs as a focused su
 
 ### CAIO (Communications & Administration Officer)
 
-CAIO handles non-code tasks: TaskForge ticket management, email sending, scheduler jobs, reminders, and notifications. Has NO access to filesystem, bash, SSH, git, or PM2. Can delegate research to SCOUT and escalate issues back to CHAPO.
+CAIO handles non-code tasks: TaskForge ticket management, email sending, scheduler jobs, reminders, and notifications. Has read-only filesystem access for context gathering (e.g. reading files for ticket context or attachments). No access to bash, SSH, git, or PM2. Can delegate research to SCOUT and escalate issues back to CHAPO.
 
 ### Agent Definitions
 
@@ -438,6 +504,8 @@ prompts/
 |   +-- chapo.ts           # Chapo's identity (versatile assistant + coordinator)
 |   +-- devo.ts            # Developer + DevOps agent behavior
 |   +-- scout.ts           # Explorer agent behavior
+|   +-- caio.ts            # Communications & admin agent behavior
+|   +-- agentSoul.ts       # Loads CAIO/DEVO/SCOUT soul blocks from workspace
 |
 +-- Validation:
 |   +-- self-validation.ts # Self-review criteria (completeness, tone, etc.)
@@ -582,7 +650,7 @@ Events are streamed via **WebSocket** as JSON. Each event has a standardized bas
 interface BaseStreamEvent {
   id: string;
   timestamp: string;
-  category: EventCategory; // 'agent' | 'tool' | 'plan' | 'task' | 'scout' | 'user' | 'system'
+  category: EventCategory; // 'agent' | 'tool' | 'plan' | 'task' | 'scout' | 'user' | 'inbox' | 'system'
   sessionId?: string;
 }
 ```
@@ -635,6 +703,13 @@ interface BaseStreamEvent {
 { type: 'approval_request',  request: {...} }
 ```
 
+**Inbox events:**
+```typescript
+{ type: 'message_queued',    messageId: '...', preview: 'Got it — I\'ll handle that too' }
+{ type: 'inbox_processing',  count: 2 }
+{ type: 'inbox_classified',  messageId: '...', classification: 'parallel', summary: '...' }
+```
+
 **System events:**
 ```typescript
 { type: 'session_start' }
@@ -655,8 +730,8 @@ Tools are defined in `apps/api/src/tools/registry.ts`. Each tool is whitelisted 
 | **Filesystem** | `fs_listFiles`, `fs_readFile`, `fs_writeFile`, `fs_glob`, `fs_grep`, `fs_edit`, `fs_mkdir`, `fs_move`, `fs_delete` |
 | **Git** | `git_status`, `git_diff`, `git_commit`, `git_push`, `git_pull`, `git_add` |
 | **GitHub** | `github_triggerWorkflow`, `github_getWorkflowRunStatus` |
-| **DevOps** | `bash_execute`, `ssh_execute`, `pm2_status`, `pm2_restart`, `pm2_stop`, `pm2_start`, `pm2_logs`, `npm_install`, `npm_run` |
-| **Web** | `web_search`, `web_fetch` |
+| **DevOps** | `bash_execute`, `devo_exec_session_start`, `devo_exec_session_write`, `devo_exec_session_poll`, `ssh_execute`, `pm2_status`, `pm2_restart`, `pm2_stop`, `pm2_start`, `pm2_logs`, `pm2_reloadAll`, `pm2_save`, `npm_install`, `npm_run` |
+| **Web** | `web_search`, `web_fetch`, `scout_search_fast`, `scout_search_deep`, `scout_site_map`, `scout_crawl_focused`, `scout_extract_schema`, `scout_research_bundle` |
 | **Context** | `context_listDocuments`, `context_readDocument`, `context_searchDocuments` |
 | **Memory** | `memory_remember`, `memory_search`, `memory_readToday` |
 | **Scheduler** | `scheduler_create`, `scheduler_list`, `scheduler_update`, `scheduler_delete`, `reminder_create`, `notify_user` |
@@ -664,14 +739,18 @@ Tools are defined in `apps/api/src/tools/registry.ts`. Each tool is whitelisted 
 | **Email** | `send_email` |
 | **Logs** | `logs_getStagingLogs` |
 
+Web tooling notes:
+- `web_search` uses Perplexity (`PERPLEXITY_API_KEY`).
+- `scout_*` Firecrawl tools use `FIRECRAWL_API_KEY`.
+
 ### Agent --> Tool Mapping
 
 | Agent | Allowed Tools |
 |-------|---------------|
-| **CHAPO** | All tools (coordinator) |
-| **DEVO** | `fs_*`, `git_*`, `bash_execute`, `ssh_execute`, `github_*`, `pm2_*`, `npm_*` |
-| **SCOUT** | `fs_readFile`, `fs_glob`, `fs_grep`, `web_search`, `web_fetch`, `context_*` |
-| **CAIO** | `taskforge_*`, `scheduler_*`, `reminder_create`, `notify_user`, `send_email`, `memory_*` |
+| **CHAPO** | `fs_read*`, `fs_glob`, `fs_grep`, `web_search`, `web_fetch`, `git_status`, `git_diff`, `github_getWorkflowRunStatus`, `logs_getStagingLogs`, `memory_*`, `skill_list`, `skill_reload`, `chapo_inbox_list_open`, `chapo_inbox_resolve`, `chapo_plan_set`, `chapo_answer_preflight` + meta-tools |
+| **DEVO** | `fs_*`, `git_*`, `bash_execute`, `devo_exec_session_*`, `ssh_execute`, `github_*`, `pm2_*`, `npm_*`, `web_search`, `web_fetch`, `logs_getStagingLogs`, `memory_*`, `skill_*` |
+| **SCOUT** | `fs_readFile`, `fs_listFiles`, `fs_glob`, `fs_grep`, `context_searchDocuments`, `git_status`, `git_diff`, `github_getWorkflowRunStatus`, `web_search`, `web_fetch`, `scout_search_fast`, `scout_search_deep`, `scout_site_map`, `scout_crawl_focused`, `scout_extract_schema`, `scout_research_bundle`, `memory_*` |
+| **CAIO** | `fs_readFile`, `fs_listFiles`, `fs_glob`, `context_listDocuments`, `context_readDocument`, `context_searchDocuments`, `taskforge_*`, `scheduler_*`, `reminder_create`, `notify_user`, `send_email`, `telegram_send_document`, `deliver_document`, `memory_*` |
 
 ### Special Tools (Coordination)
 
@@ -679,13 +758,18 @@ These are meta-tools used for coordination within the decision loop:
 
 | Tool | Available to | Purpose |
 |------|-------------|---------|
+| `chapo_inbox_list_open` | CHAPO | List unresolved inbox/obligation items for current task or full session |
+| `chapo_inbox_resolve` | CHAPO | Resolve one obligation (`done`/`blocked`/`wont_do`/`superseded`) |
+| `chapo_plan_set` | CHAPO | Persist a short execution plan (steps + owner + status) |
+| `chapo_answer_preflight` | CHAPO | Check draft coverage, contradictions, and evidence quality before final answer (enforced when multiple blocking obligations are open) |
 | `delegateToDevo` | CHAPO | Delegate a dev/devops task to DEVO sub-loop |
 | `delegateToCaio` | CHAPO | Delegate comms/admin task to CAIO sub-loop |
 | `delegateToScout` | CHAPO, DEVO, CAIO | Delegate exploration/research to SCOUT |
 | `delegateParallel` | CHAPO | Fire multiple agents concurrently (e.g. DEVO + CAIO) |
 | `askUser` | CHAPO | Pause the loop and ask the user a question |
 | `requestApproval` | CHAPO | Request user approval (pause loop) |
-| `escalateToChapo` | DEVO, CAIO | Escalate an issue back to CHAPO from sub-loop |
+| `respondToUser` | CHAPO | Send an intermediate user-visible response while the loop continues |
+| `escalateToChapo` | DEVO, SCOUT, CAIO | Escalate an issue back to CHAPO from sub-loop |
 
 ---
 
@@ -851,24 +935,27 @@ The `ChatUI.tsx` component connects via **WebSocket** and processes `AgentStream
 // Process streaming events
 handleEvent(event: AgentStreamEvent) {
   switch (event.type) {
-    case 'agent_start':      // Show agent starting
-    case 'agent_thinking':   // Show thinking indicator
-    case 'agent_response':   // Stream answer text
-    case 'delegation':       // Show delegation to DEVO/SCOUT
-    case 'tool_call':        // Show tool being called
-    case 'tool_result':      // Show tool output
-    case 'user_question':    // Show question, enable input
-    case 'approval_request': // Show approval dialog
-    case 'scout_start':      // Show SCOUT exploring
-    case 'scout_complete':   // Show exploration results
-    case 'task_update':      // Update task progress
-    case 'error':            // Display error (with recovery context)
-    case 'agent_complete':   // Processing finished
+    case 'agent_start':        // Show agent starting
+    case 'agent_thinking':     // Show thinking indicator
+    case 'agent_response':     // Stream answer text
+    case 'delegation':         // Show delegation to DEVO/SCOUT/CAIO
+    case 'tool_call':          // Show tool being called
+    case 'tool_result':        // Show tool output
+    case 'user_question':      // Show question, enable input
+    case 'approval_request':   // Show approval dialog
+    case 'scout_start':        // Show SCOUT exploring
+    case 'scout_complete':     // Show exploration results
+    case 'task_update':        // Update task progress
+    case 'message_queued':     // Show status chip: "Message received"
+    case 'inbox_processing':   // Show status: "Handling your follow-up..."
+    case 'inbox_classified':   // Show classification result
+    case 'error':              // Display error (with recovery context)
+    case 'agent_complete':     // Processing finished
   }
 }
 ```
 
 **UI Components:**
-- `ChatUI`: Main chat interface with WebSocket streaming
-- `AgentStatus`: Shows which agent is active (CHAPO / DEVO / SCOUT)
+- `ChatUI`: Main chat interface with WebSocket streaming. Input stays unlocked during processing (multi-message support).
+- `AgentStatus`: Shows which agent is active (CHAPO / DEVO / SCOUT / CAIO)
 - `AgentHistory`: Detailed history with tool calls, delegations, and results

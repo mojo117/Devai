@@ -1,9 +1,10 @@
-import { Fragment, type RefObject } from 'react';
+import { Fragment, useState, type RefObject } from 'react';
 import type { ChatMessage, SessionSummary } from '../../types';
 import type { ToolEvent } from './types';
 import { mergeConsecutiveThinking } from './mergeEvents';
 import type { MergedToolEvent } from './mergeEvents';
 import { renderMessageContent } from './utils';
+import { getUserfileDownloadUrl } from '../../api';
 
 const AGENT_COLORS: Record<string, string> = {
   chapo: 'text-cyan-400',
@@ -38,6 +39,36 @@ interface MessageListProps {
   onNewChat: () => void;
 }
 
+interface DecisionPathPayload {
+  path?: string;
+  reason?: string;
+  confidence?: number;
+  unresolvedAssumptions?: string[];
+}
+
+function readDecisionPayload(event: ToolEvent): DecisionPathPayload | null {
+  if (event.type !== 'tool_result' || event.name !== 'decision_path') return null;
+  if (!event.result || typeof event.result !== 'object' || Array.isArray(event.result)) return null;
+  return event.result as DecisionPathPayload;
+}
+
+function formatDecisionPath(path?: string): string {
+  switch (path) {
+    case 'answer':
+      return 'Direct Answer';
+    case 'delegate_devo':
+      return 'Delegate to DEVO';
+    case 'delegate_caio':
+      return 'Delegate to CAIO';
+    case 'delegate_scout':
+      return 'Delegate to SCOUT';
+    case 'tool':
+      return 'Direct Tool Use';
+    default:
+      return 'Decision';
+  }
+}
+
 export function MessageList({
   messages,
   toolEvents,
@@ -60,16 +91,31 @@ export function MessageList({
     const merged = mergeConsecutiveThinking(events);
     return (
       <div className="space-y-1.5">
-        {merged.map((event) => (
-          <InlineSystemEvent
-            key={event.id}
-            event={event}
-            mergedCount={event.mergedCount}
-            isExpanded={expandedEvents.has(event.id)}
-            onToggle={() => toggleEventExpanded(event.id)}
-            isLoading={live}
-          />
-        ))}
+        {merged.map((event) => {
+          const doc = getDocumentDelivery(event);
+          if (doc) {
+            return (
+              <DocumentDownloadCard
+                key={event.id}
+                fileId={doc.fileId}
+                filename={doc.filename}
+                sizeBytes={doc.sizeBytes}
+                mimeType={doc.mimeType}
+                description={doc.description}
+              />
+            );
+          }
+          return (
+            <InlineSystemEvent
+              key={event.id}
+              event={event}
+              mergedCount={event.mergedCount}
+              isExpanded={expandedEvents.has(event.id)}
+              onToggle={() => toggleEventExpanded(event.id)}
+              isLoading={live}
+            />
+          );
+        })}
       </div>
     );
   };
@@ -216,6 +262,124 @@ export function MessageList({
   );
 }
 
+/** Check if a tool_result event represents a document delivery with download info */
+function getDocumentDelivery(event: ToolEvent): { fileId: string; filename: string; sizeBytes: number; downloadUrl: string; mimeType?: string; description?: string } | null {
+  if (event.type !== 'tool_result' || event.name !== 'deliver_document') return null;
+  const r = event.result as Record<string, unknown> | undefined;
+  if (!r || typeof r !== 'object') return null;
+  if (typeof r.fileId !== 'string' || typeof r.downloadUrl !== 'string') return null;
+  return {
+    fileId: r.fileId as string,
+    filename: (r.filename as string) || 'document',
+    sizeBytes: (r.sizeBytes as number) || 0,
+    downloadUrl: r.downloadUrl as string,
+    mimeType: typeof r.mimeType === 'string' ? r.mimeType : undefined,
+    description: r.description as string | undefined,
+  };
+}
+
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
+
+function isImageFile(mimeType?: string, filename?: string): boolean {
+  if (mimeType && mimeType.startsWith('image/')) return true;
+  if (filename) {
+    const ext = filename.slice(filename.lastIndexOf('.')).toLowerCase();
+    return IMAGE_EXTENSIONS.has(ext);
+  }
+  return false;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Document download card — rendered for deliver_document results.
+ *  Shows image preview for image files, download card for everything else. */
+function DocumentDownloadCard({ fileId, filename, sizeBytes, mimeType, description }: {
+  fileId: string;
+  filename: string;
+  sizeBytes: number;
+  mimeType?: string;
+  description?: string;
+}) {
+  const downloadUrl = getUserfileDownloadUrl(fileId);
+  const isImage = isImageFile(mimeType, filename);
+  const [imgError, setImgError] = useState(false);
+
+  const handleDownload = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(downloadUrl, { credentials: 'include' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      // Fallback: open in new tab
+      window.open(downloadUrl, '_blank');
+    }
+  };
+
+  if (isImage && !imgError) {
+    return (
+      <div className="flex justify-start">
+        <div className="rounded-xl border border-devai-border bg-devai-card overflow-hidden max-w-[80%]">
+          <img
+            src={downloadUrl}
+            alt={description || filename}
+            className="max-w-full max-h-[400px] object-contain"
+            onError={() => setImgError(true)}
+          />
+          <div className="flex items-center justify-between px-3 py-2 border-t border-devai-border">
+            <div className="min-w-0 flex-1 mr-3">
+              <p className="text-xs text-devai-text-muted truncate">{filename} · {formatBytes(sizeBytes)}</p>
+              {description && <p className="text-xs text-devai-text-secondary truncate">{description}</p>}
+            </div>
+            <button
+              onClick={handleDownload}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 transition-colors shrink-0"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Download
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex justify-start">
+      <button
+        onClick={handleDownload}
+        className="inline-flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-2.5 max-w-[80%] hover:bg-emerald-500/10 transition-colors group text-left"
+      >
+        <span className="text-xl shrink-0">{'\u{1F4E5}'}</span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-emerald-400 font-medium truncate">{filename}</p>
+          <p className="text-xs text-devai-text-muted">
+            {formatBytes(sizeBytes)}
+            {description ? ` \u00B7 ${description}` : ''}
+          </p>
+        </div>
+        <svg className="w-4 h-4 text-emerald-400 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 /** Inline System Event — compact left-aligned badge with inline detail */
 function InlineSystemEvent({
   event,
@@ -230,8 +394,13 @@ function InlineSystemEvent({
   onToggle: () => void;
   isLoading: boolean;
 }) {
+  const decision = readDecisionPayload(event);
+
   const getEventLabel = () => {
     const agentPrefix = event.agent ? `${event.agent.toUpperCase()}: ` : '';
+    if (decision) {
+      return `${agentPrefix}${formatDecisionPath(decision.path)}`;
+    }
     if (event.type === 'thinking') {
       const countSuffix = mergedCount && mergedCount > 1 ? ` (${mergedCount}x)` : '';
       return `${agentPrefix}Thinking${countSuffix}`;
@@ -243,6 +412,7 @@ function InlineSystemEvent({
   };
 
   const getEventColor = () => {
+    if (decision) return 'border-amber-500/30 bg-amber-500/5 text-amber-300';
     if (event.type === 'thinking') return 'border-cyan-500/30 bg-cyan-500/5 text-cyan-400';
     if (event.type === 'tool_call') return 'border-devai-accent/30 bg-devai-accent/5 text-devai-accent';
     if (event.type === 'tool_result') return 'border-emerald-500/30 bg-emerald-500/5 text-emerald-400';
@@ -250,6 +420,17 @@ function InlineSystemEvent({
   };
 
   const getInlineDetail = (): string => {
+    if (decision) {
+      const confidence = typeof decision.confidence === 'number'
+        ? `confidence ${(decision.confidence * 100).toFixed(0)}%`
+        : 'confidence n/a';
+      const reason = decision.reason || 'no explicit reason';
+      const assumptions = Array.isArray(decision.unresolvedAssumptions) && decision.unresolvedAssumptions.length > 0
+        ? `assumptions: ${decision.unresolvedAssumptions.join(' | ')}`
+        : 'assumptions: none';
+      const text = `${confidence} _ ${reason} _ ${assumptions}`;
+      return text.length > 220 ? `${text.slice(0, 220)}...` : text;
+    }
     const payload = event.type === 'tool_call' ? event.arguments : event.result;
     if (!payload) return '';
     const text = typeof payload === 'string' ? payload : JSON.stringify(payload);

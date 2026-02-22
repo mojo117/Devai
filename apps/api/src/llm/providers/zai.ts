@@ -65,7 +65,7 @@ export class ZAIProvider implements LLMProviderAdapter {
     );
     const model = hasImages
       ? (request.model?.includes('4.6v') ? request.model : 'glm-4.6v-flash')
-      : (request.model || 'glm-4.7');
+      : (request.model || 'glm-5');
 
     const response = await client.chat.completions.create({
       model,

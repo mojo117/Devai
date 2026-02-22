@@ -64,6 +64,29 @@ export async function createSession(title?: string, userId: string = DEFAULT_USE
   return { id, title: title || null, createdAt: now };
 }
 
+export async function ensureSessionExists(
+  sessionId: string,
+  title?: string,
+  userId: string = DEFAULT_USER_ID,
+): Promise<void> {
+  const now = new Date().toISOString();
+  const { error } = await getSupabase()
+    .from('sessions')
+    .upsert({
+      id: sessionId,
+      user_id: userId,
+      title: title || null,
+      created_at: now,
+    }, {
+      onConflict: 'id',
+      ignoreDuplicates: true,
+    });
+
+  if (error) {
+    console.error('Failed to ensure session exists:', error);
+  }
+}
+
 export async function getSessionTitle(sessionId: string): Promise<string | null> {
   const { data, error } = await getSupabase()
     .from('sessions')

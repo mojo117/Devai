@@ -1,6 +1,6 @@
 # DevAI Agents Reference
 
-Last updated: 2026-02-19
+Last updated: 2026-02-22
 
 This document is the canonical reference for the DevAI multi-agent system. It covers agent definitions, the CHAPO decision loop, tools, delegation, and operational commands.
 
@@ -10,7 +10,7 @@ This document is the canonical reference for the DevAI multi-agent system. It co
 
 ## Overview
 
-DevAI runs a three-agent system orchestrated by the **CHAPO Decision Loop**:
+DevAI runs a multi-agent system orchestrated by the **CHAPO Decision Loop**:
 
 ```
                     +-----------+
@@ -25,10 +25,10 @@ DevAI runs a three-agent system orchestrated by the **CHAPO Decision Loop**:
               |  ANSWER | ASK | TOOL |   |
               |       DELEGATE           |
               |         |                |
-              |   +-----+------+         |
-              |   |            |         |
-              |   v            v         |
-              |  DEVO        SCOUT       |
+              |   +-----+------+-----+   |
+              |   |      |           |   |
+              |   v      v           v   |
+              |  DEVO  SCOUT       CAIO  |
               +--------------------------+
 ```
 
@@ -45,14 +45,29 @@ Errors at any point feed back into the loop as context — **never crash**.
 
 ## Agents
 
+### Identity Source of Truth
+
+Agent identity is defined in workspace soul files and must stay consistent with them.
+
+| Agent | Soul File | Usage Rule |
+|------|-----------|------------|
+| `chapo` | `workspace/SOUL.md` | Embody naturally, never recite verbatim |
+| `caio` | `workspace/souls/CAIO.SOUL.md` | Embody naturally, never recite verbatim |
+| `devo` | `workspace/souls/DEVO.SOUL.md` | Embody naturally, never recite verbatim |
+| `scout` | `workspace/souls/SCOUT.SOUL.md` | Embody naturally, never recite verbatim |
+
+Runtime integration:
+- CHAPO identity is loaded via workspace context loader (`apps/api/src/scanner/workspaceMdLoader.ts`).
+- CAIO/DEVO/SCOUT identity blocks are loaded via `apps/api/src/prompts/agentSoul.ts` and injected into each agent prompt.
+
 ### CHAPO — Task Coordinator
 
 | Property | Value |
 |----------|-------|
 | **Name** | `chapo` |
 | **Role** | Task Coordinator |
-| **Model** | `claude-opus-4-5-20251101` (Opus 4.5) |
-| **Fallback** | `claude-sonnet-4-20250514` (Sonnet 4) |
+| **Model** | `glm-5` (ZAI GLM-5) |
+| **Fallback** | `claude-opus-4-5-20251101` (Opus 4.5) |
 | **Access** | Read-only + coordination meta-tools |
 | **Source** | `apps/api/src/agents/chapo.ts` |
 | **Prompt** | `apps/api/src/prompts/chapo.ts` |
@@ -64,6 +79,9 @@ Errors at any point feed back into the loop as context — **never crash**.
 - File reads and codebase search (`fs_listFiles`, `fs_readFile`, `fs_glob`, `fs_grep`)
 - Git status checks (`git_status`, `git_diff`)
 - Memory management (`memory_remember`, `memory_search`, `memory_readToday`)
+- Inbox/obligation control (`chapo_inbox_list_open`, `chapo_inbox_resolve`)
+- Lightweight execution planning (`chapo_plan_set`)
+- Draft quality gate (`chapo_answer_preflight`, mandatory before final answer when multiple blocking obligations are open)
 - Web search via delegation or directly
 - Delegation to DEVO for code/devops work
 - Delegation to SCOUT for exploration/research
@@ -73,11 +91,13 @@ Errors at any point feed back into the loop as context — **never crash**.
 **Tools:**
 ```
 fs_listFiles, fs_readFile, fs_glob, fs_grep
+web_search, web_fetch
 git_status, git_diff
 github_getWorkflowRunStatus
 logs_getStagingLogs
 memory_remember, memory_search, memory_readToday
-delegateToDevo, delegateToScout, askUser, requestApproval
+chapo_inbox_list_open, chapo_inbox_resolve, chapo_plan_set, chapo_answer_preflight
+delegateToDevo, delegateToCaio, delegateParallel, delegateToScout, askUser, requestApproval, respondToUser
 ```
 
 ---
@@ -88,7 +108,8 @@ delegateToDevo, delegateToScout, askUser, requestApproval
 |----------|-------|
 | **Name** | `devo` |
 | **Role** | Developer & DevOps Engineer |
-| **Model** | `claude-sonnet-4-20250514` (Sonnet 4) |
+| **Model** | `glm-4.7` (ZAI GLM-4.7) |
+| **Fallback** | `claude-sonnet-4-20250514` (Sonnet 4) |
 | **Access** | Full read/write + bash + SSH + git + PM2 |
 | **Source** | `apps/api/src/agents/devo.ts` |
 | **Prompt** | `apps/api/src/prompts/devo.ts` |
@@ -99,8 +120,9 @@ delegateToDevo, delegateToScout, askUser, requestApproval
 - Full file system operations (read, write, edit, delete, mkdir, move)
 - Git operations (status, diff, commit, push, pull, add)
 - Bash execution (local commands)
+- Persistent exec sessions for long-running commands (`devo_exec_session_start`, `devo_exec_session_write`, `devo_exec_session_poll`)
 - SSH execution (remote server commands)
-- PM2 management (status, restart, logs)
+- PM2 management (status, restart, stop/start, reload, save, logs)
 - NPM operations (install, run scripts)
 - GitHub Actions (trigger workflows, check status)
 - Can delegate to SCOUT for research
@@ -109,13 +131,15 @@ delegateToDevo, delegateToScout, askUser, requestApproval
 **Tools:**
 ```
 fs_listFiles, fs_readFile, fs_writeFile, fs_edit, fs_mkdir, fs_move, fs_delete, fs_glob, fs_grep
+web_search, web_fetch
 git_status, git_diff, git_commit, git_push, git_pull, git_add
-bash_execute, ssh_execute
-pm2_status, pm2_restart, pm2_logs
+bash_execute, devo_exec_session_start, devo_exec_session_write, devo_exec_session_poll, ssh_execute
+pm2_status, pm2_restart, pm2_stop, pm2_start, pm2_logs, pm2_reloadAll, pm2_save
 npm_install, npm_run
 github_triggerWorkflow, github_getWorkflowRunStatus
 logs_getStagingLogs
 memory_remember, memory_search, memory_readToday
+skill_create, skill_update, skill_delete, skill_reload, skill_list
 delegateToScout, escalateToChapo
 ```
 
@@ -132,18 +156,27 @@ delegateToScout, escalateToChapo
 |----------|-------|
 | **Name** | `scout` |
 | **Role** | Exploration Specialist |
-| **Model** | `claude-sonnet-4-20250514` (Sonnet 4) |
-| **Fallback** | `claude-3-5-haiku-20241022` (Haiku 3.5) |
+| **Model** | `glm-4.7-flash` (ZAI GLM-4.7 Flash — free) |
+| **Fallback** | `claude-sonnet-4-20250514` (Sonnet 4) |
 | **Access** | Read-only + web tools |
 | **Source** | `apps/api/src/agents/scout.ts` |
 | **Prompt** | `apps/api/src/prompts/scout.ts` |
 
 **Identity:** Research expert. Explores codebases and searches the web. Never modifies files. Can be spawned by CHAPO or DEVO for research tasks. Max 5 tool calls per invocation.
 
+Web API requirements:
+- `web_search` requires `PERPLEXITY_API_KEY`
+- `scout_*` Firecrawl tools require `FIRECRAWL_API_KEY`
+
 **Capabilities:**
 - Codebase exploration (`fs_readFile`, `fs_glob`, `fs_grep`, `fs_listFiles`)
+- Workspace document search (`context_searchDocuments`)
 - Git inspection (`git_status`, `git_diff`)
 - Web search (`web_search` via Perplexity)
+- Firecrawl fast/deep research (`scout_search_fast`, `scout_search_deep`)
+- Firecrawl domain exploration (`scout_site_map`, `scout_crawl_focused`)
+- Firecrawl structured extraction (`scout_extract_schema`)
+- Firecrawl bundled research synthesis (`scout_research_bundle`)
 - URL fetching (`web_fetch`)
 - Memory operations
 - Escalation to CHAPO
@@ -152,7 +185,10 @@ delegateToScout, escalateToChapo
 ```
 fs_listFiles, fs_readFile, fs_glob, fs_grep
 git_status, git_diff
+github_getWorkflowRunStatus
+context_searchDocuments
 web_search, web_fetch
+scout_search_fast, scout_search_deep, scout_site_map, scout_crawl_focused, scout_extract_schema, scout_research_bundle
 memory_remember, memory_search, memory_readToday
 escalateToChapo
 ```
@@ -163,7 +199,16 @@ escalateToChapo
   "summary": "...",
   "relevantFiles": ["path/to/file.ts"],
   "codePatterns": { "patternName": "description" },
-  "webFindings": [{ "title": "...", "url": "...", "relevance": "..." }],
+  "webFindings": [{
+    "title": "...",
+    "url": "...",
+    "claim": "...",
+    "relevance": "...",
+    "evidence": [{ "url": "...", "snippet": "...", "publishedAt": "optional" }],
+    "freshness": "published:YYYY-MM-DD | unknown",
+    "confidence": "high | medium | low",
+    "gaps": ["..."]
+  }],
   "recommendations": ["..."],
   "confidence": "high" | "medium" | "low"
 }
@@ -171,52 +216,121 @@ escalateToChapo
 
 ---
 
+### CAIO — Communications & Administration Officer
+
+| Property | Value |
+|----------|-------|
+| **Name** | `caio` |
+| **Role** | Communications & Administration Officer |
+| **Model** | `glm-4.5-air` (ZAI GLM-4.5-Air) |
+| **Fallback** | `claude-sonnet-4-20250514` (Sonnet 4) |
+| **Access** | Read-only filesystem + TaskForge + Email + Scheduler |
+| **Source** | `apps/api/src/agents/caio.ts` |
+| **Prompt** | `apps/api/src/prompts/caio.ts` |
+
+**Identity:** Administration and communication expert. Manages TaskForge tickets, sends emails, creates scheduler jobs and reminders, delivers documents. Can read files for context gathering.
+
+**Capabilities:**
+- Read-only filesystem access (`fs_readFile`, `fs_listFiles`, `fs_glob`)
+- Read-only workspace context docs (`context_listDocuments`, `context_readDocument`, `context_searchDocuments`)
+- TaskForge ticket management (list, get, create, move, comment, search)
+- Email sending (`send_email`)
+- Scheduler/reminder management
+- Notifications (`notify_user`)
+- Document delivery (Telegram, Web-UI)
+- Can delegate to SCOUT for research
+- Can escalate to CHAPO via `escalateToChapo`
+
+**Tools:**
+```
+fs_readFile, fs_listFiles, fs_glob
+context_listDocuments, context_readDocument, context_searchDocuments
+taskforge_list_tasks, taskforge_get_task, taskforge_create_task, taskforge_move_task, taskforge_add_comment, taskforge_search
+scheduler_create, scheduler_list, scheduler_update, scheduler_delete, reminder_create
+notify_user, send_email
+telegram_send_document, deliver_document
+memory_remember, memory_search, memory_readToday
+delegateToScout, escalateToChapo
+```
+
+---
+
 ## Agent → Tool Mapping
 
-| Tool | CHAPO | DEVO | SCOUT |
-|------|:-----:|:----:|:-----:|
-| `fs_listFiles` | x | x | x |
-| `fs_readFile` | x | x | x |
-| `fs_writeFile` | | x | |
-| `fs_edit` | | x | |
-| `fs_mkdir` | | x | |
-| `fs_move` | | x | |
-| `fs_delete` | | x | |
-| `fs_glob` | x | x | x |
-| `fs_grep` | x | x | x |
-| `git_status` | x | x | x |
-| `git_diff` | x | x | x |
-| `git_commit` | | x | |
-| `git_push` | | x | |
-| `git_pull` | | x | |
-| `git_add` | | x | |
-| `bash_execute` | | x | |
-| `ssh_execute` | | x | |
-| `pm2_status` | | x | |
-| `pm2_restart` | | x | |
-| `pm2_logs` | | x | |
-| `npm_install` | | x | |
-| `npm_run` | | x | |
-| `github_triggerWorkflow` | | x | |
-| `github_getWorkflowRunStatus` | x | x | |
-| `web_search` | | | x |
-| `web_fetch` | | | x |
-| `context_*` | | | |
-| `memory_remember` | x | x | x |
-| `memory_search` | x | x | x |
-| `memory_readToday` | x | x | x |
-| `logs_getStagingLogs` | x | x | |
+| Tool | CHAPO | DEVO | SCOUT | CAIO |
+|------|:-----:|:----:|:-----:|:----:|
+| `fs_listFiles` | x | x | x | x |
+| `fs_readFile` | x | x | x | x |
+| `fs_writeFile` | | x | | |
+| `fs_edit` | | x | | |
+| `fs_mkdir` | | x | | |
+| `fs_move` | | x | | |
+| `fs_delete` | | x | | |
+| `fs_glob` | x | x | x | x |
+| `fs_grep` | x | x | x | |
+| `git_status` | x | x | x | |
+| `git_diff` | x | x | x | |
+| `git_commit` | | x | | |
+| `git_push` | | x | | |
+| `git_pull` | | x | | |
+| `git_add` | | x | | |
+| `bash_execute` | | x | | |
+| `devo_exec_session_start` | | x | | |
+| `devo_exec_session_write` | | x | | |
+| `devo_exec_session_poll` | | x | | |
+| `ssh_execute` | | x | | |
+| `pm2_status` | | x | | |
+| `pm2_restart` | | x | | |
+| `pm2_stop` | | x | | |
+| `pm2_start` | | x | | |
+| `pm2_logs` | | x | | |
+| `pm2_reloadAll` | | x | | |
+| `pm2_save` | | x | | |
+| `npm_install` | | x | | |
+| `npm_run` | | x | | |
+| `github_triggerWorkflow` | | x | | |
+| `github_getWorkflowRunStatus` | x | x | x | |
+| `web_search` | x | x | x | |
+| `web_fetch` | x | x | x | |
+| `scout_search_fast` | | | x | |
+| `scout_search_deep` | | | x | |
+| `scout_site_map` | | | x | |
+| `scout_crawl_focused` | | | x | |
+| `scout_extract_schema` | | | x | |
+| `scout_research_bundle` | | | x | |
+| `context_listDocuments` | | | | x |
+| `context_readDocument` | | | | x |
+| `context_searchDocuments` | | | x | x |
+| `taskforge_*` | | | | x |
+| `scheduler_*` | | | | x |
+| `memory_remember` | x | x | x | x |
+| `memory_search` | x | x | x | x |
+| `memory_readToday` | x | x | x | x |
+| `logs_getStagingLogs` | x | x | | |
+| `skill_*` | list | full | | |
+| `notify_user` | | | | x |
+| `send_email` | | | | x |
+| `chapo_inbox_list_open` | x | | | |
+| `chapo_inbox_resolve` | x | | | |
+| `chapo_plan_set` | x | | | |
+| `chapo_answer_preflight` | x | | | |
 
 ## Coordination Meta-Tools
 
 | Tool | Available to | Purpose |
 |------|-------------|---------|
+| `chapo_inbox_list_open` | CHAPO | List unresolved inbox/obligation items for current task or session |
+| `chapo_inbox_resolve` | CHAPO | Resolve one obligation (`done`/`blocked`/`wont_do`/`superseded`) |
+| `chapo_plan_set` | CHAPO | Persist a short execution plan with owners and statuses |
+| `chapo_answer_preflight` | CHAPO | Preflight-check a draft answer for coverage, contradictions, and unsupported claims |
 | `delegateToDevo` | CHAPO | Delegate dev/devops task to DEVO sub-loop |
-| `delegateToKoda` | CHAPO | Legacy alias for `delegateToDevo` |
-| `delegateToScout` | CHAPO, DEVO | Delegate exploration/research to SCOUT |
+| `delegateToCaio` | CHAPO | Delegate communication/admin task to CAIO sub-loop |
+| `delegateParallel` | CHAPO | Run multiple delegations in parallel |
+| `delegateToScout` | CHAPO, DEVO, CAIO | Delegate exploration/research to SCOUT |
 | `askUser` | CHAPO | Pause loop and ask user a question |
 | `requestApproval` | CHAPO | Request user approval for risky action |
-| `escalateToChapo` | DEVO, SCOUT | Escalate issue back to CHAPO |
+| `respondToUser` | CHAPO | Send an intermediate user-visible response without ending the loop |
+| `escalateToChapo` | DEVO, SCOUT, CAIO | Escalate issue back to CHAPO |
 
 ---
 
@@ -295,8 +409,9 @@ On every new request, `warmSystemContextForSession()` loads (in order):
 1. **devai.md** — global DevAI rules (`scanner/devaiMdLoader.ts`)
 2. **CLAUDE.md chain** — project-level instructions (`scanner/claudeMdLoader.ts`)
 3. **Workspace context** — AGENTS.md, SOUL.md, USER.md, TOOLS.md, daily memory, MEMORY.md (`scanner/workspaceMdLoader.ts`)
-4. **Global context** — user-configurable via settings
-5. **MEMORY_BEHAVIOR_BLOCK** — rules for memory tool usage (`prompts/context.ts`)
+4. **Agent Soul blocks** — `workspace/souls/CAIO.SOUL.md`, `workspace/souls/DEVO.SOUL.md`, `workspace/souls/SCOUT.SOUL.md` via `prompts/agentSoul.ts`
+5. **Global context** — user-configurable via settings
+6. **MEMORY_BEHAVIOR_BLOCK** — rules for memory tool usage (`prompts/context.ts`)
 
 Workspace mode:
 - `main`: includes MEMORY.md (default)
@@ -458,21 +573,25 @@ apps/api/src/agents/
 ├── chapo.ts              # CHAPO agent definition + meta-tools
 ├── devo.ts               # DEVO agent definition + meta-tools
 ├── scout.ts              # SCOUT agent definition + meta-tools
-├── chapo-loop.ts         # ChapoLoop — core decision loop (~695 lines)
+├── caio.ts               # CAIO agent definition + meta-tools
+├── chapo-loop.ts         # ChapoLoop — core decision loop + inbox check
+├── inbox.ts              # SessionInbox queue + event bus (multi-message)
 ├── router.ts             # processRequest() entry point + Plan Mode
 ├── error-handler.ts      # AgentErrorHandler (resilient error wrapping)
 ├── self-validation.ts    # SelfValidator (LLM reviews own answers)
 ├── conversation-manager.ts  # 120k token sliding window
-├── stateManager.ts       # Session state (phases, approvals, questions)
+├── stateManager.ts       # Session state (phases, approvals, questions, isLoopRunning)
 ├── systemContext.ts       # System context assembly + warming
 ├── events.ts             # Typed event factory functions
-├── types.ts              # All agent/plan/task/scout types
+├── types.ts              # All agent/plan/task/scout/inbox types
 └── index.ts              # Re-exports
 
 apps/api/src/prompts/
 ├── chapo.ts              # CHAPO_SYSTEM_PROMPT (German)
+├── caio.ts               # CAIO_SYSTEM_PROMPT (German)
 ├── devo.ts               # DEVO_SYSTEM_PROMPT (German)
 ├── scout.ts              # SCOUT_SYSTEM_PROMPT (German)
+├── agentSoul.ts          # Loads CAIO/DEVO/SCOUT soul blocks from workspace
 ├── self-validation.ts    # VALIDATION_SYSTEM_PROMPT
 ├── context.ts            # MEMORY_BEHAVIOR_BLOCK
 └── index.ts              # Re-exports
