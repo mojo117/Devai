@@ -287,6 +287,12 @@ export function ChatUI({
         // Keep isLoading true — loop is still running
         break;
       }
+      case 'todo_updated': {
+        // Todo events are informational — the frontend can render them but
+        // we keep the approach minimal for now (no separate UI component).
+        // The tool events already show the todoWrite call + result.
+        break;
+      }
     }
   };
 
