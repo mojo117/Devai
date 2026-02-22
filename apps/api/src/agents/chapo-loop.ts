@@ -13,45 +13,30 @@
  * Errors at any point feed back into the loop as context.
  */
 
-import { nanoid } from 'nanoid';
 import { AgentErrorHandler } from './error-handler.js';
 import { SelfValidator } from './self-validation.js';
 import { AnswerValidator, type DecisionPathInsights } from './answer-validator.js';
 import { ConversationManager } from './conversation-manager.js';
 import { llmRouter } from '../llm/router.js';
-import { executeToolWithApprovalBridge } from '../actions/approvalBridge.js';
 import { getCombinedSystemContextBlock, warmSystemContextForSession } from './systemContext.js';
-import { compactMessages } from '../memory/compaction.js';
 import { SessionLogger } from '../audit/sessionLogger.js';
 import { getAgent, getToolsForAgent } from './router.js';
 import { getToolsForLLM } from '../tools/registry.js';
 import * as stateManager from './stateManager.js';
 import { SubAgentRunner } from './sub-agent-runner.js';
-import { drainInbox, onInboxMessage, offInboxMessage } from './inbox.js';
-import {
-  buildDelegation,
-  parseParallelDelegations,
-  type ParallelDelegation,
-} from './chapo-loop/delegationUtils.js';
-import {
-  buildDelegationDecisionPath,
-  buildDelegationThinkingStatus,
-  delegateParallel as runParallelDelegations,
-  delegateToAgent as runDelegationToAgent,
-  resolveDelegationTarget,
-  type DelegationRunnerDeps,
-} from './chapo-loop/delegationRunner.js';
+import { type ParallelDelegation } from './chapo-loop/delegationUtils.js';
+import { type DelegationRunnerDeps } from './chapo-loop/delegationRunner.js';
+import { ChapoLoopContextManager } from './chapo-loop/contextManager.js';
+import { ChapoLoopGateManager } from './chapo-loop/gateManager.js';
+import { ChapoToolExecutor } from './chapo-loop/toolExecutor.js';
 import type {
   AgentStreamEvent,
   ModelSelection,
   ChapoLoopResult,
-  UserQuestion,
-  ApprovalRequest,
-  RiskLevel,
   LoopDelegationResult,
   LoopDelegationStatus,
   ToolEvidence,
-  InboxMessage,
+  RiskLevel,
 } from './types.js';
 import type { LLMProvider, ContentBlock } from '../llm/types.js';
 import { getTextContent } from '../llm/types.js';
@@ -70,9 +55,8 @@ export class ChapoLoop {
   private sessionLogger?: SessionLogger;
   private subAgentRunner = new SubAgentRunner();
   private iteration = 0;
-  private originalUserMessage = '';
-  private hasInboxMessages = false;
-  private inboxHandler: ((msg: InboxMessage) => void) | null = null;
+  private contextManager: ChapoLoopContextManager;
+  private gateManager: ChapoLoopGateManager;
 
   constructor(
     private sessionId: string,
@@ -89,93 +73,12 @@ export class ChapoLoop {
       { selfValidationEnabled: config.selfValidationEnabled },
       this.sessionLogger,
     );
-
-    // Subscribe to inbox events for reactive awareness
-    this.inboxHandler = (msg: InboxMessage) => {
-      this.hasInboxMessages = true;
-      this.sendEvent({
-        type: 'message_queued',
-        messageId: msg.id,
-        preview: 'Got it — I\'ll handle that too',
-      });
-    };
-    onInboxMessage(this.sessionId, this.inboxHandler);
+    this.contextManager = new ChapoLoopContextManager(this.sessionId, this.sendEvent, this.conversation);
+    this.gateManager = new ChapoLoopGateManager(this.sessionId, this.sendEvent);
   }
 
   dispose(): void {
-    if (this.inboxHandler) {
-      offInboxMessage(this.sessionId, this.inboxHandler);
-      this.inboxHandler = null;
-    }
-  }
-
-  private checkInbox(): void {
-    if (!this.hasInboxMessages) return;
-    this.hasInboxMessages = false;
-
-    const messages = drainInbox(this.sessionId);
-    if (messages.length === 0) return;
-
-    const inboxBlock = messages
-      .map(
-        (m, i) => `[New message #${i + 1} from user while you were working]: "${m.content}"`,
-      )
-      .join('\n');
-
-    this.conversation.addMessage({
-      role: 'system',
-      content:
-        `${inboxBlock}\n\n` +
-        `Classify each new message:\n` +
-        `- PARALLEL: Independent task -> use delegateParallel or handle after current task\n` +
-        `- AMENDMENT: Replaces/changes current task -> decide: abort (if early) or finish-then-pivot\n` +
-        `- EXPANSION: Adds to current task scope -> integrate into current plan\n` +
-        `Acknowledge each message to the user in your response.`,
-    });
-
-    this.sendEvent({ type: 'inbox_processing', count: messages.length });
-  }
-
-  private async checkAndCompact(): Promise<void> {
-    const COMPACTION_THRESHOLD = 160_000;
-    const usage = this.conversation.getTokenUsage();
-
-    if (usage < COMPACTION_THRESHOLD) return;
-
-    const messages = this.conversation.getMessages();
-    // Compact the oldest ~60% of messages
-    const compactCount = Math.floor(messages.length * 0.6);
-    if (compactCount < 2) return;
-
-    const toCompact = messages.slice(0, compactCount);
-    const toKeep = messages.slice(compactCount);
-
-    const result = await compactMessages(toCompact, this.sessionId);
-
-    // Replace conversation: summary + kept messages
-    this.conversation.clear();
-    this.conversation.addMessage({
-      role: 'system',
-      content: `[Context compacted — ${result.droppedTokens} tokens summarized]\n\n${result.summary}`,
-    });
-
-    // Pin original user request so CHAPO never loses the goal (Ralph spec pinning)
-    if (this.originalUserMessage) {
-      this.conversation.addMessage({
-        role: 'system',
-        content: `[ORIGINAL REQUEST — pinned]\n${this.originalUserMessage}`,
-      });
-    }
-
-    for (const msg of toKeep) {
-      this.conversation.addMessage(msg);
-    }
-
-    this.sendEvent({
-      type: 'agent_thinking',
-      agent: 'chapo',
-      status: `Context kompaktiert: ${result.droppedTokens} → ${result.summaryTokens} Tokens`,
-    });
+    this.contextManager.dispose();
   }
 
   private deriveDelegationStatus(
@@ -247,10 +150,11 @@ export class ChapoLoop {
   }
 
   async run(userMessage: string | ContentBlock[], conversationHistory: Array<{ role: string; content: string }>): Promise<ChapoLoopResult> {
-    this.originalUserMessage = getTextContent(userMessage);
+    const userText = getTextContent(userMessage);
+    this.contextManager.setPinnedRequest(userText);
 
     // 1. Warm system context
-    await warmSystemContextForSession(this.sessionId, this.projectRoot, getTextContent(userMessage));
+    await warmSystemContextForSession(this.sessionId, this.projectRoot, userText);
     const systemContextBlock = getCombinedSystemContextBlock(this.sessionId);
 
     // 2. Set system prompt on conversation manager
@@ -324,7 +228,7 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
       });
 
       // Check if compaction needed before LLM call
-      await this.checkAndCompact();
+      await this.contextManager.checkAndCompact();
 
       // Call LLM with conversation + tools
       const [response, err] = await this.errorHandler.safe('llm_call', () =>
@@ -376,189 +280,32 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
 
       const toolResults: { toolUseId: string; result: string; isError: boolean }[] = [];
       let earlyReturn: ChapoLoopResult | null = null;
+      const toolExecutor = new ChapoToolExecutor({
+        sessionId: this.sessionId,
+        iteration: this.iteration,
+        sendEvent: this.sendEvent,
+        errorHandler: this.errorHandler,
+        queueQuestion: this.queueQuestion.bind(this),
+        queueApproval: this.queueApproval.bind(this),
+        emitDecisionPath: this.emitDecisionPath.bind(this),
+        getDelegationRunnerDeps: this.getDelegationRunnerDeps.bind(this),
+        buildVerificationEnvelope: this.buildVerificationEnvelope.bind(this),
+        buildToolResultContent: this.buildToolResultContent.bind(this),
+        markExternalActionToolSuccess: this.markExternalActionToolSuccess.bind(this),
+      });
 
       for (const toolCall of response.toolCalls) {
-        // ACTION: ASK — pause loop, wait for user
-        if (toolCall.name === 'askUser') {
-          const question = (toolCall.arguments.question as string) || 'Kannst du das genauer beschreiben?';
-          earlyReturn = await this.queueQuestion(question, this.iteration + 1);
+        const outcome = await toolExecutor.execute({
+          id: toolCall.id,
+          name: toolCall.name,
+          arguments: toolCall.arguments,
+        });
+        if (outcome.earlyReturn) {
+          earlyReturn = outcome.earlyReturn;
           break;
         }
-
-        // ACTION: DELEGATE in parallel to multiple agents
-        if (toolCall.name === 'delegateParallel') {
-          const delegations = parseParallelDelegations(toolCall.arguments.delegations);
-          if (delegations.length === 0) {
-            toolResults.push({
-              toolUseId: toolCall.id,
-              result: 'Error: delegateParallel benoetigt mindestens eine gueltige Delegation.',
-              isError: true,
-            });
-            continue;
-          }
-          this.emitDecisionPath({
-            path: 'tool',
-            reason: `Unabhaengige Teilaufgaben werden parallel delegiert (${delegations.length}).`,
-            confidence: 0.8,
-            unresolvedAssumptions: [],
-          });
-
-          this.sendEvent({
-            type: 'agent_thinking',
-            agent: 'chapo',
-            status: `Delegiere parallel (${delegations.length} Aufgaben)...`,
-          });
-
-          const [parallelSummary, parallelErr] = await this.errorHandler.safe(
-            `delegate:parallel:${this.iteration}`,
-            () => runParallelDelegations(
-              this.getDelegationRunnerDeps(),
-              delegations,
-              this.buildVerificationEnvelope.bind(this),
-            ),
-          );
-
-          if (parallelErr) {
-            toolResults.push({
-              toolUseId: toolCall.id,
-              result: `Parallel-Delegation Fehler: ${this.errorHandler.formatForLLM(parallelErr)}`,
-              isError: true,
-            });
-          } else {
-            this.sendEvent({
-              type: 'tool_result',
-              agent: 'chapo',
-              toolName: toolCall.name,
-              result: { delegated: true, parallel: delegations.length },
-              success: true,
-            });
-            toolResults.push({
-              toolUseId: toolCall.id,
-              result: parallelSummary,
-              isError: false,
-            });
-          }
-          continue;
-        }
-
-        // ACTION: DELEGATE to DEVO/CAIO/SCOUT through one unified pipeline
-        const delegationTarget = resolveDelegationTarget(toolCall.name);
-        if (delegationTarget) {
-          const delegation = buildDelegation(delegationTarget, toolCall.arguments);
-          this.emitDecisionPath(buildDelegationDecisionPath(delegation));
-
-          this.sendEvent({
-            type: 'agent_thinking',
-            agent: 'chapo',
-            status: buildDelegationThinkingStatus(delegation),
-          });
-
-          const [delegationResult, delegationErr] = await this.errorHandler.safe(
-            `delegate:${delegation.target}:${this.iteration}`,
-            () => runDelegationToAgent(this.getDelegationRunnerDeps(), delegation, 'chapo'),
-          );
-
-          if (delegationErr) {
-            toolResults.push({
-              toolUseId: toolCall.id,
-              result: `${delegation.target.toUpperCase()} Fehler: ${this.errorHandler.formatForLLM(delegationErr)}`,
-              isError: true,
-            });
-          } else {
-            const envelope = this.buildVerificationEnvelope(delegation, delegationResult);
-            this.sendEvent({
-              type: 'tool_result',
-              agent: 'chapo',
-              toolName: toolCall.name,
-              result: { delegated: true, agent: delegation.target, status: delegationResult.status },
-              success: delegationResult.status === 'success' || delegationResult.status === 'partial',
-            });
-            toolResults.push({
-              toolUseId: toolCall.id,
-              result: envelope,
-              isError: delegationResult.status === 'failed',
-            });
-          }
-          continue;
-        }
-
-        // requestApproval — handle as user question
-        if (toolCall.name === 'requestApproval') {
-          const description = (toolCall.arguments.description as string) || 'Freigabe erforderlich';
-          const riskLevel = ((toolCall.arguments.riskLevel as RiskLevel) || 'medium');
-          earlyReturn = await this.queueApproval(description, riskLevel, this.iteration + 1);
-          break;
-        }
-
-        // ACTION: TOOL — execute any regular tool
-        this.emitDecisionPath({
-          path: 'tool',
-          reason: `Direkter Tool-Aufruf (${toolCall.name}) fuer verifizierbare Zwischenergebnisse.`,
-          confidence: 0.76,
-          unresolvedAssumptions: [],
-        });
-        this.sendEvent({
-          type: 'tool_call',
-          agent: 'chapo',
-          toolName: toolCall.name,
-          args: toolCall.arguments,
-        });
-
-        const [toolResult, toolErr] = await this.errorHandler.safe(
-          `tool:${toolCall.name}:${this.iteration}`,
-          () => executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
-            agentName: 'chapo',
-            onActionPending: (action) => {
-              this.sendEvent({
-                type: 'action_pending',
-                actionId: action.id,
-                toolName: action.toolName,
-                toolArgs: action.toolArgs,
-                description: action.description,
-                preview: action.preview,
-              });
-            },
-          }),
-        );
-
-        if (toolErr) {
-          // Feed error back — CHAPO decides what to do
-          this.sendEvent({
-            type: 'tool_result',
-            agent: 'chapo',
-            toolName: toolCall.name,
-            result: { error: toolErr.message },
-            success: false,
-          });
-          toolResults.push({
-            toolUseId: toolCall.id,
-            result: `Error: ${toolErr.message}`,
-            isError: true,
-          });
-        } else {
-          const success = toolResult.success;
-          const content = this.buildToolResultContent(toolResult);
-
-          this.sendEvent({
-            type: 'tool_result',
-            agent: 'chapo',
-            toolName: toolCall.name,
-            result: toolResult.result,
-            success,
-          });
-          this.markExternalActionToolSuccess(toolCall.name, success);
-
-          // Track gathered files
-          if (toolCall.name === 'fs_readFile' && success) {
-            const path = toolCall.arguments.path as string;
-            stateManager.addGatheredFile(this.sessionId, path);
-          }
-
-          toolResults.push({
-            toolUseId: toolCall.id,
-            result: content.content,
-            isError: content.isError,
-          });
+        if (outcome.toolResult) {
+          toolResults.push(outcome.toolResult);
         }
       }
 
@@ -575,11 +322,11 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
       });
 
       // Check inbox for new messages between iterations
-      this.checkInbox();
+      this.contextManager.checkInbox();
     }
 
     // Loop exhaustion — check for unprocessed inbox messages
-    const remaining = drainInbox(this.sessionId);
+    const remaining = this.contextManager.drainRemainingMessages();
     if (remaining.length > 0) {
       const extras = remaining.map((m) => m.content).join('; ');
       return this.queueQuestion(
@@ -587,58 +334,23 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
         this.iteration,
       );
     }
+
     return this.queueQuestion(
       'Die Anfrage hat mehr Schritte benoetigt als erlaubt. Soll ich weitermachen?',
       this.iteration,
     );
   }
 
-  private async queueQuestion(question: string, totalIterations: number): Promise<ChapoLoopResult> {
-    const questionPayload: UserQuestion = {
-      questionId: nanoid(),
-      question,
-      fromAgent: 'chapo',
-      timestamp: new Date().toISOString(),
-    };
-    // State mutation + WS emission handled by projections via the event bus bridge:
-    //   sendEvent → bridge → gate.question.queued → StateProjection + StreamProjection
-    this.sendEvent({ type: 'user_question', question: questionPayload });
-
-    return {
-      answer: question,
-      status: 'waiting_for_user',
-      totalIterations,
-      question,
-    };
+  private queueQuestion(question: string, totalIterations: number): Promise<ChapoLoopResult> {
+    return this.gateManager.queueQuestion(question, totalIterations);
   }
 
-  private async queueApproval(
+  private queueApproval(
     description: string,
     riskLevel: RiskLevel,
-    totalIterations: number
+    totalIterations: number,
   ): Promise<ChapoLoopResult> {
-    const approval: ApprovalRequest = {
-      approvalId: nanoid(),
-      description,
-      riskLevel,
-      actions: [],
-      fromAgent: 'chapo',
-      timestamp: new Date().toISOString(),
-    };
-    // State mutation + WS emission handled by projections via the event bus bridge:
-    //   sendEvent → bridge → gate.approval.queued → StateProjection + StreamProjection
-    this.sendEvent({
-      type: 'approval_request',
-      request: approval,
-      sessionId: this.sessionId,
-    });
-
-    return {
-      answer: description,
-      status: 'waiting_for_user',
-      totalIterations,
-      question: description,
-    };
+    return this.gateManager.queueApproval(description, riskLevel, totalIterations);
   }
 
   private markExternalActionToolSuccess(toolName: string, success: boolean): void {
