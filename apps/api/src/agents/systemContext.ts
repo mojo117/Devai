@@ -251,7 +251,7 @@ function buildContextBlocks(sessionId: string): ContextBlock[] {
   const schedulerErrors = getSchedulerErrors();
   const schedulerErrorBlock = schedulerErrors.length > 0
     ? [
-      '## Letzte Scheduler-Fehler',
+      '## Recent Scheduler Errors',
       ...schedulerErrors.slice(-5).map((entry) =>
         `- [${entry.timestamp}] ${entry.jobName} (${entry.jobId}): ${entry.error}`
       ),
@@ -261,7 +261,7 @@ function buildContextBlocks(sessionId: string): ContextBlock[] {
   // Inject communication platform so CHAPO knows which channel the user is on
   const platform = info.platform || '';
   const platformBlock = platform
-    ? `## Kommunikationskanal\nDer Benutzer kommuniziert gerade über: **${platform === 'telegram' ? 'Telegram' : 'Web-UI'}**.\nDateien an den Benutzer ${platform === 'telegram' ? 'via Telegram senden (telegram_send_document)' : 'im Web-UI zum Download bereitstellen (deliver_document)'}.`
+    ? `## Communication Channel\nThe user is currently communicating via: **${platform === 'telegram' ? 'Telegram' : 'Web-UI'}**.\nSend files to the user ${platform === 'telegram' ? 'via Telegram (telegram_send_document)' : 'via Web-UI download (deliver_document)'}.`
     : '';
 
   const workspaceDiagnostics =
