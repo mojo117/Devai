@@ -6,7 +6,6 @@ import type { AgentStreamEvent, InboxMessage } from '../types.js';
 const COMPACTION_THRESHOLD = 160_000;
 
 export class ChapoLoopContextManager {
-  private hasInboxMessages = false;
   private inboxHandler: ((msg: InboxMessage) => void) | null = null;
   private originalUserMessage = '';
 
@@ -17,7 +16,6 @@ export class ChapoLoopContextManager {
   ) {
     // Subscribe to inbox events for reactive awareness
     this.inboxHandler = (msg: InboxMessage) => {
-      this.hasInboxMessages = true;
       this.sendEvent({
         type: 'message_queued',
         messageId: msg.id,
@@ -39,10 +37,9 @@ export class ChapoLoopContextManager {
   }
 
   checkInbox(): boolean {
-    // Always check the actual inbox — the reactive hasInboxMessages flag
-    // can miss messages queued before the handler was registered.
+    // Always check the actual inbox to avoid missing messages queued
+    // before the handler was registered.
     const messages = drainInbox(this.sessionId);
-    this.hasInboxMessages = false;
 
     if (messages.length === 0) return false;
 

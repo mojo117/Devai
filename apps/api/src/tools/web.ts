@@ -5,9 +5,6 @@
  * Used by SCOUT agent for research tasks.
  */
 
-import { isIP } from 'node:net';
-import dns from 'node:dns/promises';
-
 import {
   getPerplexityClient,
   isPerplexityConfigured,
@@ -15,16 +12,13 @@ import {
   formatSearchResponse,
   type PerplexitySearchResponse,
 } from '../llm/perplexity.js';
+import { assertPublicHttpUrl } from './urlSafety.js';
 
 // ============================================
 // TYPES
 // ============================================
 
-export interface WebSearchResult {
-  answer: string;
-  citations: { url: string; title?: string }[];
-  model: string;
-}
+export type WebSearchResult = PerplexitySearchResponse;
 
 export interface WebSearchOptions {
   complexity?: 'simple' | 'detailed' | 'deep';
@@ -100,62 +94,7 @@ export async function webSearch(
  * Format web search result for display
  */
 export function formatWebSearchResult(result: WebSearchResult): string {
-  let output = result.answer;
-
-  if (result.citations.length > 0) {
-    output += '\n\nQuellen:\n';
-    output += result.citations
-      .map((c) => `- [${c.title || c.url}](${c.url})`)
-      .join('\n');
-  }
-
-  return output;
-}
-
-// ============================================
-// SSRF PROTECTION
-// ============================================
-
-const PRIVATE_IP_RANGES = [
-  /^127\./,                    // loopback
-  /^10\./,                     // class A private
-  /^172\.(1[6-9]|2\d|3[01])\./, // class B private
-  /^192\.168\./,               // class C private
-  /^169\.254\./,               // link-local
-  /^0\./,                      // current network
-  /^::1$/,                     // IPv6 loopback
-  /^fc00:/i,                   // IPv6 ULA
-  /^fe80:/i,                   // IPv6 link-local
-  /^fd/i,                      // IPv6 ULA
-];
-
-function isPrivateIp(ip: string): boolean {
-  return PRIVATE_IP_RANGES.some((range) => range.test(ip));
-}
-
-async function checkSsrf(hostname: string): Promise<void> {
-  // Check if hostname is already an IP
-  if (isIP(hostname)) {
-    if (isPrivateIp(hostname)) {
-      throw new Error(`Blocked: "${hostname}" resolves to a private/internal IP address.`);
-    }
-    return;
-  }
-
-  // Resolve DNS and check all addresses
-  try {
-    const addresses = await dns.resolve4(hostname);
-    for (const addr of addresses) {
-      if (isPrivateIp(addr)) {
-        throw new Error(`Blocked: "${hostname}" resolves to private IP ${addr}.`);
-      }
-    }
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOTFOUND') {
-      throw new Error(`DNS lookup failed for "${hostname}".`);
-    }
-    // For other DNS errors, allow the request (will fail at fetch level)
-  }
+  return formatSearchResponse(result);
 }
 
 // ============================================
@@ -175,28 +114,15 @@ export async function webFetch(
 ): Promise<WebFetchResult> {
   const { maxLength = 50000, timeout = 10000 } = options;
 
-  // Validate URL
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(url);
-  } catch {
-    throw new Error(`Invalid URL: ${url}`);
-  }
-
-  // Security check: only allow http/https
-  if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-    throw new Error(`Unsupported protocol: ${parsedUrl.protocol}. Only http/https allowed.`);
-  }
-
-  // SSRF protection: block private/internal IPs
-  await checkSsrf(parsedUrl.hostname);
+  // Validate URL and apply SSRF protection.
+  const parsedUrl = await assertPublicHttpUrl(url);
 
   // Create abort controller for timeout
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch(parsedUrl.toString(), {
       signal: controller.signal,
       headers: {
         'User-Agent': 'DevAI-Scout/1.0 (Research Bot)',

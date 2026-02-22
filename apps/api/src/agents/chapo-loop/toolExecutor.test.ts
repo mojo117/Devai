@@ -10,7 +10,7 @@ describe('ChapoToolExecutor', () => {
     stateManager.clearAllStates();
   });
 
-  it('stores preflight metadata in gatheredInfo', async () => {
+  it('stores plan metadata in gatheredInfo via chapo_plan_set', async () => {
     stateManager.createState(sessionId);
     stateManager.setOriginalRequest(sessionId, 'Please answer in English.');
     stateManager.setActiveTurnId(sessionId, 'turn-preflight');
@@ -35,7 +35,10 @@ describe('ChapoToolExecutor', () => {
       sessionId,
       iteration: 0,
       sendEvent: vi.fn(),
-      errorHandler: {} as never,
+      errorHandler: {
+        safe: vi.fn(),
+        formatForLLM: vi.fn((err: Error) => err.message),
+      } as never,
       queueQuestion,
       queueApproval,
       emitDecisionPath: vi.fn(),
@@ -46,26 +49,30 @@ describe('ChapoToolExecutor', () => {
     });
 
     const outcome = await executor.execute({
-      id: 'preflight-1',
-      name: 'chapo_answer_preflight',
+      id: 'plan-1',
+      name: 'chapo_plan_set',
       arguments: {
-        draft: 'All good and complete.',
-        strict: true,
+        title: 'Execution plan',
+        steps: [
+          {
+            id: 's1',
+            text: 'Inspect logs',
+            owner: 'chapo',
+            status: 'todo',
+          },
+        ],
       },
     });
 
     expect(outcome.toolResult?.isError).toBe(false);
-    const stored = stateManager.getState(sessionId)?.taskContext.gatheredInfo.chapoAnswerPreflight as {
-      turnId?: string;
-      checkedAt?: string;
-      ok?: boolean;
-      score?: number;
-      strict?: boolean;
+    const stored = stateManager.getState(sessionId)?.taskContext.gatheredInfo.chapoPlan as {
+      title?: string;
+      steps?: Array<{ id: string; owner: string; status: string }>;
+      version?: number;
     };
-    expect(stored.turnId).toBe('turn-preflight');
-    expect(stored.strict).toBe(true);
-    expect(typeof stored.checkedAt).toBe('string');
-    expect(typeof stored.ok).toBe('boolean');
-    expect(typeof stored.score).toBe('number');
+    expect(stored.title).toBe('Execution plan');
+    expect(stored.steps).toHaveLength(1);
+    expect(stored.steps?.[0]?.id).toBe('s1');
+    expect(stored.version).toBe(1);
   });
 });

@@ -6,7 +6,7 @@
 import { getSupabase } from '../db/index.js';
 import { getUserfilesByIds } from '../db/userfileQueries.js';
 import type { UserfileRow } from '../db/userfileQueries.js';
-import type { ContentBlock, TextContentBlock } from '../llm/types.js';
+import type { ContentBlock } from '../llm/types.js';
 
 const MAX_TEXT_BYTES = 50 * 1024; // 50 KB text budget
 const STORAGE_BUCKET = 'userfiles';

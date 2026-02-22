@@ -1,5 +1,5 @@
 import { readdir, readFile as fsReadFile, writeFile as fsWriteFile, stat, access, mkdir as fsMkdir, rename, unlink, rmdir, rm, realpath as fsRealpath } from 'fs/promises';
-import { join, resolve, relative, dirname, basename } from 'path';
+import { join, resolve, relative, dirname } from 'path';
 import fg from 'fast-glob';
 import { config } from '../config.js';
 

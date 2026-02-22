@@ -5,8 +5,7 @@
  * focused crawling, and schema extraction.
  */
 
-import { isIP } from 'node:net';
-import dns from 'node:dns/promises';
+import { assertPublicHttpUrl } from './urlSafety.js';
 
 const FIRECRAWL_BASE_URL = 'https://api.firecrawl.dev';
 const MAX_LIMIT = 10;
@@ -16,18 +15,6 @@ type FirecrawlCategory = 'github' | 'research' | 'pdf';
 type FirecrawlSource = 'web' | 'news';
 type FirecrawlRecency = 'day' | 'week' | 'month' | 'year';
 
-const PRIVATE_IP_RANGES = [
-  /^127\./, // loopback
-  /^10\./, // class A private
-  /^172\.(1[6-9]|2\d|3[01])\./, // class B private
-  /^192\.168\./, // class C private
-  /^169\.254\./, // link-local
-  /^0\./, // current network
-  /^::1$/, // IPv6 loopback
-  /^fc00:/i, // IPv6 ULA
-  /^fe80:/i, // IPv6 link-local
-  /^fd/i, // IPv6 ULA
-];
 
 interface FirecrawlSearchWebItem {
   title?: string;
@@ -192,45 +179,6 @@ function truncate(text: string | undefined, maxChars: number): string {
   if (!raw) return '';
   if (raw.length <= maxChars) return raw;
   return `${raw.slice(0, maxChars)}...`;
-}
-
-function isPrivateIp(ip: string): boolean {
-  return PRIVATE_IP_RANGES.some((range) => range.test(ip));
-}
-
-async function checkSsrf(hostname: string): Promise<void> {
-  if (isIP(hostname)) {
-    if (isPrivateIp(hostname)) {
-      throw new Error(`Blocked: "${hostname}" resolves to a private/internal IP address.`);
-    }
-    return;
-  }
-
-  try {
-    const addresses = await dns.resolve4(hostname);
-    for (const addr of addresses) {
-      if (isPrivateIp(addr)) {
-        throw new Error(`Blocked: "${hostname}" resolves to private IP ${addr}.`);
-      }
-    }
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOTFOUND') {
-      throw new Error(`DNS lookup failed for "${hostname}".`);
-    }
-  }
-}
-
-async function assertPublicHttpUrl(url: string): Promise<void> {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error(`Invalid URL: ${url}`);
-  }
-  if (!['http:', 'https:'].includes(parsed.protocol)) {
-    throw new Error(`Unsupported protocol: ${parsed.protocol}. Only http/https allowed.`);
-  }
-  await checkSsrf(parsed.hostname);
 }
 
 function getFirecrawlApiKey(): string {

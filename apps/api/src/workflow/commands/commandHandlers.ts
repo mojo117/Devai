@@ -33,7 +33,6 @@ import {
   getOrCreateState,
   setGatheredInfo,
   setActiveTurnId,
-  getActiveTurnId,
   setPhase,
   isLoopActive,
   setLoopRunning,

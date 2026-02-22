@@ -1,7 +1,7 @@
 import simpleGit, { SimpleGit, StatusResult } from 'simple-git';
 import { config } from '../config.js';
 import { access } from 'fs/promises';
-import { join, resolve, dirname, relative } from 'path';
+import { join, resolve, dirname } from 'path';
 import { toCanonicalPath, toRuntimePath } from '../utils/pathMapping.js';
 
 async function pathExists(path: string): Promise<boolean> {

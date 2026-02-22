@@ -111,7 +111,7 @@ export class SessionLogger {
     const resultStr = truncate(formatValue(result));
 
     const lines = [
-      `**Result:** ${status}${duration}`,
+      `**Result (${tool}):** ${status}${duration}`,
     ];
 
     if (resultStr.length > 200) {

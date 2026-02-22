@@ -3,9 +3,7 @@ import { resolve } from 'path';
 import { config } from '../config.js';
 import { getProjectContext, clearProjectCache } from '../scanner/projectScanner.js';
 import { listFiles, readFile, grepFiles, globFiles } from '../tools/fs.js';
-import fg from 'fast-glob';
 import * as minimatchPkg from 'minimatch';
-import type { ProjectContext } from '@devai/shared';
 
 const minimatch = ((minimatchPkg as unknown as { minimatch?: unknown; default?: unknown }).minimatch
   ?? (minimatchPkg as unknown as { default?: unknown }).default) as (

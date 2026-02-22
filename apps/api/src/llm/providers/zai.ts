@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { config } from '../../config.js';
-import type { LLMProviderAdapter, GenerateRequest, GenerateResponse, ToolDefinition, LLMMessage, ContentBlock } from '../types.js';
+import type { LLMProviderAdapter, GenerateRequest, GenerateResponse, ToolDefinition, LLMMessage } from '../types.js';
 import { getTextContent } from '../types.js';
 
 export class ZAIProvider implements LLMProviderAdapter {

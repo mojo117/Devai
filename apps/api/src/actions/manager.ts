@@ -5,7 +5,6 @@ import {
   saveAction,
   getActionById,
   getAllActionsFromDb,
-  getPendingActionsFromDb,
   updateActionInDb,
   type DbAction,
 } from '../db/queries.js';

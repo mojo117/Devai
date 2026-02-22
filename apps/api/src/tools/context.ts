@@ -1,6 +1,5 @@
 import { readdir, readFile, stat } from 'fs/promises';
 import { join, relative, extname } from 'path';
-import { config } from '../config.js';
 
 // Context documents folder path (relative to project that DevAI is working on)
 const CONTEXT_FOLDER = 'context/documents';
