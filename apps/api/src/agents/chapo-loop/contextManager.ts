@@ -39,10 +39,11 @@ export class ChapoLoopContextManager {
   }
 
   checkInbox(): boolean {
-    if (!this.hasInboxMessages) return false;
+    // Always check the actual inbox — the reactive hasInboxMessages flag
+    // can miss messages queued before the handler was registered.
+    const messages = drainInbox(this.sessionId);
     this.hasInboxMessages = false;
 
-    const messages = drainInbox(this.sessionId);
     if (messages.length === 0) return false;
 
     for (const msg of messages) {
