@@ -1,27 +1,18 @@
 import { getAgentState, upsertAgentState } from '../../db/queries.js';
 import type { ConversationState } from '../types.js';
+import { PersistenceQueue } from './persistenceQueue.js';
 
 // In-memory state storage (per session)
 const stateStore = new Map<string, ConversationState>();
 
-// Persistence: avoid duplicate loads / debounce writes per session
+// Load deduplication (not persistence — stays in core)
 const loadPromises = new Map<string, Promise<ConversationState>>();
-const persistTimers = new Map<string, NodeJS.Timeout>();
-const lastPersisted = new Map<string, string>();
-const persistInFlight = new Map<string, Promise<void>>();
-const persistRetryTimers = new Map<string, NodeJS.Timeout>();
-const persistRetryCount = new Map<string, number>();
+
+// Per-session persistence queues
+const persistQueues = new Map<string, PersistenceQueue>();
 
 // Auto-cleanup after 24 hours
 const STATE_TTL_MS = 24 * 60 * 60 * 1000;
-
-// Persistence retry/backoff (best-effort, non-fatal)
-const PERSIST_RETRY_BASE_MS = 500;
-const PERSIST_RETRY_MAX_MS = 10_000;
-const PERSIST_RETRY_MAX_ATTEMPTS = 8;
-
-// Keep persistence payload bounded so JSONB rows don't grow unbounded over long sessions.
-const MAX_PERSISTED_AGENT_HISTORY = 200;
 
 function buildDefaultState(sessionId: string): ConversationState {
   return {
@@ -53,15 +44,24 @@ function scheduleMemoryCleanup(sessionId: string): void {
   // Best-effort memory hygiene; persistence lives in DB.
   const t = setTimeout(() => {
     stateStore.delete(sessionId);
-    persistTimers.delete(sessionId);
-    lastPersisted.delete(sessionId);
-    persistInFlight.delete(sessionId);
-    const retry = persistRetryTimers.get(sessionId);
-    if (retry) clearTimeout(retry);
-    persistRetryTimers.delete(sessionId);
-    persistRetryCount.delete(sessionId);
+    const queue = persistQueues.get(sessionId);
+    if (queue) queue.cleanup();
+    persistQueues.delete(sessionId);
   }, STATE_TTL_MS);
   t.unref?.();
+}
+
+function getOrCreateQueue(sessionId: string): PersistenceQueue {
+  let queue = persistQueues.get(sessionId);
+  if (!queue) {
+    queue = new PersistenceQueue(
+      sessionId,
+      () => stateStore.get(sessionId),
+      upsertAgentState,
+    );
+    persistQueues.set(sessionId, queue);
+  }
+  return queue;
 }
 
 function normalizeLoadedState(sessionId: string, raw: unknown): ConversationState {
@@ -96,76 +96,7 @@ function normalizeLoadedState(sessionId: string, raw: unknown): ConversationStat
 }
 
 export function schedulePersist(sessionId: string): void {
-  if (persistTimers.has(sessionId)) return;
-  const t = setTimeout(() => {
-    persistTimers.delete(sessionId);
-    void persistNow(sessionId);
-  }, 300);
-  t.unref?.();
-  persistTimers.set(sessionId, t);
-}
-
-function schedulePersistRetry(sessionId: string, err: unknown): void {
-  if (!stateStore.has(sessionId)) return;
-  if (persistRetryTimers.has(sessionId)) return;
-
-  const attempt = (persistRetryCount.get(sessionId) ?? 0) + 1;
-  persistRetryCount.set(sessionId, attempt);
-  if (attempt > PERSIST_RETRY_MAX_ATTEMPTS) {
-    console.warn('[state] Giving up persisting state after retries', { sessionId, attempt, err });
-    return;
-  }
-
-  const delay = Math.min(PERSIST_RETRY_BASE_MS * (2 ** (attempt - 1)), PERSIST_RETRY_MAX_MS);
-  const t = setTimeout(() => {
-    persistRetryTimers.delete(sessionId);
-    void persistNow(sessionId);
-  }, delay);
-  t.unref?.();
-  persistRetryTimers.set(sessionId, t);
-}
-
-async function persistNow(sessionId: string): Promise<void> {
-  const inFlight = persistInFlight.get(sessionId);
-  if (inFlight) return inFlight;
-
-  const p = (async () => {
-    const state = stateStore.get(sessionId);
-    if (!state) return;
-
-    let encoded = '';
-    try {
-      encoded = JSON.stringify(state);
-    } catch (err) {
-      console.warn('[state] Failed to serialize state', { sessionId, err });
-      return;
-    }
-
-    if (lastPersisted.get(sessionId) === encoded) return;
-
-    try {
-      // Deep-clone via JSON and prune before writing to keep rows bounded.
-      const decoded = JSON.parse(encoded) as ConversationState;
-      if (Array.isArray(decoded.agentHistory) && decoded.agentHistory.length > MAX_PERSISTED_AGENT_HISTORY) {
-        decoded.agentHistory = decoded.agentHistory.slice(-MAX_PERSISTED_AGENT_HISTORY);
-      }
-
-      await upsertAgentState(sessionId, decoded);
-      lastPersisted.set(sessionId, encoded);
-      persistRetryCount.delete(sessionId);
-      const retry = persistRetryTimers.get(sessionId);
-      if (retry) clearTimeout(retry);
-      persistRetryTimers.delete(sessionId);
-    } catch (err) {
-      console.warn('[state] Failed to persist state', { sessionId, err });
-      schedulePersistRetry(sessionId, err);
-    }
-  })().finally(() => {
-    persistInFlight.delete(sessionId);
-  });
-
-  persistInFlight.set(sessionId, p);
-  return p;
+  getOrCreateQueue(sessionId).schedule();
 }
 
 export function createState(sessionId: string): ConversationState {
@@ -188,16 +119,8 @@ export function getOrCreateState(sessionId: string): ConversationState {
  * Use this after enqueueing approvals/questions so they survive restarts even if the process exits quickly.
  */
 export async function flushState(sessionId: string): Promise<void> {
-  const t = persistTimers.get(sessionId);
-  if (t) {
-    clearTimeout(t);
-    persistTimers.delete(sessionId);
-  }
-  try {
-    await persistNow(sessionId);
-  } catch {
-    // persistNow is best-effort; callers should not fail user-visible flows on persistence errors.
-  }
+  const queue = persistQueues.get(sessionId);
+  if (queue) await queue.flush();
 }
 
 /**
@@ -240,15 +163,9 @@ export function updateState(
 
 export function deleteState(sessionId: string): void {
   stateStore.delete(sessionId);
-  const t = persistTimers.get(sessionId);
-  if (t) clearTimeout(t);
-  persistTimers.delete(sessionId);
-  lastPersisted.delete(sessionId);
-  persistInFlight.delete(sessionId);
-  const retry = persistRetryTimers.get(sessionId);
-  if (retry) clearTimeout(retry);
-  persistRetryTimers.delete(sessionId);
-  persistRetryCount.delete(sessionId);
+  const queue = persistQueues.get(sessionId);
+  if (queue) queue.cleanup();
+  persistQueues.delete(sessionId);
 }
 
 // Export full state for persistence/debugging
@@ -265,5 +182,7 @@ export function importState(state: ConversationState): void {
 
 // Clear all states (for testing)
 export function clearAllStates(): void {
+  for (const queue of persistQueues.values()) queue.cleanup();
+  persistQueues.clear();
   stateStore.clear();
 }

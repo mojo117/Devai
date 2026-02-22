@@ -1,27 +1,24 @@
-import { executeToolWithApprovalBridge } from '../../actions/approvalBridge.js';
 import { getCombinedSystemContextBlock } from '../systemContext.js';
 import { getAgent, getToolsForAgent, spawnScout } from '../router.js';
 import { getToolsForLLM } from '../../tools/registry.js';
 import type { AgentErrorHandler } from '../error-handler.js';
-import type { SubAgentRunner, SubAgentToolCallOutcome } from '../sub-agent-runner.js';
+import type { SubAgentRunner } from '../sub-agent-runner.js';
 import type {
   AgentStreamEvent,
   LoopDelegationResult,
   LoopDelegationStatus,
   ModelSelection,
   ScoutFindings,
-  ScoutScope,
   ToolEvidence,
 } from '../types.js';
 import type { LLMProvider } from '../../llm/types.js';
 import {
   applyCaioEvidenceSummary,
   buildCaioEvidence,
-  normalizeToolOutcome,
-  preflightCaioToolCall,
   type CaioEvidence,
 } from './caioEvidence.js';
-import { formatDelegationContext, type ParallelDelegation } from './delegationUtils.js';
+import { formatDelegationContext, isDelegationSuccessful, type ParallelDelegation } from './delegationUtils.js';
+import { handleToolCall, devoStrategy, caioStrategy, type RunnerToolCall } from './toolCallHandler.js';
 
 export type DelegationSourceAgent = 'chapo' | 'devo' | 'caio';
 
@@ -30,19 +27,6 @@ export interface DelegationDecisionPath {
   reason: string;
   confidence: number;
   unresolvedAssumptions: string[];
-}
-
-interface ToolExecutionResult {
-  success: boolean;
-  result?: unknown;
-  error?: string;
-  pendingApproval?: boolean;
-}
-
-interface RunnerToolCall {
-  id: string;
-  name: string;
-  arguments: Record<string, unknown>;
 }
 
 interface ParallelJobResult extends ParallelDelegation {
@@ -70,10 +54,6 @@ export interface DelegationRunnerDeps {
   ) => { content: string; isError: boolean };
 }
 
-function isDelegationSuccessful(status: LoopDelegationStatus): boolean {
-  return status === 'success' || status === 'partial';
-}
-
 function mapCaioEvidence(evidenceLog: CaioEvidence[]): ToolEvidence[] {
   return evidenceLog.map((e) => ({
     tool: e.tool,
@@ -83,331 +63,6 @@ function mapCaioEvidence(evidenceLog: CaioEvidence[]): ToolEvidence[] {
     externalId: e.externalId,
     nextStep: e.nextStep,
   }));
-}
-
-function buildScoutDelegationFromArgs(
-  args: Record<string, unknown>,
-  fallbackObjective: string,
-): ParallelDelegation {
-  const query = typeof args.query === 'string' && args.query.trim().length > 0
-    ? args.query.trim()
-    : fallbackObjective;
-  const scopeRaw = typeof args.scope === 'string' ? args.scope : '';
-  const scope: ScoutScope = scopeRaw === 'codebase' || scopeRaw === 'web' || scopeRaw === 'both'
-    ? scopeRaw
-    : 'both';
-  const context = typeof args.context === 'string' && args.context.trim().length > 0
-    ? args.context.trim()
-    : undefined;
-
-  return {
-    target: 'scout',
-    domain: 'research',
-    objective: query,
-    context,
-    contextFacts: [],
-    constraints: [],
-    scope,
-  };
-}
-
-async function handleDevoToolCall(
-  deps: DelegationRunnerDeps,
-  delegation: ParallelDelegation,
-  toolEvidence: ToolEvidence[],
-  turn: number,
-  toolCall: RunnerToolCall,
-): Promise<SubAgentToolCallOutcome> {
-  if (toolCall.name === 'escalateToChapo') {
-    const desc = (toolCall.arguments.description as string) || 'Unknown issue';
-    return {
-      toolResult: {
-        toolUseId: toolCall.id,
-        result: `Eskalation wird von CHAPO verarbeitet: ${desc}`,
-        isError: false,
-      },
-      escalated: desc,
-    };
-  }
-
-  if (toolCall.name === 'delegateToScout') {
-    const scoutDelegation = buildScoutDelegationFromArgs(toolCall.arguments, delegation.objective);
-    const [scoutLoopResult, scoutErr] = await deps.errorHandler.safe(
-      `delegate:devo:scout:${turn}`,
-      () => delegateToAgent(deps, scoutDelegation, 'devo'),
-    );
-    if (scoutErr) {
-      const errMsg = deps.errorHandler.formatForLLM(scoutErr);
-      toolEvidence.push({
-        tool: 'delegateToScout',
-        success: false,
-        summary: errMsg,
-      });
-      return {
-        toolResult: {
-          toolUseId: toolCall.id,
-          result: `Error: ${errMsg}`,
-          isError: true,
-        },
-      };
-    }
-
-    const success = isDelegationSuccessful(scoutLoopResult.status);
-    toolEvidence.push({
-      tool: 'delegateToScout',
-      success,
-      summary: success ? `SCOUT: ${(scoutDelegation.objective || '').slice(0, 80)}` : scoutLoopResult.summary,
-    });
-    return {
-      toolResult: {
-        toolUseId: toolCall.id,
-        result: JSON.stringify({
-          summary: scoutLoopResult.summary,
-          findings: scoutLoopResult.findings,
-        }, null, 2),
-        isError: !success,
-      },
-    };
-  }
-
-  deps.sendEvent({
-    type: 'tool_call',
-    agent: 'devo',
-    toolName: toolCall.name,
-    args: toolCall.arguments,
-  });
-
-  const startTime = Date.now();
-  const [result, toolErr] = await deps.errorHandler.safe(
-    `devo-tool:${toolCall.name}:${turn}`,
-    () => executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
-      agentName: 'devo',
-      onActionPending: (action) => {
-        deps.sendEvent({
-          type: 'action_pending',
-          actionId: action.id,
-          toolName: action.toolName,
-          toolArgs: action.toolArgs,
-          description: action.description,
-          preview: action.preview,
-        });
-      },
-    }),
-  );
-  const duration = Date.now() - startTime;
-
-  if (toolErr) {
-    deps.sendEvent({
-      type: 'tool_result',
-      agent: 'devo',
-      toolName: toolCall.name,
-      result: { error: toolErr.message },
-      success: false,
-    });
-    toolEvidence.push({
-      tool: toolCall.name,
-      success: false,
-      summary: toolErr.message,
-    });
-    return {
-      toolResult: {
-        toolUseId: toolCall.id,
-        result: `Error: ${toolErr.message}`,
-        isError: true,
-      },
-    };
-  }
-
-  const normalizedResult = result as ToolExecutionResult;
-  const pendingApproval = normalizedResult.pendingApproval === true;
-  deps.sendEvent({
-    type: 'tool_result',
-    agent: 'devo',
-    toolName: toolCall.name,
-    result: normalizedResult.result,
-    success: normalizedResult.success,
-  });
-  toolEvidence.push({
-    tool: toolCall.name,
-    success: normalizedResult.success,
-    pendingApproval: pendingApproval ? true : undefined,
-    summary: pendingApproval
-      ? 'Aktion wartet auf Freigabe.'
-      : (normalizedResult.success
-        ? `${toolCall.name} OK (${duration}ms)`
-        : (normalizedResult.error || `${toolCall.name} failed`)),
-  });
-
-  const content = deps.buildToolResultContent(normalizedResult);
-  return {
-    toolResult: {
-      toolUseId: toolCall.id,
-      result: content.content,
-      isError: content.isError,
-    },
-  };
-}
-
-async function handleCaioToolCall(
-  deps: DelegationRunnerDeps,
-  delegation: ParallelDelegation,
-  evidenceLog: CaioEvidence[],
-  turn: number,
-  toolCall: RunnerToolCall,
-): Promise<SubAgentToolCallOutcome> {
-  if (toolCall.name === 'escalateToChapo') {
-    const desc = (toolCall.arguments.description as string) || 'Unknown issue';
-    return {
-      toolResult: {
-        toolUseId: toolCall.id,
-        result: `Eskalation wird von CHAPO verarbeitet: ${desc}`,
-        isError: false,
-      },
-      escalated: desc,
-    };
-  }
-
-  if (toolCall.name === 'delegateToScout') {
-    const scoutDelegation = buildScoutDelegationFromArgs(toolCall.arguments, delegation.objective);
-    const [scoutLoopResult, scoutErr] = await deps.errorHandler.safe(
-      `delegate:caio:scout:${turn}`,
-      () => delegateToAgent(deps, scoutDelegation, 'caio'),
-    );
-    if (scoutErr) {
-      const errMsg = deps.errorHandler.formatForLLM(scoutErr);
-      const evidence = buildCaioEvidence('delegateToScout', {
-        success: false,
-        pendingApproval: false,
-        error: errMsg,
-      });
-      evidenceLog.push(evidence);
-      return {
-        toolResult: {
-          toolUseId: toolCall.id,
-          result: JSON.stringify(evidence),
-          isError: true,
-        },
-      };
-    }
-
-    const success = isDelegationSuccessful(scoutLoopResult.status);
-    const evidence = success
-      ? buildCaioEvidence('delegateToScout', {
-        success: true,
-        pendingApproval: false,
-        data: {
-          summary: scoutLoopResult.summary,
-          confidence: scoutLoopResult.findings?.confidence,
-        },
-      })
-      : buildCaioEvidence('delegateToScout', {
-        success: false,
-        pendingApproval: false,
-        error: scoutLoopResult.summary,
-      });
-    evidenceLog.push(evidence);
-    return {
-      toolResult: {
-        toolUseId: toolCall.id,
-        result: JSON.stringify(evidence),
-        isError: !success,
-      },
-    };
-  }
-
-  const preflight = preflightCaioToolCall(toolCall.name, toolCall.arguments);
-  if (!preflight.ok) {
-    const evidence = buildCaioEvidence(toolCall.name, {
-      success: false,
-      pendingApproval: false,
-      error: preflight.error || 'Preflight validation failed',
-    });
-    evidenceLog.push(evidence);
-
-    deps.sendEvent({
-      type: 'tool_result',
-      agent: 'caio',
-      toolName: toolCall.name,
-      result: evidence,
-      success: false,
-    });
-    return {
-      toolResult: {
-        toolUseId: toolCall.id,
-        result: JSON.stringify(evidence),
-        isError: true,
-      },
-    };
-  }
-
-  deps.sendEvent({
-    type: 'tool_call',
-    agent: 'caio',
-    toolName: toolCall.name,
-    args: toolCall.arguments,
-  });
-
-  const [result, toolErr] = await deps.errorHandler.safe(
-    `caio-tool:${toolCall.name}:${turn}`,
-    () => executeToolWithApprovalBridge(toolCall.name, toolCall.arguments, {
-      agentName: 'caio',
-      onActionPending: (action) => {
-        deps.sendEvent({
-          type: 'action_pending',
-          actionId: action.id,
-          toolName: action.toolName,
-          toolArgs: action.toolArgs,
-          description: action.description,
-          preview: action.preview,
-        });
-      },
-    }),
-  );
-
-  if (toolErr) {
-    const evidence = buildCaioEvidence(toolCall.name, {
-      success: false,
-      pendingApproval: false,
-      error: toolErr.message,
-    });
-    evidenceLog.push(evidence);
-
-    deps.sendEvent({
-      type: 'tool_result',
-      agent: 'caio',
-      toolName: toolCall.name,
-      result: evidence,
-      success: false,
-    });
-    return {
-      toolResult: {
-        toolUseId: toolCall.id,
-        result: JSON.stringify(evidence),
-        isError: true,
-      },
-    };
-  }
-
-  const normalized = normalizeToolOutcome(result);
-  const evidence = buildCaioEvidence(toolCall.name, normalized);
-  evidenceLog.push(evidence);
-
-  deps.sendEvent({
-    type: 'tool_result',
-    agent: 'caio',
-    toolName: toolCall.name,
-    result: evidence,
-    success: normalized.success,
-  });
-  deps.markExternalActionToolSuccess(toolCall.name, normalized.success);
-
-  return {
-    toolResult: {
-      toolUseId: toolCall.id,
-      result: JSON.stringify(evidence),
-      isError: !normalized.success,
-    },
-  };
 }
 
 async function delegateToSubAgent(
@@ -467,9 +122,9 @@ Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
     sendEvent: deps.sendEvent,
     handleToolCall: async ({ toolCall, turn }) => {
       if (target === 'devo') {
-        return handleDevoToolCall(deps, delegation, devoEvidence, turn, toolCall as RunnerToolCall);
+        return handleToolCall(devoStrategy, deps, delegation, devoEvidence, turn, toolCall as RunnerToolCall, delegateToAgent);
       }
-      return handleCaioToolCall(deps, delegation, caioEvidenceLog, turn, toolCall as RunnerToolCall);
+      return handleToolCall(caioStrategy, deps, delegation, caioEvidenceLog, turn, toolCall as RunnerToolCall, delegateToAgent);
     },
   });
 

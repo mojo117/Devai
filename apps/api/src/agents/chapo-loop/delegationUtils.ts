@@ -1,5 +1,5 @@
 import { getToolsForLLM } from '../../tools/registry.js';
-import type { DelegationDomain, ScoutScope } from '../types.js';
+import type { DelegationDomain, LoopDelegationStatus, ScoutScope } from '../types.js';
 
 export type ParallelAgent = 'devo' | 'caio' | 'scout';
 
@@ -150,4 +150,34 @@ export function formatDelegationContext(delegation: ParallelDelegation): string 
   }
   lines.push('Waehle die konkreten Tools innerhalb deiner Domaene selbst.');
   return lines.join('\n');
+}
+
+export function isDelegationSuccessful(status: LoopDelegationStatus): boolean {
+  return status === 'success' || status === 'partial';
+}
+
+export function buildScoutDelegationFromArgs(
+  args: Record<string, unknown>,
+  fallbackObjective: string,
+): ParallelDelegation {
+  const query = typeof args.query === 'string' && args.query.trim().length > 0
+    ? args.query.trim()
+    : fallbackObjective;
+  const scopeRaw = typeof args.scope === 'string' ? args.scope : '';
+  const scope: ScoutScope = scopeRaw === 'codebase' || scopeRaw === 'web' || scopeRaw === 'both'
+    ? scopeRaw
+    : 'both';
+  const context = typeof args.context === 'string' && args.context.trim().length > 0
+    ? args.context.trim()
+    : undefined;
+
+  return {
+    target: 'scout',
+    domain: 'research',
+    objective: query,
+    context,
+    contextFacts: [],
+    constraints: [],
+    scope,
+  };
 }
