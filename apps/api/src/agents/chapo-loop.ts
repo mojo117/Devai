@@ -306,7 +306,6 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
         getDelegationRunnerDeps: this.getDelegationRunnerDeps.bind(this),
         buildVerificationEnvelope: this.buildVerificationEnvelope.bind(this),
         buildToolResultContent: this.buildToolResultContent.bind(this),
-        markExternalActionToolSuccess: this.markExternalActionToolSuccess.bind(this),
         onPartialResponse: (message: string, inReplyTo?: string) => {
           const label = inReplyTo
             ? `[Intermediate response sent — re: "${inReplyTo}"] ${message}`
@@ -420,12 +419,6 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
     return this.gateManager.queueApproval(description, riskLevel, totalIterations);
   }
 
-  private markExternalActionToolSuccess(toolName: string, success: boolean): void {
-    if (success) {
-      this.answerValidator.markExternalToolSuccess(toolName);
-    }
-  }
-
   private getDelegationRunnerDeps(): DelegationRunnerDeps {
     return {
       sessionId: this.sessionId,
@@ -434,7 +427,6 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       sendEvent: this.sendEvent,
       errorHandler: this.errorHandler,
       subAgentRunner: this.subAgentRunner,
-      markExternalActionToolSuccess: this.markExternalActionToolSuccess.bind(this),
       deriveDelegationStatus: this.deriveDelegationStatus.bind(this),
       buildToolResultContent: this.buildToolResultContent.bind(this),
     };

@@ -64,7 +64,6 @@ interface ToolExecutorDeps {
   buildToolResultContent: (
     result: { success: boolean; result?: unknown; error?: string },
   ) => { content: string; isError: boolean };
-  markExternalActionToolSuccess: (toolName: string, success: boolean) => void;
   onPartialResponse: (message: string, inReplyTo?: string) => void;
 }
 
@@ -349,8 +348,6 @@ export class ChapoToolExecutor {
       result: toolResult.result,
       success,
     });
-    this.deps.markExternalActionToolSuccess(toolCall.name, success);
-
     // Track gathered files
     if (toolCall.name === 'fs_readFile' && success) {
       const path = toolCall.arguments.path as string;

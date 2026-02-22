@@ -131,9 +131,6 @@ export const caioStrategy: EvidenceStrategy<CaioEvidence> = {
   formatEventError(evidence) {
     return evidence;
   },
-  onToolComplete(deps, toolName, success) {
-    deps.markExternalActionToolSuccess(toolName, success);
-  },
 };
 
 type DelegateToAgentFn = (

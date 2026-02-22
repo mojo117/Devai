@@ -1,9 +1,8 @@
 /**
  * AnswerValidator — Normalization and routing of CHAPO answers
  *
- * - Hallucination detection (false success claims via tool evidence)
  * - Clarification detection and extraction
- * - Email delivery claim normalization
+ * - Assumption extraction
  */
 
 import type { SessionLogger } from '../audit/sessionLogger.js';
@@ -16,37 +15,10 @@ export interface DecisionPathInsights {
   unresolvedAssumptions: string[];
 }
 
-const EXTERNAL_ACTION_TOOLS = new Set([
-  'send_email',
-  'taskforge_create_task',
-  'taskforge_move_task',
-  'taskforge_add_comment',
-  'scheduler_create',
-  'scheduler_update',
-  'scheduler_delete',
-  'reminder_create',
-  'notify_user',
-]);
-
-/**
- * Max answer length for the unbacked-claim check to fire.
- * Long answers (watchlists, formatted reports, code) are content delivery,
- * not false action confirmations. Only short "I did X" style answers need checking.
- */
-const CLAIM_CHECK_MAX_LENGTH = 400;
-
 export class AnswerValidator {
-  private successfulExternalTools = new Set<string>();
-
   constructor(
     private sessionLogger?: SessionLogger,
   ) {}
-
-  markExternalToolSuccess(toolName: string): void {
-    if (EXTERNAL_ACTION_TOOLS.has(toolName)) {
-      this.successfulExternalTools.add(toolName);
-    }
-  }
 
   async validateAndNormalize(
     userMessage: string,
@@ -54,16 +26,7 @@ export class AnswerValidator {
     iteration: number,
     emitDecisionPath: (insights: DecisionPathInsights) => void,
   ): Promise<ChapoLoopResult> {
-    let finalAnswer = this.normalizeEmailDeliveryClaims(answer);
-
-    // Detect false success claims when no matching tool was actually called.
-    // Only check short answers — long content responses are never false action claims.
-    if (this.hasUnbackedExternalClaim(finalAnswer)) {
-      finalAnswer = 'I could not reliably verify the execution. There is no confirmed tool run for this action. Want me to try again with verifiable tool execution?';
-      console.warn('[answer-validator] Replacing unsafe final answer — external action claimed without tool evidence');
-    }
-
-    const unresolvedAssumptions = this.extractAssumptionsFromAnswer(finalAnswer);
+    const unresolvedAssumptions = this.extractAssumptionsFromAnswer(answer);
     emitDecisionPath({
       path: 'answer',
       reason: 'No further tool calls needed; answer delivered directly.',
@@ -72,7 +35,7 @@ export class AnswerValidator {
     });
 
     return {
-      answer: finalAnswer,
+      answer,
       status: 'completed',
       totalIterations: iteration + 1,
     };
@@ -105,93 +68,6 @@ export class AnswerValidator {
     }
 
     return 'Can you be more specific about what you want me to do?';
-  }
-
-  /**
-   * Detect answers that claim external actions (email sent, ticket created)
-   * without matching tool evidence.
-   *
-   * Only fires on SHORT answers (< CLAIM_CHECK_MAX_LENGTH chars).
-   * Long answers with formatted content (lists, tables, code blocks) are
-   * content delivery, not false action confirmations.
-   */
-  private hasUnbackedExternalClaim(answer: string): boolean {
-    // Long answers are never false action claims — they're content delivery
-    if (answer.length > CLAIM_CHECK_MAX_LENGTH) {
-      return false;
-    }
-
-    const text = answer.toLowerCase();
-
-    // Only match explicit action-completion patterns, not mere word presence
-    const claimsAction = /\b(habe .{0,20}(gesendet|erstellt|verschoben|gel.scht)|sent .{0,15}(email|mail|notification)|created .{0,15}(ticket|task|reminder|schedule)|moved .{0,15}(ticket|task)|deleted .{0,15}(ticket|task|reminder|schedule)|e-?mail .{0,15}(gesendet|sent|verschickt)|ticket .{0,15}(erstellt|created|verschoben|moved))\b/.test(text);
-
-    if (!claimsAction) {
-      return false;
-    }
-
-    return !this.hasMatchingActionEvidence(text);
-  }
-
-  private hasMatchingActionEvidence(answerText: string): boolean {
-    if (/(e-?mail|email|mail|sent|gesendet|zugestellt)/.test(answerText)) {
-      if (this.successfulExternalTools.has('send_email')) {
-        return true;
-      }
-    }
-
-    if (/(taskforge|ticket|task|created|erstellt|moved|verschoben|comment|kommentar)/.test(answerText)) {
-      for (const toolName of this.successfulExternalTools) {
-        if (toolName.startsWith('taskforge_')) {
-          return true;
-        }
-      }
-    }
-
-    if (/(scheduler|reminder|calendar|termin|kalender|erinnerung)/.test(answerText)) {
-      if (
-        this.successfulExternalTools.has('scheduler_create')
-        || this.successfulExternalTools.has('scheduler_update')
-        || this.successfulExternalTools.has('scheduler_delete')
-        || this.successfulExternalTools.has('reminder_create')
-      ) {
-        return true;
-      }
-    }
-
-    if (/(notification|benachrichtigung|notify)/.test(answerText)) {
-      if (this.successfulExternalTools.has('notify_user')) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Keep wording honest: `send_email` confirms provider acceptance, not guaranteed inbox placement.
-   */
-  private normalizeEmailDeliveryClaims(answer: string): string {
-    if (!this.successfulExternalTools.has('send_email')) {
-      return answer;
-    }
-
-    let normalized = answer;
-    // German normalization
-    normalized = normalized.replace(
-      /\bwurde erfolgreich(?:\s+\S+){0,4}\s+gesendet\b/gi,
-      'wurde vom E-Mail-Provider zur Zustellung angenommen',
-    );
-    normalized = normalized.replace(
-      /\bist jetzt unterwegs\b/gi,
-      'ist beim Provider in der Zustellung',
-    );
-    // English normalization
-    normalized = normalized.replace(
-      /\bsuccessfully\s+(?:sent|delivered)\b/gi,
-      'accepted by the email provider for delivery',
-    );
-    return normalized;
   }
 
   private isAmbiguousRequest(userMessage: string): boolean {

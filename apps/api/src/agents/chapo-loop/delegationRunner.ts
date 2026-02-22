@@ -52,7 +52,6 @@ export interface DelegationRunnerDeps {
   sendEvent: (event: AgentStreamEvent) => void;
   errorHandler: AgentErrorHandler;
   subAgentRunner: SubAgentRunner;
-  markExternalActionToolSuccess: (toolName: string, success: boolean) => void;
   deriveDelegationStatus: (
     evidence: ToolEvidence[],
     escalated: boolean,

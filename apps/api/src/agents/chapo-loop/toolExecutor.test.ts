@@ -45,7 +45,6 @@ describe('ChapoToolExecutor', () => {
       getDelegationRunnerDeps: vi.fn(() => ({} as never)),
       buildVerificationEnvelope: vi.fn(() => 'ok'),
       buildToolResultContent: vi.fn(() => ({ content: 'ok', isError: false })),
-      markExternalActionToolSuccess: vi.fn(),
       onPartialResponse: vi.fn(),
     });
 
