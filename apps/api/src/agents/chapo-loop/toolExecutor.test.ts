@@ -46,6 +46,7 @@ describe('ChapoToolExecutor', () => {
       buildVerificationEnvelope: vi.fn(() => 'ok'),
       buildToolResultContent: vi.fn(() => ({ content: 'ok', isError: false })),
       markExternalActionToolSuccess: vi.fn(),
+      onPartialResponse: vi.fn(),
     });
 
     const outcome = await executor.execute({

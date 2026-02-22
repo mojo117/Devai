@@ -48,6 +48,11 @@ export class ChapoLoopContextManager {
         role: 'user',
         content: msg.content,
       });
+      this.conversation.addMessage({
+        role: 'system',
+        content: '[INBOX] Neue Nachricht eingetroffen. '
+          + 'Pruefe deine Todo-Liste und fuege neue Punkte hinzu falls noetig.',
+      });
     }
 
     this.sendEvent({ type: 'inbox_processing', count: messages.length });

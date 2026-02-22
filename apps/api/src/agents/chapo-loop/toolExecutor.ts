@@ -65,6 +65,7 @@ interface ToolExecutorDeps {
     result: { success: boolean; result?: unknown; error?: string },
   ) => { content: string; isError: boolean };
   markExternalActionToolSuccess: (toolName: string, success: boolean) => void;
+  onPartialResponse: (message: string, inReplyTo?: string) => void;
 }
 
 export class ChapoToolExecutor {
@@ -125,8 +126,8 @@ export class ChapoToolExecutor {
       const message = (toolCall.arguments.message as string) || '';
       const inReplyTo = toolCall.arguments.inReplyTo as string | undefined;
 
-      // Add to conversation context so CHAPO knows what was already answered
-      // (This is NOT an early return — the loop continues)
+      // Record what was answered so the next LLM iteration knows
+      this.deps.onPartialResponse(message, inReplyTo);
 
       // Emit partial_response event for frontend
       this.deps.sendEvent({
