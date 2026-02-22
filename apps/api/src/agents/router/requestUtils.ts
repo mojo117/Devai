@@ -1,8 +1,7 @@
 import { getMessages } from '../../db/queries.js';
 import * as stateManager from '../stateManager.js';
 import { buildConversationHistoryContext } from '../conversationHistory.js';
-import type { QualificationResult, TaskType } from '../types.js';
-import { isConversationalSmallTalk } from '../intakeClassifier.js';
+
 
 export function parseYesNo(input: string): boolean | null {
   const raw = input.trim().toLowerCase().replace(/[.!?,;:]+$/g, '');
@@ -30,10 +29,6 @@ export function parseYesNo(input: string): boolean | null {
 export function looksLikeContinuePrompt(text: string): boolean {
   const t = (text || '').toLowerCase();
   return t.includes('required more steps than allowed') || t.includes('should i continue?');
-}
-
-export function isSmallTalk(text: string): boolean {
-  return isConversationalSmallTalk(text);
 }
 
 export function extractExplicitRememberNote(text: string): { note: string; promoteToLongTerm: boolean } | null {
@@ -105,19 +100,3 @@ export function buildToolResultContent(result: { success: boolean; result?: unkn
   return { content, isError: true };
 }
 
-export function buildPlanQualificationForComplexTask(userMessage: string): QualificationResult {
-  const lower = userMessage.toLowerCase();
-  const looksDevOps = /(deploy|pm2|server|ssh|infra|docker|nginx|k8s|kubernetes)/.test(lower);
-  const taskType: TaskType = looksDevOps ? 'devops' : 'mixed';
-
-  return {
-    taskType,
-    riskLevel: 'high',
-    complexity: 'complex',
-    targetAgent: looksDevOps ? 'devo' : null,
-    requiresApproval: false,
-    requiresClarification: false,
-    gatheredContext: { relevantFiles: [], fileContents: {} },
-    reasoning: 'Complex task routed directly to Plan Mode pre-qualification.',
-  };
-}

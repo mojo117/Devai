@@ -46,7 +46,7 @@ describe('systemContext provenance tags', () => {
 
     expect(combined).toContain('[CTX kind="devai_instructions"');
     expect(combined).toContain('[CTX kind="memory_behavior_policy"');
-    expect(combined).toContain('## Memory-Verhalten');
+    expect(combined).toContain('## Memory Behavior');
     expect(profile.totalTokensEstimate).toBeGreaterThan(0);
     expect(kinds).toEqual(expect.arrayContaining(['devai_instructions', 'memory_behavior_policy']));
   });
@@ -67,6 +67,6 @@ describe('systemContext provenance tags', () => {
 
     expect(combined).not.toContain('[CTX ');
     expect(combined).toContain('## Workspace Instructions');
-    expect(combined).toContain('## Memory-Verhalten');
+    expect(combined).toContain('## Memory Behavior');
   });
 });

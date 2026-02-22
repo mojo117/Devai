@@ -16,7 +16,6 @@ import type {
 import {
   extractExplicitRememberNote,
   getProjectRootFromState,
-  isSmallTalk,
   loadRecentConversationHistory,
   looksLikeContinuePrompt,
   parseYesNo,
@@ -65,11 +64,6 @@ export async function processRequest(
         userMessage = lastUser;
       }
     }
-  }
-
-  // Lightweight small-talk response (avoid forcing project clarification on greetings).
-  if (isSmallTalk(getTextContent(userMessage))) {
-    return 'Hey. Womit soll ich dir helfen: Code aendern, Bug fixen, oder etwas nachschlagen?';
   }
 
   const explicitRemember = extractExplicitRememberNote(getTextContent(userMessage));

@@ -169,73 +169,8 @@ export function classifyTaskComplexity(message: string): TaskComplexityLevel {
 }
 
 /**
- * Detect which agent should handle this task (without LLM)
- */
-export function detectTargetAgent(message: string): 'chapo' | 'devo' {
-  const lowercased = message.toLowerCase();
-
-  // DevOps indicators
-  const devoPatterns = [
-    /\b(git|commit|push|pull|merge|branch)\b/,
-    /\b(npm|yarn|pnpm)\s+(install|run|build|test)/,
-    /\b(pm2|process|restart|reload)\b/,
-    /\b(deploy|deployment|staging|production)\b/,
-    /\b(ssh|server|remote)\b/,
-    /\b(docker|container)\b/,
-    /\b(ci|cd|pipeline|workflow)\b/,
-  ];
-
-  for (const pattern of devoPatterns) {
-    if (pattern.test(lowercased)) {
-      return 'devo';
-    }
-  }
-
-  // Code change indicators (also handled by DEVO)
-  const codePatterns = [
-    /\b(edit|create|write|add|remove|delete|modify|update|change)\s+(file|code|function|class|component)/,
-    /\b(implement|fix|refactor|rewrite)\b/,
-    /\b(erstelle|schreibe|ändere|füge.*hinzu)\b/i,
-  ];
-
-  for (const pattern of codePatterns) {
-    if (pattern.test(lowercased)) {
-      return 'devo';
-    }
-  }
-
-  // Default to CHAPO for read-only/exploration
-  return 'chapo';
-}
-
-/**
  * Check if a task should skip the qualification phase
  */
 export function shouldSkipQualification(complexity: TaskComplexityLevel): boolean {
   return complexity === 'trivial' || complexity === 'simple';
-}
-
-/**
- * Check if review phase should be skipped
- */
-export function shouldSkipReview(
-  complexity: TaskComplexityLevel,
-  riskLevel: 'low' | 'medium' | 'high',
-  executionResult: string
-): boolean {
-  // Always review high-risk tasks
-  if (riskLevel === 'high') return false;
-
-  // Always review complex tasks
-  if (complexity === 'complex') return false;
-
-  // Review if execution had errors
-  if (executionResult.toLowerCase().includes('error') ||
-      executionResult.toLowerCase().includes('failed') ||
-      executionResult.toLowerCase().includes('fehler')) {
-    return false;
-  }
-
-  // Skip review for trivial/simple/moderate low-risk tasks
-  return true;
 }
