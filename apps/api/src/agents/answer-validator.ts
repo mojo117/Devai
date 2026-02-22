@@ -1,17 +1,13 @@
 /**
- * AnswerValidator — Validation and normalization of CHAPO answers
+ * AnswerValidator — Normalization and routing of CHAPO answers
  *
- * Extracted from ChapoLoop to separate concerns:
- * - Self-validation via SelfValidator
- * - Hallucination detection (false success claims)
+ * - Hallucination detection (false success claims via tool evidence)
  * - Clarification detection and extraction
  * - Email delivery claim normalization
  */
 
-import type { SelfValidator } from './self-validation.js';
 import type { SessionLogger } from '../audit/sessionLogger.js';
-import type { AgentErrorHandler } from './error-handler.js';
-import type { ChapoLoopResult, ValidationResult } from './types.js';
+import type { ChapoLoopResult } from './types.js';
 
 export interface DecisionPathInsights {
   path: 'answer' | 'delegate_devo' | 'delegate_caio' | 'delegate_scout' | 'tool';
@@ -36,8 +32,6 @@ export class AnswerValidator {
   private successfulExternalTools = new Set<string>();
 
   constructor(
-    private selfValidator: SelfValidator,
-    private config: { selfValidationEnabled: boolean },
     private sessionLogger?: SessionLogger,
   ) {}
 
@@ -52,51 +46,20 @@ export class AnswerValidator {
     answer: string,
     iteration: number,
     emitDecisionPath: (insights: DecisionPathInsights) => void,
-    errorHandler: AgentErrorHandler,
   ): Promise<ChapoLoopResult> {
-    let finalAnswer = answer;
-    let validationResult: ValidationResult | undefined;
+    let finalAnswer = this.normalizeEmailDeliveryClaims(answer);
 
-    if (this.config.selfValidationEnabled && answer.length > 20) {
-      const [validation] = await errorHandler.safe('validation', () =>
-        this.selfValidator.validate(userMessage, answer),
-      );
-
-      if (validation) {
-        validationResult = validation;
-        this.sessionLogger?.logAgentEvent({
-          type: 'validation',
-          confidence: validation.confidence,
-          issues: validation.issues,
-          isComplete: validation.isComplete,
-        });
-
-        if (!validation.isComplete && validation.confidence < 0.4 && validation.suggestion) {
-          console.info('[chapo-loop] Self-validation flagged low confidence', {
-            confidence: validation.confidence,
-            issues: validation.issues,
-          });
-        }
-
-        // Prevent known false-success claims (e.g. "email sent") from being returned
-        // when validation already detected hallucination-like issues.
-        if (this.shouldReplaceWithSafeFallback(validation, answer)) {
-          finalAnswer = 'Ich konnte die Ausfuehrung nicht verlaesslich verifizieren. Es liegt kein bestaetigter Tool-Lauf fuer diese Aktion vor. Wenn du willst, fuehre ich den Schritt jetzt erneut mit nachvollziehbarer Tool-Ausfuehrung aus.';
-          console.warn('[chapo-loop] Replacing unsafe final answer after failed validation', {
-            confidence: validation.confidence,
-            issues: validation.issues,
-          });
-        }
-      }
+    // Detect false success claims when no matching tool was actually called
+    if (this.hasUnbackedExternalClaim(finalAnswer)) {
+      finalAnswer = 'Ich konnte die Ausfuehrung nicht verlaesslich verifizieren. Es liegt kein bestaetigter Tool-Lauf fuer diese Aktion vor. Wenn du willst, fuehre ich den Schritt jetzt erneut mit nachvollziehbarer Tool-Ausfuehrung aus.';
+      console.warn('[chapo-loop] Replacing unsafe final answer — external action claimed without tool evidence');
     }
 
-    finalAnswer = this.normalizeEmailDeliveryClaims(finalAnswer);
-    const confidence = validationResult?.confidence ?? 0.8;
-    const unresolvedAssumptions = this.extractAssumptionsFromAnswer(finalAnswer, validationResult);
+    const unresolvedAssumptions = this.extractAssumptionsFromAnswer(finalAnswer);
     emitDecisionPath({
       path: 'answer',
       reason: 'Keine weiteren Tool-Calls notwendig; Antwort wurde direkt geliefert.',
-      confidence,
+      confidence: 0.8,
       unresolvedAssumptions,
     });
 
@@ -136,26 +99,19 @@ export class AnswerValidator {
     return 'Kannst du genauer sagen, was ich verbessern soll?';
   }
 
-  private shouldReplaceWithSafeFallback(validation: ValidationResult, answer: string): boolean {
-    if (validation.isComplete || validation.confidence >= 0.4) {
-      return false;
-    }
+  /**
+   * Detect answers that claim external actions (email sent, ticket created)
+   * without matching tool evidence.
+   */
+  private hasUnbackedExternalClaim(answer: string): boolean {
+    const text = answer.toLowerCase();
 
-    const issuesText = validation.issues.join(' ').toLowerCase();
-    const answerText = answer.toLowerCase();
-
-    const mentionsHallucination = /(halluz|halluc|falsch|faelsch|erfind|behauptet|invented)/.test(issuesText);
-    if (!mentionsHallucination) {
-      return false;
-    }
-
-    // Focus on side-effect claims where false positives are costly for users.
-    const claimsExternalAction = /(e-?mail|email|gesendet|zugestellt|ticket|erstellt|verschoben|notification|benachrichtigung|scheduler)/.test(answerText);
+    const claimsExternalAction = /(e-?mail|email|gesendet|zugestellt|ticket|erstellt|verschoben|notification|benachrichtigung|scheduler)/.test(text);
     if (!claimsExternalAction) {
       return false;
     }
 
-    return !this.hasMatchingActionEvidence(answerText);
+    return !this.hasMatchingActionEvidence(text);
   }
 
   private hasMatchingActionEvidence(answerText: string): boolean {
@@ -258,15 +214,9 @@ export class AnswerValidator {
     return extracted.length > 0 && extracted.length <= 220;
   }
 
-  private extractAssumptionsFromAnswer(answer: string, validation?: ValidationResult): string[] {
+  private extractAssumptionsFromAnswer(answer: string): string[] {
     const assumptions = new Set<string>();
     const text = answer.toLowerCase();
-
-    if (validation) {
-      for (const issue of validation.issues.slice(0, 3)) {
-        if (issue.trim().length > 0) assumptions.add(issue.trim());
-      }
-    }
 
     if (/(vorausgesetzt|assuming|assume|falls|if )/.test(text)) {
       assumptions.add('Antwort enthaelt bedingte Annahmen.');

@@ -460,13 +460,6 @@ export interface LoopDelegationResult {
 // CHAPO LOOP TYPES
 // ============================================
 
-export interface ValidationResult {
-  isComplete: boolean;
-  confidence: number;
-  issues: string[];
-  suggestion?: string;
-}
-
 export interface ChapoLoopResult {
   answer: string;
   status: 'completed' | 'waiting_for_user' | 'error';

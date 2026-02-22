@@ -115,7 +115,6 @@ export async function processRequest(
   try {
     const loopProjectRoot = projectRoot || getProjectRootFromState(sessionId);
     const loop = new ChapoLoop(sessionId, sendEvent, loopProjectRoot, modelSelection, {
-      selfValidationEnabled: taskComplexity !== 'trivial',
       maxIterations: taskComplexity === 'trivial' ? 8 : 20,
     });
     const loopResult = await loop.run(userMessage, history);

@@ -84,9 +84,6 @@ export interface Config {
   looperMaxIterations: number;
   looperMaxConversationTokens: number;
   looperMaxToolRetries: number;
-  looperMinValidationConfidence: number;
-  looperSelfValidationEnabled: boolean;
-
   // Memory retrieval tuning
   memoryRetrievalThresholds: number[];
   memoryMinHitsBeforeStop: number;
@@ -164,8 +161,6 @@ export function loadConfig(): Config {
     looperMaxIterations: parseInt(process.env.LOOPER_MAX_ITERATIONS || "25", 10),
     looperMaxConversationTokens: parseInt(process.env.LOOPER_MAX_CONVERSATION_TOKENS || "180000", 10),
     looperMaxToolRetries: parseInt(process.env.LOOPER_MAX_TOOL_RETRIES || "3", 10),
-    looperMinValidationConfidence: parseFloat(process.env.LOOPER_MIN_VALIDATION_CONFIDENCE || "0.7"),
-    looperSelfValidationEnabled: process.env.LOOPER_SELF_VALIDATION !== "false",
     memoryRetrievalThresholds: parseNumberList(
       process.env.MEMORY_RETRIEVAL_THRESHOLDS,
       [0.5, 0.35, 0.2],

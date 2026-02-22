@@ -2,7 +2,7 @@
  * ChapoLoop — CHAPO Decision Loop
  *
  * A continuous loop where the LLM's tool_calls ARE the decisions:
- *   - No tool_calls = ANSWER → self-validate → respond → exit
+ *   - No tool_calls = ANSWER → normalize → respond → exit
  *   - askUser = ASK → pause loop → wait for user reply
  *   - delegateToDevo = DELEGATE → run DEVO sub-loop → feed result back
  *   - delegateToCaio = DELEGATE → run CAIO sub-loop → feed result back
@@ -14,7 +14,6 @@
  */
 
 import { AgentErrorHandler } from './error-handler.js';
-import { SelfValidator } from './self-validation.js';
 import { AnswerValidator, type DecisionPathInsights } from './answer-validator.js';
 import { ConversationManager } from './conversation-manager.js';
 import { llmRouter } from '../llm/router.js';
@@ -46,7 +45,6 @@ import type { QueueQuestionOptions } from './chapo-loop/gateManager.js';
 export type SendEventFn = (event: AgentStreamEvent) => void;
 
 interface ChapoLoopConfig {
-  selfValidationEnabled: boolean;
   maxIterations: number;
 }
 
@@ -70,11 +68,7 @@ export class ChapoLoop {
     this.errorHandler = new AgentErrorHandler(3);
     this.conversation = new ConversationManager(180_000);
     this.sessionLogger = SessionLogger.getActive(sessionId);
-    this.answerValidator = new AnswerValidator(
-      new SelfValidator(modelSelection.provider as LLMProvider),
-      { selfValidationEnabled: config.selfValidationEnabled },
-      this.sessionLogger,
-    );
+    this.answerValidator = new AnswerValidator(this.sessionLogger);
     this.contextManager = new ChapoLoopContextManager(this.sessionId, this.sendEvent, this.conversation);
     this.gateManager = new ChapoLoopGateManager(this.sessionId, this.sendEvent);
   }
@@ -289,7 +283,7 @@ Du bist CHAPO im Decision Loop. Fuehre Aufgaben DIREKT aus:
             { kind: 'clarification', turnId: this.getActiveTurnId() || undefined },
           );
         }
-        return this.answerValidator.validateAndNormalize(userText, answer, this.iteration, this.emitDecisionPath.bind(this), this.errorHandler);
+        return this.answerValidator.validateAndNormalize(userText, answer, this.iteration, this.emitDecisionPath.bind(this));
       }
 
       // Add assistant message with tool calls to conversation
