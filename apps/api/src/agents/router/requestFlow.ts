@@ -7,6 +7,7 @@ import { warmSystemContextForSession } from '../systemContext.js';
 import { resolveModelSelection } from '../../llm/modelSelector.js';
 import { getAgent } from './agentAccess.js';
 import { ChapoLoop } from '../chapo-loop.js';
+import { runIntakeSeed } from '../../services/intakeSeed.js';
 import type {
   AgentName,
   UserResponse,
@@ -98,6 +99,14 @@ export async function processRequest(
   stateManager.setGatheredInfo(sessionId, 'modelSelection', modelSelection);
   const trustMode = await getTrustMode();
   stateManager.setGatheredInfo(sessionId, 'trustMode', trustMode);
+
+  // Intake Seed: extract discrete requests as initial todos
+  const textContent = getTextContent(userMessage);
+  const initialTodos = await runIntakeSeed(textContent);
+  if (initialTodos.length > 0) {
+    state.todos = initialTodos;
+    sendEvent({ type: 'todo_updated', todos: initialTodos });
+  }
 
   try {
     const loopProjectRoot = projectRoot || getProjectRootFromState(sessionId);

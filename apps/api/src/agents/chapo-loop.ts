@@ -58,6 +58,7 @@ export class ChapoLoop {
   private iteration = 0;
   private contextManager: ChapoLoopContextManager;
   private gateManager: ChapoLoopGateManager;
+  private exitGateBounces = 0;
 
   constructor(
     private sessionId: string,
@@ -265,12 +266,29 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       // No tool calls → ACTION: ANSWER
       if (!response.toolCalls || response.toolCalls.length === 0) {
         // Check inbox before finalizing — catch late-arriving messages
-        const hasNew = this.contextManager.checkInbox();
+        const hasNew = await this.contextManager.checkInbox();
         if (hasNew) {
           // Save current answer as intermediate response, continue loop
           this.conversation.addMessage({
             role: 'assistant',
             content: response.content || '',
+          });
+          continue;
+        }
+
+        // EXIT GATE: check for unresolved todos before allowing answer
+        const state = stateManager.getOrCreateState(this.sessionId);
+        const pendingTodos = state.todos.filter((t) => t.status === 'pending');
+        if (pendingTodos.length > 0 && this.exitGateBounces < 2) {
+          this.exitGateBounces++;
+          const pendingList = pendingTodos.map((t) => `- [ ] ${t.content}`).join('\n');
+          this.conversation.addMessage({
+            role: 'assistant',
+            content: response.content || '',
+          });
+          this.conversation.addMessage({
+            role: 'system',
+            content: `[EXIT GATE] Du hast noch offene Punkte:\n${pendingList}\nBearbeite sie oder nutze todoWrite um sie als erledigt zu markieren.`,
           });
           continue;
         }
@@ -357,7 +375,7 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       }
 
       // Check inbox for new messages between iterations
-      this.contextManager.checkInbox();
+      await this.contextManager.checkInbox();
     }
 
     // Loop exhaustion — check for unprocessed inbox messages

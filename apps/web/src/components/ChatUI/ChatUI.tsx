@@ -14,6 +14,7 @@ import { InputArea } from './InputArea';
 import { PendingActionsBar } from './PendingActionsBar';
 import { DropOverlay } from './DropOverlay';
 import { validateFile } from './uploadConstants';
+import { TodoCard } from '../TodoCard';
 
 export function ChatUI({
   projectRoot,
@@ -42,6 +43,7 @@ export function ChatUI({
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const [messageToolEvents, setMessageToolEvents] = useState<Record<string, ToolEvent[]>>({});
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set());
+  const [currentTodos, setCurrentTodos] = useState<Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }>>([]);
   const [retryState, setRetryState] = useState<null | {
     input: string;
     userMessage: ChatMessage;
@@ -121,6 +123,7 @@ export function ChatUI({
   useEffect(() => {
     if (!session.sessionId) return;
     setToolEvents([]);
+    setCurrentTodos([]);
 
     // Load localStorage fallback (server events will overwrite via onEventsLoaded)
     try {
@@ -294,9 +297,8 @@ export function ChatUI({
         break;
       }
       case 'todo_updated': {
-        // Todo events are informational — the frontend can render them but
-        // we keep the approach minimal for now (no separate UI component).
-        // The tool events already show the todoWrite call + result.
+        const ev = event as { todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }> };
+        setCurrentTodos(ev.todos || []);
         break;
       }
     }
@@ -595,6 +597,8 @@ export function ChatUI({
         onRestartChat={session.handleRestartChat}
         onNewChat={session.handleNewChat}
       />
+
+      {currentTodos.length > 0 && <TodoCard todos={currentTodos} />}
 
       <PendingActionsBar
         pendingActions={actions.pendingActions}

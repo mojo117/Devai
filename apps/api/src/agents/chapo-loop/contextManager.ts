@@ -1,5 +1,7 @@
 import { compactMessages } from '../../memory/compaction.js';
 import { drainInbox, offInboxMessage, onInboxMessage } from '../inbox.js';
+import { runIntakeSeed } from '../../services/intakeSeed.js';
+import * as stateManager from '../stateManager.js';
 import type { ConversationManager } from '../conversation-manager.js';
 import type { AgentStreamEvent, InboxMessage } from '../types.js';
 
@@ -36,7 +38,7 @@ export class ChapoLoopContextManager {
     this.originalUserMessage = userMessage;
   }
 
-  checkInbox(): boolean {
+  async checkInbox(): Promise<boolean> {
     // Always check the actual inbox to avoid missing messages queued
     // before the handler was registered.
     const messages = drainInbox(this.sessionId);
@@ -53,6 +55,14 @@ export class ChapoLoopContextManager {
         content: '[INBOX] Neue Nachricht eingetroffen. '
           + 'Pruefe deine Todo-Liste und fuege neue Punkte hinzu falls noetig.',
       });
+
+      // Seed todos from inbox messages so exit gate catches them
+      const newTodos = await runIntakeSeed(msg.content);
+      if (newTodos.length > 0) {
+        const state = stateManager.getOrCreateState(this.sessionId);
+        state.todos = [...state.todos, ...newTodos];
+        this.sendEvent({ type: 'todo_updated', todos: state.todos });
+      }
     }
 
     this.sendEvent({ type: 'inbox_processing', count: messages.length });
