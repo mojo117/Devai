@@ -51,25 +51,15 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-function formatDateStamp(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
 function getWorkspaceFileSpecs(mode: WorkspaceLoadMode): WorkspaceFileSpec[] {
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-
   const specs: WorkspaceFileSpec[] = [
     { role: 'AGENTS', relativePath: 'AGENTS.md', required: true },
     { role: 'SOUL', relativePath: 'SOUL.md', required: true },
     { role: 'USER', relativePath: 'USER.md', required: true },
-    { role: 'Memory Today', relativePath: `memory/${formatDateStamp(today)}.md`, required: false },
-    { role: 'Memory Yesterday', relativePath: `memory/${formatDateStamp(yesterday)}.md`, required: false },
   ];
 
   if (mode === 'main') {
-    specs.push({ role: 'Long-Term Memory', relativePath: 'MEMORY.md', required: false });
+    specs.push({ role: 'Structured Memory', relativePath: 'memory.md', required: false });
   }
 
   return specs;
