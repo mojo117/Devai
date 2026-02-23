@@ -29,6 +29,13 @@ Regeln:
 - Jede Erkenntnis muss ohne Kontext verständlich sein (eigenständig formuliert)
 - Gib NUR das JSON-Array zurück, keine Erklärungen
 
+Extrahiere NICHT:
+- Fehlgeschlagene Operationen ohne bleibenden Wert ("file not found", Tool-Fehler, Syntax-Errors)
+- Reine Statusmeldungen ("task created", "commit pushed", "deployed") — das ist Git-History
+- Identitätsaussagen ("Ich bin Chapo", "Mein Name ist...") — das lebt in SOUL.md
+- Duplikate von Systemprompt-Inhalten (Team-Rollen, Tool-Listen, Agent-Definitionen)
+- Temporäre Debug-Informationen, Log-Ausgaben oder Stack-Traces
+
 Wenn es keine extrahierbaren Learnings gibt, gib ein leeres Array zurück: []`;
 
 // ---------------------------------------------------------------------------
