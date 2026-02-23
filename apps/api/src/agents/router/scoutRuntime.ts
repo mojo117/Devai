@@ -4,8 +4,8 @@ import { executeToolWithApprovalBridge } from '../../actions/approvalBridge.js';
 import { getCombinedSystemContextBlock } from '../systemContext.js';
 import { getToolsForLLM } from '../../tools/registry.js';
 import type { ScoutResult, ScoutScope } from '../types.js';
+import { buildToolResultContent } from '../utils.js';
 import { getAgent, getToolsForAgent } from './agentAccess.js';
-import { buildToolResultContent } from './requestUtils.js';
 import type { SendEventFn } from './shared.js';
 
 /**

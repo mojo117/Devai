@@ -55,7 +55,9 @@ async function parsePdf(buffer: Buffer): Promise<ParseResult> {
     await parser.load();
     const result = await parser.getText();
     const text = stripNullBytes(result.text || '');
-    if (!text.trim()) {
+    // Strip pdf-parse page markers (e.g. "-- 1 of 3 --") to detect scanned/empty PDFs
+    const meaningful = text.replace(/--\s*\d+\s+of\s+\d+\s*--/g, '').trim();
+    if (!meaningful) {
       return { content: null, status: 'metadata_only' };
     }
     return { content: truncate(text), status: 'parsed' };

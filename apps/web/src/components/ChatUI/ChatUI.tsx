@@ -342,7 +342,14 @@ export function ChatUI({
         return null;
       }
 
-      setMessages((prev) => [...prev, responseMessage]);
+      setMessages((prev) => {
+        // Dedup guard: skip if a message with same ID already exists
+        if (prev.some((m) => m.id === responseMessage.id)) {
+          console.warn('[ChatUI] Dedup: skipping duplicate response', responseMessage.id);
+          return prev;
+        }
+        return [...prev, responseMessage];
+      });
       return { message: responseMessage, sessionId: response.sessionId };
     };
 

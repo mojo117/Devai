@@ -17,18 +17,31 @@ const HARDCODED_ALLOWED_ROOTS: readonly string[] = [
 // Devai must not be able to modify its own deployment
 const HARDCODED_DENIED_PATHS: readonly string[] = [
   "/root/.openclaw",  // OpenClaw config, credentials, workspace — separate system
+  "/root/.ssh",       // SSH keys
+  "/root/.gnupg",     // GPG keys
+  "/root/.aws",       // Cloud credentials
+  "/root/.config/gcloud",
+  "/root/.config/gh",
+  "/root/.git-credentials",
+  "/root/.npmrc",
   "/opt/Devai",       // Devai's own deployment — prevent self-modification
 ] as const;
 
-// Directories/files within /opt/Devai that SCOUT must NOT read (secrets, runtime data)
+// Directories/files within self-inspection root that SCOUT must NOT read (secrets, runtime data)
 const SELF_INSPECTION_EXCLUDE: readonly string[] = [
   '.env',
+  '.env.local',
+  '.env.development',
+  '.env.staging',
+  '.env.production',
+  '.env.test',
   'secrets',
   'var',
   'workspace/memory',
   '.git',
   'node_modules',
 ] as const;
+const HARD_BLOCKED_EXTENSIONS = ['.env'] as const;
 
 export interface Config {
   nodeEnv: string;
@@ -261,8 +274,8 @@ function buildTaskForgeKeyMap(): Record<string, string> {
 }
 
 function parseExtensions(value?: string): string[] {
-  if (!value) {
-    return [
+  const configured = !value
+    ? [
       ".md",
       ".txt",
       ".json",
@@ -275,16 +288,19 @@ function parseExtensions(value?: string): string[] {
       ".html",
       ".yml",
       ".yaml",
-      ".env",
       ".example",
       ".log",
-    ];
-  }
-  return value
-    .split(/[;,]/)
-    .map((ext) => ext.trim())
-    .filter(Boolean)
-    .map((ext) => (ext.startsWith(".") ? ext : `.${ext}`));
+    ]
+    : value
+      .split(/[;,]/)
+      .map((ext) => ext.trim())
+      .filter(Boolean)
+      .map((ext) => (ext.startsWith(".") ? ext : `.${ext}`));
+
+  return configured.filter((ext) => {
+    const lowered = ext.toLowerCase();
+    return !HARD_BLOCKED_EXTENSIONS.some((blocked) => lowered === blocked || lowered.startsWith(`${blocked}.`));
+  });
 }
 
 function parseNumberList(

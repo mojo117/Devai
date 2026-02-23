@@ -277,7 +277,7 @@ async function delegateToScout(
 }
 
 export function resolveDelegationTarget(toolName: string): ParallelDelegation['target'] | null {
-  if (toolName === 'delegateToKoda' || toolName === 'delegateToDevo') return 'devo';
+  if (toolName === 'delegateToDevo') return 'devo';
   if (toolName === 'delegateToCaio') return 'caio';
   if (toolName === 'delegateToScout') return 'scout';
   return null;

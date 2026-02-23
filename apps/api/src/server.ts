@@ -67,6 +67,9 @@ const app = Fastify({
     level: config.nodeEnv === 'development' ? 'info' : 'warn',
   },
 });
+let mcpInitPromise: Promise<void> | undefined;
+type RegisterPlugin = Parameters<typeof app.register>[0];
+type RegisterPluginOpts = Parameters<typeof app.register>[1];
 
 const corsOrigins = [
   'http://localhost:5173',
@@ -85,9 +88,9 @@ await app.register(cors, {
 });
 
 // Security headers (CSP handled by Caddy + frontend meta tag)
-await app.register(helmet as any, {
+await app.register(helmet as unknown as RegisterPlugin, {
   contentSecurityPolicy: false,
-});
+} as RegisterPluginOpts);
 
 // Global rate limiting (per IP)
 await app.register(rateLimit, {
@@ -100,10 +103,12 @@ await app.register(rateLimit, {
 await app.register(fastifyWebsocket);
 
 // Register multipart support for file uploads (10MB limit)
-await app.register(multipart as any, { limits: { fileSize: 10 * 1024 * 1024 } });
+await app.register(multipart as unknown as RegisterPlugin, {
+  limits: { fileSize: 10 * 1024 * 1024 },
+} as RegisterPluginOpts);
 
 // Register cookie parsing (needed for httpOnly auth cookies)
-await app.register(cookie as any);
+await app.register(cookie as unknown as RegisterPlugin);
 
 // Global error handler — sanitize unexpected errors
 app.setErrorHandler((error: { statusCode?: number; message: string }, _request, reply) => {
@@ -177,7 +182,7 @@ const start = async () => {
 
     // Initialize MCP servers asynchronously so the API starts quickly even if MCP servers are slow.
     // This avoids long startup delays (e.g. Serena scanning large project trees).
-    const mcpInitPromise = (async () => {
+    mcpInitPromise = (async () => {
       try {
         await mcpManager.initialize();
         const mcpTools = mcpManager.getToolDefinitions();
@@ -189,10 +194,6 @@ const start = async () => {
         app.log.error({ err }, 'Failed to initialize MCP (continuing without MCP tools)');
       }
     })();
-
-    // Ensure shutdown waits for init to settle before trying to tear down MCP.
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    (app as any).mcpInitPromise = mcpInitPromise;
 
     const sendSchedulerNotification = async (message: string, targetChannel?: string | null) => {
       let chatId = targetChannel ? String(targetChannel) : '';
@@ -346,7 +347,6 @@ const start = async () => {
 const shutdown = async () => {
   console.log('Shutting down...');
   schedulerService.stop();
-  const mcpInitPromise = (app as any).mcpInitPromise as Promise<void> | undefined;
   if (mcpInitPromise) {
     try { await mcpInitPromise; } catch { /* ignore */ }
   }
