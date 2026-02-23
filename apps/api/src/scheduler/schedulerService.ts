@@ -142,6 +142,18 @@ class SchedulerService {
       this.registerJob(job);
     }
 
+    // Catch missed one-shot jobs: if the scheduled time already passed (e.g. process was
+    // down at fire time), execute them now instead of silently losing them.
+    const now = Date.now();
+    for (const job of jobs) {
+      if (!job.one_shot || !job.enabled || job.status !== 'active') continue;
+      const fireTime = Date.parse(job.cron_expression);
+      if (Number.isFinite(fireTime) && fireTime <= now && !job.last_run_at) {
+        console.log(`[Scheduler] Missed one-shot job "${job.name}" (was due ${job.cron_expression}) — executing now`);
+        void this.executeJob(job.id);
+      }
+    }
+
     this.running = true;
     this.startedAt = new Date().toISOString();
     this.startRecoveryLoop();

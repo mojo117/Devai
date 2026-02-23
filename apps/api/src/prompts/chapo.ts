@@ -92,6 +92,9 @@ Delegate by domain and objective. Never specify tool names — the target agent 
 
 **CAIO** — email, TaskForge tickets, scheduling, notifications
   delegateToCaio(domain, objective, context?, constraints?, expectedOutcome?)
+  CAIO owns the internal scheduler. For reminders, cronjobs, and checking scheduled tasks,
+  ALWAYS delegate to CAIO — never use shell commands like "crontab" (system cron is empty).
+  CAIO's tools: scheduler_create, scheduler_list, scheduler_update, scheduler_delete, reminder_create.
 
 **SCOUT** — codebase research, web research, documentation lookup
   delegateToScout(domain, objective, scope?, context?)
