@@ -12,6 +12,8 @@ import { useFileHints } from './hooks/useFileHints';
 import { MessageList } from './MessageList';
 import { InputArea } from './InputArea';
 import { PendingActionsBar } from './PendingActionsBar';
+import { DropOverlay } from './DropOverlay';
+import { validateFile } from './uploadConstants';
 
 export function ChatUI({
   projectRoot,
@@ -57,6 +59,8 @@ export function ChatUI({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isFileUploading, setIsFileUploading] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragCounterRef = useRef(0);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const debug = import.meta.env.DEV && Boolean((window as any).__DEVAI_DEBUG);
@@ -471,10 +475,95 @@ export function ChatUI({
     }
   };
 
+  // --- Drag & drop file upload ---
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer.types.includes('Files')) {
+      setIsDragOver(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setIsDragOver(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = 0;
+    setIsDragOver(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+
+    setIsFileUploading(true);
+    const uploadedIds: string[] = [];
+    for (const file of files) {
+      const validationError = validateFile(file);
+      if (validationError) {
+        persistSystemMessage({
+          id: `err-${Date.now()}-${file.name}`,
+          role: 'system',
+          content: `Upload abgelehnt (${file.name}): ${validationError}`,
+          timestamp: new Date().toISOString(),
+        });
+        continue;
+      }
+      try {
+        const result = await uploadUserfile(file);
+        if (result.file?.id) {
+          uploadedIds.push(result.file.id);
+          if (onPinUserfile) {
+            onPinUserfile(result.file.id);
+          }
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Upload failed';
+        persistSystemMessage({
+          id: `err-${Date.now()}-${file.name}`,
+          role: 'system',
+          content: `Upload fehlgeschlagen (${file.name}): ${msg}`,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+    setIsFileUploading(false);
+    const count = uploadedIds.length;
+    if (count > 0) {
+      persistSystemMessage({
+        id: `upload-${Date.now()}`,
+        role: 'system',
+        content: `${count} Datei${count > 1 ? 'en' : ''} hochgeladen und als AI-Kontext gepinnt`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }, [onPinUserfile, persistSystemMessage]);
+
   // --- Render ---
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div
+      className="flex flex-col h-full overflow-hidden relative"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      <DropOverlay visible={isDragOver} />
       <MessageList
         messages={messages}
         toolEvents={toolEvents}
