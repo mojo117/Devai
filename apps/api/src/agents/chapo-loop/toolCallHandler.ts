@@ -113,8 +113,11 @@ export const caioStrategy: EvidenceStrategy<CaioEvidence> = {
     const normalized = normalizeToolOutcome(rawResult);
     return buildCaioEvidence(toolName, normalized);
   },
-  formatToolResult(evidence) {
-    return JSON.stringify(evidence);
+  formatToolResult(evidence, deps, rawResult) {
+    // Return full tool output so the LLM sees complete data (not 240-char evidence summary).
+    // Evidence is still captured in the evidence log for audit.
+    const content = deps.buildToolResultContent(rawResult);
+    return content.content;
   },
   formatToolErrorResult(evidence) {
     return JSON.stringify(evidence);
