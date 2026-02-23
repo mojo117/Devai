@@ -342,6 +342,29 @@ The current inbox system has limitations: messages are injected as system hints 
 - Intake classifier may become redundant — kept for now as cheap pre-filter
 - CAIO as inbox task manager is architecturally possible if model self-tracking proves insufficient at high volumes (uses existing delegation, no new systems)
 
+### Intake Seed
+
+Before the ChapoLoop starts, a fast model call (GLM-4.7-Flash) extracts discrete requests from the user message and creates initial TodoItems. This ensures multi-part messages are tracked structurally, not relying on CHAPO to voluntarily parse them.
+
+**Source:** `apps/api/src/services/intakeSeed.ts`
+**Called from:** `processRequest()` in `agents/router/requestFlow.ts`
+
+The intake seed also runs on inbox messages (via `contextManager.checkInbox()`), ensuring follow-up messages during an active loop are also tracked as todos.
+
+### Exit Gate
+
+Before the ChapoLoop can exit with an ANSWER, it checks `ConversationState.todos` for pending items. If any are found, a system message is injected and the loop continues. Max 2 bounces to prevent infinite loops.
+
+**Source:** `apps/api/src/agents/chapo-loop.ts` (ANSWER path)
+
+### Heartbeat Loop
+
+Every 120 minutes during active hours (07:00-21:00 Europe/Berlin), a heartbeat job triggers a CHAPO loop that checks chat history, API logs, and memory for unhandled issues. Results are persisted in the `heartbeat_runs` Supabase table.
+
+**Source:** `apps/api/src/services/heartbeatService.ts`
+**Scheduled by:** `schedulerService.registerInternalJob()` in `server.ts`
+**DB table:** `heartbeat_runs` (status, findings, actions_taken, duration_ms)
+
 ### ChapoLoopResult
 
 ```typescript
