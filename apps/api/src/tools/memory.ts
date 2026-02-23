@@ -3,9 +3,6 @@ import {
   searchWorkspaceMemory,
   readDailyMemory,
 } from '../memory/workspaceMemory.js';
-import { generateEmbedding } from '../memory/embeddings.js';
-import { insertMemory } from '../memory/memoryStore.js';
-import { renderMemoryMd } from '../memory/renderMemoryMd.js';
 
 export async function memoryRemember(
   content: string,
@@ -18,24 +15,6 @@ export async function memoryRemember(
     sessionId: options?.sessionId,
     source: options?.source || 'tool.memory_remember',
   });
-
-  // Also store in Supabase for structured memory.md rendering
-  try {
-    const embedding = await generateEmbedding(content);
-    await insertMemory({
-      content,
-      embedding,
-      memory_type: 'semantic',
-      namespace: 'devai/user',
-      priority: 'high',
-      source: 'user_stated',
-      session_id: options?.sessionId,
-    });
-    // Re-render memory.md immediately with the new entry
-    await renderMemoryMd();
-  } catch (err) {
-    console.error('[memoryRemember] DB storage failed (workspace file saved):', err);
-  }
 
   return {
     saved: true,

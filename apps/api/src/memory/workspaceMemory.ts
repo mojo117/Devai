@@ -1,6 +1,8 @@
 import { access, appendFile, mkdir, readFile, readdir } from 'fs/promises';
 import { resolve, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { generateEmbedding } from './embeddings.js';
+import { insertMemory } from './memoryStore.js';
 import { renderMemoryMd } from './renderMemoryMd.js';
 
 export interface MemoryAppendResult {
@@ -129,6 +131,22 @@ export async function rememberNote(
   daily: MemoryAppendResult;
 }> {
   const daily = await appendDailyMemoryEntry(content, options);
+
+  // Store in Supabase for structured memory.md rendering
+  try {
+    const embedding = await generateEmbedding(content);
+    await insertMemory({
+      content,
+      embedding,
+      memory_type: 'semantic',
+      namespace: 'devai/user',
+      priority: 'high',
+      source: 'user_stated',
+      session_id: options.sessionId,
+    });
+  } catch (err) {
+    console.error('[rememberNote] DB storage failed (workspace file saved):', err);
+  }
 
   // Fire-and-forget: regenerate memory.md from DB
   renderMemoryMd(options.workspaceRoot ?? undefined).catch((err) =>

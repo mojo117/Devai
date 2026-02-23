@@ -3,6 +3,7 @@ import { loadWorkspaceMdContext, formatWorkspaceMdBlock, type WorkspaceLoadMode 
 import { getSetting } from '../db/queries.js';
 import { MEMORY_BEHAVIOR_BLOCK } from '../prompts/context.js';
 import { getSchedulerErrors } from '../scheduler/schedulerService.js';
+import { retrieveRelevantMemories } from '../memory/service.js';
 import { config } from '../config.js';
 
 const GLOBAL_CONTEXT_MAX_CHARS = 4000;
@@ -129,6 +130,26 @@ export async function getWorkspaceMdBlockForSession(sessionId: string): Promise<
   }
 }
 
+export async function warmMemoryRetrievalForSession(
+  sessionId: string,
+  userQuery: string,
+): Promise<void> {
+  try {
+    const memories = await retrieveRelevantMemories(userQuery);
+    if (memories.length === 0) {
+      stateManager.setGatheredInfo(sessionId, 'memoryRetrievalBlock', '');
+      return;
+    }
+    const lines = memories
+      .slice(0, 5)
+      .map((m) => `- [${m.namespace}] ${m.content}`);
+    const block = `## Relevant Memories (vector search)\n${lines.join('\n')}`;
+    stateManager.setGatheredInfo(sessionId, 'memoryRetrievalBlock', block);
+  } catch {
+    stateManager.setGatheredInfo(sessionId, 'memoryRetrievalBlock', '');
+  }
+}
+
 export async function refreshGlobalContextBlockForSession(sessionId: string): Promise<string> {
   const raw = await getSetting('globalContext');
   const parsed = parseGlobalContextSetting(raw);
@@ -193,6 +214,16 @@ function buildContextBlocks(sessionId: string): ContextBlock[] {
         sensitivity: 'medium',
       },
       content: asNonEmptyString(info.workspaceMdBlock) || '',
+    },
+    {
+      meta: {
+        kind: 'memory_retrieval',
+        source: 'memory.vectorSearch',
+        priority: 'medium',
+        freshness: 'dynamic',
+        sensitivity: 'low',
+      },
+      content: asNonEmptyString(info.memoryRetrievalBlock) || '',
     },
     {
       meta: {

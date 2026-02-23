@@ -17,7 +17,7 @@ import { AgentErrorHandler } from './error-handler.js';
 import { AnswerValidator, type DecisionPathInsights } from './answer-validator.js';
 import { ConversationManager } from './conversation-manager.js';
 import { llmRouter } from '../llm/router.js';
-import { getCombinedSystemContextBlock, warmSystemContextForSession } from './systemContext.js';
+import { getCombinedSystemContextBlock, warmSystemContextForSession, warmMemoryRetrievalForSession } from './systemContext.js';
 import { SessionLogger } from '../audit/sessionLogger.js';
 import { getAgent, getToolsForAgent } from './router.js';
 import { getToolsForLLM } from '../tools/registry.js';
@@ -155,8 +155,9 @@ export class ChapoLoop {
     stateManager.ensureActiveTurnId(this.sessionId);
     this.contextManager.setPinnedRequest(userText);
 
-    // 1. Warm system context
+    // 1. Warm system context + query-relevant memories
     await warmSystemContextForSession(this.sessionId, this.projectRoot);
+    await warmMemoryRetrievalForSession(this.sessionId, userText);
     const systemContextBlock = getCombinedSystemContextBlock(this.sessionId);
 
     // 2. Set system prompt on conversation manager
