@@ -192,7 +192,7 @@ export async function tagCurrentWork(
     const userContent = buildTagInput(context);
 
     const response = await llmRouter.generateWithFallback(provider, {
-      model: 'glm-4.7-flash',
+      model: 'glm-4.7',
       systemPrompt,
       messages: [
         {

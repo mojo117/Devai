@@ -1,7 +1,7 @@
 import type { TodoItem } from '../agents/types.js'
 import type { LLMProvider } from '../llm/types.js'
 
-const INTAKE_MODEL = 'glm-4.7-flash'
+const INTAKE_MODEL = 'glm-4.7'
 const INTAKE_PROVIDER: LLMProvider = 'zai'
 
 export function buildIntakeSeedPrompt(userMessage: string): string {
@@ -13,7 +13,7 @@ export function buildIntakeSeedPrompt(userMessage: string): string {
     + '- Single requests produce a single item\n'
     + '- No interpretation, no sub-tasks, no elaboration\n'
     + '- Greetings or smalltalk produce an empty array []\n'
-    + '- Return ONLY the JSON array, nothing else\n\n'
+    + '- Return ONLY the JSON array, compact, no extra whitespace\n\n'
     + `User message: "${userMessage}"`
   )
 }
@@ -29,7 +29,18 @@ export function parseIntakeSeedResponse(raw: string): TodoItem[] {
   try {
     parsed = JSON.parse(cleaned)
   } catch {
-    return []
+    // Try to salvage truncated JSON — close any open braces/brackets
+    const salvaged = cleaned
+      .replace(/,\s*$/, '')          // trailing comma
+      .replace(/"[^"]*$/, '"')       // unclosed string
+      .replace(/\{[^}]*$/, '')       // remove last incomplete object
+      .replace(/,\s*$/, '')          // trailing comma after removal
+      + ']'
+    try {
+      parsed = JSON.parse(salvaged)
+    } catch {
+      return []
+    }
   }
 
   if (!Array.isArray(parsed)) return []
@@ -58,10 +69,14 @@ export async function runIntakeSeed(
       model: INTAKE_MODEL,
       messages: [{ role: 'user', content: buildIntakeSeedPrompt(userMessage) }],
       toolsEnabled: false,
-      maxTokens: 500,
+      maxTokens: 1024,
     })
 
-    return parseIntakeSeedResponse(response.content)
+    const todos = parseIntakeSeedResponse(response.content)
+    if (todos.length > 0) {
+      console.info('[intakeSeed] extracted', todos.length, 'todos:', todos.map(t => t.content))
+    }
+    return todos
   } catch (err) {
     console.warn('[intakeSeed] Failed, skipping seed:', err instanceof Error ? err.message : err)
     return []

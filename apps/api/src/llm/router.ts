@@ -94,31 +94,49 @@ export class LLMRouter {
     maxRetries: number = 2
   ): Promise<GenerateResponse> {
     let lastError: Error | undefined;
+    // 429 rate limits get extra retries with longer backoff
+    const isRateLimit = (msg: string): boolean => msg.includes('429') || msg.toLowerCase().includes('rate limit');
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         return await this.generate(providerName, request);
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
+        const errorMsg = lastError.message;
 
-        // Don't retry on client errors (4xx) - these won't succeed on retry
-        const errorMsg = lastError.message.toLowerCase();
-        if (errorMsg.includes('400') ||
-            errorMsg.includes('401') ||
-            errorMsg.includes('403') ||
-            errorMsg.includes('invalid') ||
-            errorMsg.includes('unauthorized')) {
+        // 429 → extend retries up to 5 with longer backoff (2s, 4s, 8s, 16s, 32s)
+        if (isRateLimit(errorMsg)) {
+          const rateMaxRetries = Math.max(maxRetries, 5);
+          if (attempt < rateMaxRetries) {
+            const backoffMs = Math.pow(2, attempt + 1) * 1000;
+            console.warn(`[llm] Rate-limited, retry ${attempt + 1}/${rateMaxRetries} for ${providerName} after ${backoffMs}ms`);
+            await sleep(backoffMs);
+            // Extend the loop bound so we keep retrying
+            maxRetries = rateMaxRetries;
+            continue;
+          }
+          // Exhausted rate-limit retries — fall through to throw
+          break;
+        }
+
+        // Don't retry on non-transient client errors
+        const lowerMsg = errorMsg.toLowerCase();
+        if (lowerMsg.includes('400') ||
+            lowerMsg.includes('401') ||
+            lowerMsg.includes('403') ||
+            lowerMsg.includes('invalid') ||
+            lowerMsg.includes('unauthorized')) {
           throw lastError;
         }
 
-        // Last attempt - don't wait, just throw
+        // Last attempt for non-rate-limit errors
         if (attempt === maxRetries) {
           throw lastError;
         }
 
         // Exponential backoff: 1s, 2s, 4s...
         const backoffMs = Math.pow(2, attempt) * 1000;
-        console.warn(`[llm] Retry ${attempt + 1}/${maxRetries} for ${providerName} after ${backoffMs}ms:`, lastError.message);
+        console.warn(`[llm] Retry ${attempt + 1}/${maxRetries} for ${providerName} after ${backoffMs}ms:`, errorMsg);
         await sleep(backoffMs);
       }
     }
