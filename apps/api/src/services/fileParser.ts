@@ -93,12 +93,9 @@ async function ocrPdf(buffer: Buffer): Promise<string | null> {
 
 async function parsePdf(buffer: Buffer): Promise<ParseResult> {
   try {
-    const { PDFParse } = await import('pdf-parse');
-    const uint8 = new Uint8Array(buffer);
-    const parser = new PDFParse(uint8);
-    await parser.load();
-    const result = await parser.getText();
-    const text = stripNullBytes(result.text || '');
+    const pdfParse = (await import('pdf-parse')).default
+    const result = await pdfParse(buffer)
+    const text = stripNullBytes(result.text || '')
     // Strip pdf-parse page markers (e.g. "-- 1 of 3 --") to detect scanned/empty PDFs
     const meaningful = text.replace(/--\s*\d+\s+of\s+\d+\s*--/g, '').trim();
     if (!meaningful) {

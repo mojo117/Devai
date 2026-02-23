@@ -69,19 +69,24 @@ async function parseNDJSONStream<T>(
   return finalResponse;
 }
 
+interface ApiErrorResponse {
+  error?: string
+  details?: string | unknown[]
+}
+
 async function readApiError(res: Response): Promise<string> {
-  const contentType = res.headers.get('content-type') || '';
-  const fallback = `HTTP ${res.status} ${res.statusText || ''}`.trim();
+  const contentType = res.headers.get('content-type') || ''
+  const fallback = `HTTP ${res.status} ${res.statusText || ''}`.trim()
 
   if (contentType.includes('application/json')) {
     try {
-      const data = (await res.json()) as any;
-      const parts: string[] = [];
-      if (data?.error) parts.push(String(data.error));
-      if (data?.details) parts.push(String(data.details));
-      if (Array.isArray(data?.details)) parts.push(JSON.stringify(data.details));
-      const msg = parts.filter(Boolean).join(': ').trim();
-      return msg || fallback;
+      const data = (await res.json()) as ApiErrorResponse
+      const parts: string[] = []
+      if (data?.error) parts.push(String(data.error))
+      if (data?.details) parts.push(String(data.details))
+      if (Array.isArray(data?.details)) parts.push(JSON.stringify(data.details))
+      const msg = parts.filter(Boolean).join(': ').trim()
+      return msg || fallback
     } catch {
       // fall through
     }
@@ -201,8 +206,17 @@ export async function fetchHealth(): Promise<HealthResponse> {
 }
 
 export interface ChatStreamEvent {
-  type: string;
-  [key: string]: unknown;
+  type: string
+  [key: string]: unknown
+}
+
+interface WebSocketMessage {
+  type?: string
+  sessionId?: string
+  seq?: number
+  requestId?: string
+  response?: MultiAgentResponse
+  [key: string]: unknown
 }
 
 export async function sendMessage(
@@ -582,11 +596,11 @@ async function ensureChatWsConnected(): Promise<WebSocket> {
     };
 
     ws.onmessage = (event) => {
-      let msg: any;
+      let msg: WebSocketMessage
       try {
-        msg = JSON.parse(event.data);
+        msg = JSON.parse(event.data) as WebSocketMessage
       } catch {
-        return;
+        return
       }
 
       // Action events are global and do not include sessionId/seq.

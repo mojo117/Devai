@@ -1,15 +1,15 @@
-import type { FastifyPluginAsync } from 'fastify';
-import type { WebSocket } from 'ws';
-import { nanoid } from 'nanoid';
-import { registerClient as registerActionClient, unregisterClient as unregisterActionClient, getConnectionStats } from './actionBroadcaster.js';
+import type { FastifyPluginAsync } from 'fastify'
+import type { WebSocket } from 'ws'
+import { nanoid } from 'nanoid'
+import { registerClient as registerActionClient, unregisterClient as unregisterActionClient, getConnectionStats } from './actionBroadcaster.js'
 import {
   registerChatClient, unregisterChatClient,
   getEventsSince, getCurrentSeq, getChatGatewayStats
-} from './chatGateway.js';
-import { getPendingActions } from '../actions/manager.js';
-import { verifyToken } from '../routes/auth.js';
-import { ensureStateLoaded, getState } from '../agents/stateManager.js';
-import { commandDispatcher, mapWsMessageToCommand } from '../workflow/commands/dispatcher.js';
+} from './chatGateway.js'
+import { getPendingActions } from '../actions/manager.js'
+import { verifyToken } from '../services/authService.js'
+import { ensureStateLoaded, getState } from '../agents/stateManager.js'
+import { commandDispatcher, mapWsMessageToCommand } from '../workflow/commands/dispatcher.js'
 
 const WS_RATE_LIMIT_MAX_MESSAGES = 120;
 const WS_RATE_LIMIT_WINDOW_MS = 60_000;

@@ -160,5 +160,43 @@ export async function uploadUserfileFromBuffer(
       uploadedAt: row.uploaded_at,
       expiresAt: row.expires_at,
     },
-  };
+  }
+}
+
+export interface DownloadResult {
+  buffer: Buffer
+  filename: string
+  mimeType: string
+}
+
+export async function downloadUserfile(storagePath: string): Promise<DownloadResult | null> {
+  const { data, error } = await getSupabase()
+    .storage
+    .from(STORAGE_BUCKET)
+    .download(storagePath)
+
+  if (error || !data) {
+    console.error('[userfileService] Storage download failed:', error)
+    return null
+  }
+
+  return {
+    buffer: Buffer.from(await data.arrayBuffer()),
+    filename: storagePath.split('/').pop() || 'download',
+    mimeType: 'application/octet-stream',
+  }
+}
+
+export async function deleteUserfileStorage(storagePath: string): Promise<boolean> {
+  const { error } = await getSupabase()
+    .storage
+    .from(STORAGE_BUCKET)
+    .remove([storagePath])
+
+  if (error) {
+    console.error('[userfileService] Storage delete failed:', error)
+    return false
+  }
+
+  return true
 }
