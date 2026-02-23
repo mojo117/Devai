@@ -25,6 +25,7 @@ import {
   createSession,
   ensureSessionExists,
   getMessages,
+  saveMessage,
   updateSessionTitleIfEmpty,
 } from '../../db/queries.js';
 import {
@@ -144,6 +145,13 @@ export class CommandHandlers {
         source: (command.metadata?.platform === 'telegram') ? 'telegram' : 'websocket',
       };
       pushToInbox(activeSessionId, inboxMsg);
+
+      // Persist the user message so it survives page refreshes and appears in chat history
+      const queuedUserMessage = createChatMessage('user', typeof command.message === 'string' ? command.message : '[multimodal content]');
+      saveMessage(activeSessionId, queuedUserMessage).catch((err) =>
+        console.error('[commandHandlers] Failed to persist queued message:', err),
+      );
+
       return {
         type: 'queued',
         sessionId: activeSessionId,

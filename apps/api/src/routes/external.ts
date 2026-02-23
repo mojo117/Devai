@@ -14,7 +14,7 @@ import {
 import type { WorkflowCommand } from '../workflow/commands/types.js';
 import type { TelegramUpdate } from '../external/telegram.js';
 import { isAllowedChat, sendTelegramMessage, extractTelegramMessage, downloadTelegramFile } from '../external/telegram.js';
-import { createSession } from '../db/queries.js';
+import { createSession, saveMessage } from '../db/queries.js';
 import { transcribeBuffer } from '../services/transcriptionService.js';
 import { uploadUserfileFromBuffer, isUploadError } from '../services/userfileService.js';
 import { shouldAttachPinnedContext } from '../external/pinnedContextPolicy.js';
@@ -196,6 +196,15 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
               source: 'telegram' as const,
             };
             pushToInbox(externalSession.session_id, inboxMsg);
+
+            // Persist queued message so it appears in chat history
+            saveMessage(externalSession.session_id, {
+              id: nanoid(),
+              role: 'user',
+              content: messageText,
+              timestamp: new Date().toISOString(),
+            }).catch((err) => console.error('[external] Failed to persist queued message:', err));
+
             return;
           }
 
