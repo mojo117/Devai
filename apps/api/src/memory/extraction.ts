@@ -4,6 +4,7 @@ import type { MemoryCandidate, MemoryPriority } from './types.js';
 import { generateEmbedding } from './embeddings.js';
 import { findSimilarMemories, insertMemory, supersedeMemory } from './memoryStore.js';
 import { normalizeMemoryNamespace } from './namespace.js';
+import { renderMemoryMd } from './renderMemoryMd.js';
 
 // ---------------------------------------------------------------------------
 // Extraction prompt (German) — instructs the LLM to distill learnings
@@ -216,6 +217,13 @@ export async function runExtractionPipeline(
 
   // Phase 2: Deduplicate and store
   const storeResult = await deduplicateAndStore(candidates, sessionId);
+
+  // Phase 3: Re-render memory.md from updated DB state
+  if (storeResult.added > 0 || storeResult.updated > 0) {
+    renderMemoryMd().catch((err) =>
+      console.error('[extraction] renderMemoryMd fire-and-forget failed:', err),
+    );
+  }
 
   const result: ExtractionResult = {
     ...storeResult,

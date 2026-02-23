@@ -8,6 +8,7 @@ import { llmRouter } from '../llm/router.js';
 import { isPerplexityConfigured } from '../llm/perplexity.js';
 import { runDecay } from '../memory/memoryStore.js';
 import { runRecentTopicDecay } from '../memory/recentFocus.js';
+import { renderMemoryMd } from '../memory/renderMemoryMd.js';
 import { mcpManager } from '../mcp/index.js';
 import { schedulerService } from '../scheduler/schedulerService.js';
 
@@ -150,6 +151,8 @@ export async function cleanupExpiredUserfilesJob(): Promise<string> {
 
 export async function memoryDecayJob(): Promise<string> {
   const result = await runDecay();
+  // Re-render memory.md — strength changes affect ordering/inclusion
+  await renderMemoryMd();
   return `Memory decay: ${result.decayed} decayed, ${result.pruned} pruned`;
 }
 

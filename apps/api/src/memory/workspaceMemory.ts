@@ -1,6 +1,7 @@
 import { access, appendFile, mkdir, readFile, readdir, writeFile } from 'fs/promises';
 import { resolve, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { renderMemoryMd } from './renderMemoryMd.js';
 
 export interface MemoryAppendResult {
   workspaceRoot: string;
@@ -171,6 +172,11 @@ export async function rememberNote(
   if (options.promoteToLongTerm) {
     longTerm = await appendLongTermMemoryEntry(content, { workspaceRoot: options.workspaceRoot });
   }
+
+  // Fire-and-forget: regenerate memory.md from DB
+  renderMemoryMd(options.workspaceRoot ?? undefined).catch((err) =>
+    console.error('[workspaceMemory] renderMemoryMd fire-and-forget failed:', err),
+  );
 
   return { daily, longTerm };
 }
