@@ -28,6 +28,7 @@ export function ChatUI({
   onSessionStateChange,
   pinnedUserfileIds,
   onPinUserfile,
+  onClearPinnedUserfiles,
 }: ChatUIProps) {
   // Core state shared across sub-components
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -82,6 +83,7 @@ export function ChatUI({
     setMessages,
     setToolEvents: setToolEvents as React.Dispatch<React.SetStateAction<unknown[]>>,
     onEventsLoaded: handleEventsLoaded,
+    onClearPinnedUserfiles,
   });
 
   const actions = usePendingActions({
@@ -331,7 +333,9 @@ export function ChatUI({
         session.setSessionId(response.sessionId);
         await saveSetting('lastSessionId', response.sessionId);
       }
-      await session.refreshSessions(response.sessionId);
+      // Only refresh the sidebar session list — don't reload messages.
+      // Messages are already managed by streaming events + the append below.
+      await session.refreshSessionList();
 
       const responseMessage = response.message;
       if (!responseMessage) {

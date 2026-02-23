@@ -52,4 +52,5 @@ export interface ChatUIProps {
   onSessionStateChange?: (state: ChatSessionState) => void;
   pinnedUserfileIds?: string[];
   onPinUserfile?: (id: string) => void;
+  onClearPinnedUserfiles?: () => void;
 }

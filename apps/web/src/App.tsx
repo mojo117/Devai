@@ -239,6 +239,7 @@ function App() {
             onSessionStateChange={setChatSessionState}
             pinnedUserfileIds={settings.pinnedUserfileIds}
             onPinUserfile={settings.togglePinnedUserfile}
+            onClearPinnedUserfiles={settings.clearPinnedUserfiles}
           />
         </div>
       </div>
