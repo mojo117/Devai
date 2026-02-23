@@ -3,7 +3,7 @@
  *
  * Supported:
  *  - Text files (.txt, .md, .csv): raw UTF-8
- *  - PDF: pdf-parse
+ *  - PDF: pdf-parse (text-based), Tesseract OCR (scanned)
  *  - DOCX: mammoth (extractRawText)
  *  - XLSX: xlsx (SheetJS) — each sheet as CSV-like text
  *
@@ -11,7 +11,16 @@
  *  - Images, legacy Office (.doc, .xls, .ppt), archives, email files
  */
 
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { writeFile, readdir, rm, mkdtemp } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+
+const execFileAsync = promisify(execFile);
+
 const MAX_PARSED_BYTES = 200 * 1024; // 200 KB
+const OCR_TIMEOUT_MS = 60_000; // 60s max for OCR
 
 export interface ParseResult {
   content: string | null;
@@ -47,6 +56,41 @@ async function parseText(buffer: Buffer): Promise<ParseResult> {
   return { content: truncate(stripNullBytes(raw)), status: 'parsed' };
 }
 
+async function ocrPdf(buffer: Buffer): Promise<string | null> {
+  const tempDir = await mkdtemp(join(tmpdir(), 'devai-ocr-'));
+  try {
+    const pdfPath = join(tempDir, 'input.pdf');
+    await writeFile(pdfPath, buffer);
+
+    // Convert PDF pages to PNG images (300 DPI for good OCR quality)
+    await execFileAsync('pdftoppm', ['-png', '-r', '300', pdfPath, join(tempDir, 'page')], {
+      timeout: OCR_TIMEOUT_MS,
+    });
+
+    // Find generated page images
+    const files = await readdir(tempDir);
+    const pageImages = files.filter(f => f.startsWith('page') && f.endsWith('.png')).sort();
+    if (pageImages.length === 0) return null;
+
+    // OCR each page
+    const parts: string[] = [];
+    for (const img of pageImages) {
+      const imgPath = join(tempDir, img);
+      const { stdout } = await execFileAsync('tesseract', [imgPath, 'stdout', '-l', 'deu+eng'], {
+        timeout: OCR_TIMEOUT_MS,
+      });
+      if (stdout.trim()) parts.push(stdout.trim());
+    }
+
+    return parts.join('\n\n') || null;
+  } catch (err) {
+    console.error('[fileParser] OCR failed:', err instanceof Error ? err.message : err);
+    return null;
+  } finally {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 async function parsePdf(buffer: Buffer): Promise<ParseResult> {
   try {
     const { PDFParse } = await import('pdf-parse');
@@ -58,6 +102,11 @@ async function parsePdf(buffer: Buffer): Promise<ParseResult> {
     // Strip pdf-parse page markers (e.g. "-- 1 of 3 --") to detect scanned/empty PDFs
     const meaningful = text.replace(/--\s*\d+\s+of\s+\d+\s*--/g, '').trim();
     if (!meaningful) {
+      // Scanned PDF — try OCR
+      const ocrText = await ocrPdf(buffer);
+      if (ocrText?.trim()) {
+        return { content: truncate(stripNullBytes(ocrText)), status: 'parsed' };
+      }
       return { content: null, status: 'metadata_only' };
     }
     return { content: truncate(text), status: 'parsed' };
