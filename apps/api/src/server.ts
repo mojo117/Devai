@@ -40,6 +40,7 @@ import {
   memoryDecayJob,
   recentTopicDecayJob,
 } from './services/systemReliability.js';
+import { configureHeartbeat, runHeartbeat } from './services/heartbeatService.js';
 
 const envValidation = validateRequiredEnv(config);
 if (!envValidation.ok) {
@@ -292,6 +293,30 @@ const start = async () => {
       return `Health status: ${snapshot.status}`;
     };
 
+    // Configure heartbeat executor to run through the agent system
+    configureHeartbeat(async (sessionId, instruction) => {
+      await ensureSessionExists(sessionId, 'Heartbeat');
+      const history = await loadRecentConversationHistory(sessionId);
+
+      await saveMessage(sessionId, {
+        id: nanoid(),
+        role: 'user',
+        content: instruction,
+        timestamp: new Date().toISOString(),
+      });
+
+      const result = await processRequest(sessionId, instruction, history, null, () => {});
+
+      await saveMessage(sessionId, {
+        id: nanoid(),
+        role: 'assistant',
+        content: result,
+        timestamp: new Date().toISOString(),
+      });
+
+      return result;
+    });
+
     // Internal maintenance jobs run through scheduler framework (cron + retry + telemetry).
     schedulerService.registerInternalJob({
       id: 'maintenance-userfile-cleanup',
@@ -336,6 +361,15 @@ const start = async () => {
       run: runHealthWatchdog,
       runOnStart: true,
       notifyOnFailure: false,
+    });
+
+    schedulerService.registerInternalJob({
+      id: 'heartbeat-check',
+      name: 'Heartbeat: Autonomy Check',
+      cronExpression: '0 */2 * * *',
+      run: runHeartbeat,
+      runOnStart: false,
+      notifyOnFailure: true,
     });
   } catch (err) {
     app.log.error(err);
