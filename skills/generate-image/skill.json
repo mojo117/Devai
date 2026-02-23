@@ -1,0 +1,40 @@
+{
+  "id": "generate-image",
+  "name": "Generate Image",
+  "description": "Generate images using OpenAI DALL-E API. Creates images from text prompts with configurable model, size, and quality settings.",
+  "version": "1.0.0",
+  "parameters": {
+    "prompt": {
+      "type": "string",
+      "description": "Text description of the image to generate",
+      "required": true
+    },
+    "model": {
+      "type": "string",
+      "description": "OpenAI DALL-E model to use (default: dall-e-3)",
+      "default": "dall-e-3"
+    },
+    "size": {
+      "type": "string",
+      "description": "Image size (default: 1024x1024). Options: 256x256, 512x512, 1024x1024, 1792x1024, 1024x1792",
+      "default": "1024x1024"
+    },
+    "quality": {
+      "type": "string",
+      "description": "Image quality (default: standard). Options: standard, hd",
+      "default": "standard"
+    },
+    "style": {
+      "type": "string",
+      "description": "Image style (default: vivid). Options: vivid, natural",
+      "default": "vivid"
+    }
+  },
+  "createdBy": "devo",
+  "tags": [
+    "image",
+    "openai",
+    "generation",
+    "ai"
+  ]
+}

@@ -389,10 +389,11 @@ export interface AgentHistoryEntry {
 }
 
 export interface MultiAgentResponse {
-  message: ChatMessage;
+  message?: ChatMessage;
   pendingActions: Action[];
   sessionId?: string;
   agentHistory?: AgentHistoryEntry[];
+  queued?: boolean;
 }
 
 export type WorkspaceChatMode = 'main' | 'shared';

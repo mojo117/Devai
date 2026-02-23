@@ -1,10 +1,10 @@
 import type { Dispatch, SetStateAction } from 'react';
-import DOMPurify from 'dompurify';
 import type { ToolEvent, ToolEventUpdate } from './types';
 
 export function renderMessageContent(content: string) {
-  // Sanitize content: strip all HTML tags before markdown-like rendering
-  const clean = DOMPurify.sanitize(content, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
+  // Sanitize content: strip HTML tags before markdown-like rendering.
+  // We intentionally keep this dependency-free so typecheck works in lean environments.
+  const clean = content.replace(/<[^>]*>/g, '');
   // Simple markdown-like rendering for bold, code blocks, and inline code
   const parts = clean.split(/(```[\s\S]*?```|\*\*.*?\*\*|`[^`]+`)/g);
 

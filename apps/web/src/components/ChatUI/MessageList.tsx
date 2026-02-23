@@ -2,16 +2,8 @@ import { Fragment, useState, type RefObject } from 'react';
 import type { ChatMessage, SessionSummary } from '../../types';
 import type { ToolEvent } from './types';
 import { mergeConsecutiveThinking } from './mergeEvents';
-import type { MergedToolEvent } from './mergeEvents';
 import { renderMessageContent } from './utils';
 import { getUserfileDownloadUrl } from '../../api';
-
-const AGENT_COLORS: Record<string, string> = {
-  chapo: 'text-cyan-400',
-  devo: 'text-orange-400',
-  caio: 'text-blue-400',
-  scout: 'text-purple-400',
-};
 
 const AGENT_DOT_COLORS: Record<string, string> = {
   chapo: 'bg-cyan-400',

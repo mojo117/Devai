@@ -45,6 +45,20 @@ Klyde (source) --[Mutagen sync]--> Baso (runtime) --[Infrit proxy]--> https://de
 
 See `docs/DEPLOYMENT.md` for full architecture documentation.
 
+## Reliability and Autonomy
+
+DevAI now includes:
+- dependency-aware health endpoint (`/api/health`) with degraded/503 signaling
+- scheduler execution telemetry (`scheduler_execution_logs`)
+- internal maintenance jobs (cleanup, memory decay, local DB backups, health watchdog)
+- operational helper scripts in `scripts/`:
+  - `deploy-env.sh`
+  - `pm2-supervise.sh`
+  - `backup-local-db.sh`
+
+Operational runbook:
+- `docs/runbooks/workflow-events-and-logs.md`
+
 ## Secrets Management
 
 See `SECRETS.md` for the SOPS + age workflow used to store and deploy encrypted `.env` files.

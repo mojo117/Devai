@@ -152,6 +152,73 @@ This means:
 - The user selects a project root in the UI, which must be under one of these paths
 - Paths outside these roots are blocked for security
 
+## Reliability and Autonomous Operations
+
+### Health Endpoint (Machine-Actionable)
+
+`GET /api/health` now performs real dependency checks and returns:
+- `200` with `"status": "ok"` when critical dependencies are healthy
+- `503` with `"status": "degraded"` when critical checks fail
+
+Critical checks include:
+- Supabase query reachability
+- Scheduler runtime state
+- At least one configured LLM provider
+
+The payload also includes:
+- process uptime + memory usage
+- scheduler/internal job states
+- recent scheduler/watchdog failure markers
+
+### Internal Maintenance Jobs
+
+The API process now registers internal cron jobs through the scheduler framework:
+- `maintenance-userfile-cleanup` (expired storage/rows)
+- `maintenance-memory-decay` (memory decay and pruning)
+- `maintenance-local-db-backup` (daily local DB snapshots)
+- `system-health-watchdog` (periodic health snapshots + notifications)
+
+These jobs use the same retry/disable/recovery behavior and telemetry channel as DB-backed scheduled jobs.
+
+### Scheduler Telemetry
+
+Supabase table:
+- `scheduler_execution_logs`
+
+This stores `start/success/failure/disabled/recovered` records for:
+- user-created scheduled jobs
+- internal maintenance jobs
+- health watchdog checks
+
+Fallback when Supabase is unavailable:
+- `var/scheduler-events-fallback.jsonl`
+
+## Operations Scripts
+
+All scripts are in `scripts/`:
+
+### PM2 Supervision
+```bash
+scripts/pm2-supervise.sh --host root@77.42.90.193
+scripts/pm2-supervise.sh --host root@77.42.90.193 --restart-missing --tail-logs
+```
+
+### Encrypted Env Deploy + Reload
+```bash
+scripts/deploy-env.sh --host root@77.42.90.193 --target dev
+scripts/deploy-env.sh --host root@77.42.90.193 --target staging
+```
+
+### Manual Local DB Backup
+```bash
+scripts/backup-local-db.sh /opt/Klyde/projects/Devai/var/devai.db 14
+```
+
+### Runbook
+
+Detailed workflow/scheduler troubleshooting:
+- `docs/runbooks/workflow-events-and-logs.md`
+
 ## Troubleshooting
 
 ### "Error in input stream" on chat
