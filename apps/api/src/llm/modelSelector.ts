@@ -59,6 +59,22 @@ export function resolveModelSelection(agent: AgentDefinition): ModelSelection {
   throw new Error('No LLM provider configured');
 }
 
+/**
+ * Resolve the model for a delegated agent, respecting the model tier hint.
+ * 'fast' uses agent.fastModel (if defined), 'standard' uses agent.model.
+ */
+export function resolveDelegationModel(
+  agent: AgentDefinition,
+  modelTier: 'fast' | 'standard' | undefined,
+  baseProvider: LLMProviderName,
+): { provider: LLMProviderName; model: string } {
+  const model = modelTier === 'fast' && agent.fastModel
+    ? agent.fastModel
+    : agent.model;
+  const provider = detectProvider(model) || baseProvider;
+  return { provider, model };
+}
+
 function detectProvider(model: string): LLMProviderName | null {
   if (model.startsWith('glm-')) return 'zai';
   if (model.startsWith('claude-')) return 'anthropic';

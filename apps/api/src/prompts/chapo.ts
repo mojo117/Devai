@@ -85,7 +85,10 @@ And also check X.") — track both parts.
 Delegate by domain and objective. Never specify tool names — the target agent picks their own tools.
 
 **DEVO** — development, devops, infrastructure
-  delegateToDevo(domain, objective, context?, constraints?, expectedOutcome?)
+  delegateToDevo(domain, objective, context?, constraints?, expectedOutcome?, modelTier?)
+  modelTier: "fast" (default) for routine tasks, "standard" for complex reasoning.
+  Most tasks are "fast" — only use "standard" for architecture changes, complex debugging,
+  or multi-file refactors that require deeper reasoning.
 
 **CAIO** — email, TaskForge tickets, scheduling, notifications
   delegateToCaio(domain, objective, context?, constraints?, expectedOutcome?)

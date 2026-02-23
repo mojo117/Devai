@@ -42,6 +42,7 @@ export interface AgentDefinition {
   name: AgentName;
   role: AgentRole;
   model: string;
+  fastModel?: string;
   fallbackModel?: string;
   tools: string[];
   systemPrompt: string;

@@ -1,6 +1,7 @@
 import { getCombinedSystemContextBlock } from '../systemContext.js';
 import { getAgent, getToolsForAgent, spawnScout } from '../router.js';
 import { getToolsForLLM } from '../../tools/registry.js';
+import { resolveDelegationModel } from '../../llm/modelSelector.js';
 import type { AgentErrorHandler } from '../error-handler.js';
 import type { SubAgentRunner } from '../sub-agent-runner.js';
 import type {
@@ -77,7 +78,12 @@ async function delegateToSubAgent(
   }
 
   const agentDefinition = getAgent(target);
-  const provider = (deps.modelSelection.provider || 'anthropic') as LLMProvider;
+  const baseProvider = deps.modelSelection.provider || 'anthropic';
+  const { provider, model: delegationModel } = resolveDelegationModel(
+    agentDefinition,
+    delegation.modelTier,
+    baseProvider,
+  );
   const toolNames = getToolsForAgent(target);
   const tools = getToolsForLLM().filter((t) => toolNames.includes(t.name));
   const systemContextBlock = getCombinedSystemContextBlock(deps.sessionId);
@@ -114,8 +120,8 @@ Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
   const runResult = await deps.subAgentRunner.run({
     sessionId: deps.sessionId,
     agent: target,
-    provider,
-    model: agentDefinition.model,
+    provider: provider as LLMProvider,
+    model: delegationModel,
     objective: delegation.objective,
     systemPrompt,
     tools,

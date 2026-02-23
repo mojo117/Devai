@@ -171,6 +171,11 @@ export const CHAPO_META_TOOLS = [
           type: 'string',
           description: 'Erwartetes Ergebnis als Klartext.',
         },
+        modelTier: {
+          type: 'string',
+          enum: ['fast', 'standard'],
+          description: 'Model tier: "fast" (default) for routine tasks (file edits, git ops, npm commands), "standard" for complex reasoning (architecture, debugging, multi-file refactors).',
+        },
         task: {
           type: 'string',
           description: 'Legacy-Feld: wird als objective interpretiert.',
@@ -260,6 +265,11 @@ export const CHAPO_META_TOOLS = [
               expectedOutcome: {
                 type: 'string',
                 description: 'Optionales erwartetes Ergebnis.',
+              },
+              modelTier: {
+                type: 'string',
+                enum: ['fast', 'standard'],
+                description: 'Model tier fuer DEVO: "fast" (default) fuer Routineaufgaben, "standard" fuer komplexes Reasoning.',
               },
               task: {
                 type: 'string',

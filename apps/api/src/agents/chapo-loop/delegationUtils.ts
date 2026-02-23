@@ -2,6 +2,8 @@ import type { DelegationDomain, LoopDelegationStatus, ScoutScope } from '../type
 
 export type ParallelAgent = 'devo' | 'caio' | 'scout';
 
+export type ModelTierHint = 'fast' | 'standard';
+
 export interface ParallelDelegation {
   target: ParallelAgent;
   domain: DelegationDomain;
@@ -11,6 +13,7 @@ export interface ParallelDelegation {
   constraints: string[];
   expectedOutcome?: string;
   scope?: ScoutScope;
+  modelTier?: ModelTierHint;
 }
 
 function defaultDomainForAgent(target: ParallelAgent): DelegationDomain {
@@ -73,6 +76,9 @@ export function buildDelegation(target: ParallelAgent, args: Record<string, unkn
     scopeRaw === 'codebase' || scopeRaw === 'web' || scopeRaw === 'both'
       ? scopeRaw
       : undefined;
+  const modelTierRaw = readFirstString(args, ['modelTier']);
+  const modelTier: ModelTierHint | undefined =
+    modelTierRaw === 'fast' || modelTierRaw === 'standard' ? modelTierRaw : undefined;
 
   return {
     target,
@@ -83,6 +89,7 @@ export function buildDelegation(target: ParallelAgent, args: Record<string, unkn
     constraints,
     expectedOutcome,
     scope,
+    modelTier,
   };
 }
 
