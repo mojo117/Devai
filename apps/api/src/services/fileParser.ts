@@ -49,8 +49,11 @@ async function parseText(buffer: Buffer): Promise<ParseResult> {
 
 async function parsePdf(buffer: Buffer): Promise<ParseResult> {
   try {
-    const pdfParse = (await import('pdf-parse')).default;
-    const result = await pdfParse(buffer);
+    const { PDFParse } = await import('pdf-parse');
+    const uint8 = new Uint8Array(buffer);
+    const parser = new PDFParse(uint8);
+    await parser.load();
+    const result = await parser.getText();
     const text = stripNullBytes(result.text || '');
     if (!text.trim()) {
       return { content: null, status: 'metadata_only' };
