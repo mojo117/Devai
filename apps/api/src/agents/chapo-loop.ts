@@ -276,13 +276,6 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
         const answer = response.content || '';
         const userText = getTextContent(userMessage);
 
-        if (this.answerValidator.shouldConvertToAsk(userText, answer)) {
-          return this.queueQuestion(
-            this.answerValidator.extractClarificationQuestion(answer),
-            this.iteration + 1,
-            { kind: 'clarification', turnId: this.getActiveTurnId() || undefined },
-          );
-        }
         return this.answerValidator.validateAndNormalize(userText, answer, this.iteration, this.emitDecisionPath.bind(this));
       }
 
