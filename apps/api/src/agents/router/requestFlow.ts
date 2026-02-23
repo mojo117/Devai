@@ -4,10 +4,8 @@ import { getTrustMode } from '../../db/queries.js';
 import { rememberNote } from '../../memory/workspaceMemory.js';
 import * as stateManager from '../stateManager.js';
 import { warmSystemContextForSession } from '../systemContext.js';
-import {
-  classifyTaskComplexity,
-  selectModel,
-} from '../../llm/modelSelector.js';
+import { resolveModelSelection } from '../../llm/modelSelector.js';
+import { getAgent } from './agentAccess.js';
 import { ChapoLoop } from '../chapo-loop.js';
 import type {
   AgentName,
@@ -86,22 +84,19 @@ export async function processRequest(
   stateManager.setOriginalRequest(sessionId, getTextContent(userMessage));
   await warmSystemContextForSession(sessionId, projectRoot || getProjectRootFromState(sessionId));
 
-  // FAST PATH: Early task classification (no LLM call!)
-  const taskComplexity = classifyTaskComplexity(getTextContent(userMessage));
-  const modelSelection = selectModel(taskComplexity);
+  const chapo = getAgent('chapo');
+  const modelSelection = resolveModelSelection(chapo);
 
   console.info('[agents] processRequest start', {
     sessionId,
     projectRoot: projectRoot || null,
     messageLength: getTextContent(userMessage).length,
-    taskComplexity,
     selectedModel: `${modelSelection.provider}/${modelSelection.model}`,
   });
 
   // Initialize or get state
   const state = stateManager.getOrCreateState(sessionId);
   stateManager.setOriginalRequest(sessionId, getTextContent(userMessage));
-  stateManager.setGatheredInfo(sessionId, 'taskComplexity', taskComplexity);
   stateManager.setGatheredInfo(sessionId, 'modelSelection', modelSelection);
   const trustMode = await getTrustMode();
   stateManager.setGatheredInfo(sessionId, 'trustMode', trustMode);
@@ -109,7 +104,7 @@ export async function processRequest(
   try {
     const loopProjectRoot = projectRoot || getProjectRootFromState(sessionId);
     const loop = new ChapoLoop(sessionId, sendEvent, loopProjectRoot, modelSelection, {
-      maxIterations: taskComplexity === 'trivial' ? 8 : 20,
+      maxIterations: 20,
     });
     const loopResult = await loop.run(userMessage, history);
 
