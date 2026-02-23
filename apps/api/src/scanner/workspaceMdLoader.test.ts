@@ -33,7 +33,6 @@ describe('workspaceMdLoader', () => {
     await writeWorkspaceFile(workspaceRoot, 'AGENTS.md', '# AGENTS');
     await writeWorkspaceFile(workspaceRoot, 'SOUL.md', '# SOUL');
     await writeWorkspaceFile(workspaceRoot, 'USER.md', '# USER');
-    await writeWorkspaceFile(workspaceRoot, 'TOOLS.md', '# TOOLS');
     await writeWorkspaceFile(workspaceRoot, `memory/${formatDateStamp(today)}.md`, 'today memory');
     await writeWorkspaceFile(workspaceRoot, `memory/${formatDateStamp(yesterday)}.md`, 'yesterday memory');
     await writeWorkspaceFile(workspaceRoot, 'MEMORY.md', 'long term memory');
@@ -55,7 +54,7 @@ describe('workspaceMdLoader', () => {
     const context = await loadWorkspaceMdContext({ mode: 'main', workspaceRoot });
 
     expect(context.diagnostics.missingFiles).toEqual(
-      expect.arrayContaining(['SOUL.md', 'USER.md', 'TOOLS.md'])
+      expect.arrayContaining(['SOUL.md', 'USER.md'])
     );
   });
 });

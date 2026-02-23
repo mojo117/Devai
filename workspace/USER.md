@@ -1,19 +1,5 @@
 # USER.md - User Profile
 
-## Basics
-
-- Name:
-- Preferred form of address:
-- Timezone:
-- Preferred language:
-
-## Working Preferences
-
-- Communication style:
-- Risk tolerance:
-- Default level of detail:
-
-## Ongoing Focus
-
-- Project priorities:
-- Current blockers:
+- **Name:** Jörn
+- **Sprache:** Deutsch (antworte immer auf Deutsch, außer der User wechselt zu Englisch)
+- **Timezone:** Europe/Berlin (CET/CEST)

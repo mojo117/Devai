@@ -64,7 +64,6 @@ function getWorkspaceFileSpecs(mode: WorkspaceLoadMode): WorkspaceFileSpec[] {
     { role: 'AGENTS', relativePath: 'AGENTS.md', required: true },
     { role: 'SOUL', relativePath: 'SOUL.md', required: true },
     { role: 'USER', relativePath: 'USER.md', required: true },
-    { role: 'TOOLS', relativePath: 'TOOLS.md', required: true },
     { role: 'Memory Today', relativePath: `memory/${formatDateStamp(today)}.md`, required: false },
     { role: 'Memory Yesterday', relativePath: `memory/${formatDateStamp(yesterday)}.md`, required: false },
   ];
