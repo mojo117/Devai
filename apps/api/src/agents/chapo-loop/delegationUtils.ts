@@ -1,4 +1,3 @@
-import { getToolsForLLM } from '../../tools/registry.js';
 import type { DelegationDomain, LoopDelegationStatus, ScoutScope } from '../types.js';
 
 export type ParallelAgent = 'devo' | 'caio' | 'scout';
@@ -13,8 +12,6 @@ export interface ParallelDelegation {
   expectedOutcome?: string;
   scope?: ScoutScope;
 }
-
-let toolDirectiveRegex: RegExp | null = null;
 
 function defaultDomainForAgent(target: ParallelAgent): DelegationDomain {
   if (target === 'devo') return 'development';
@@ -48,36 +45,14 @@ function readStringArray(raw: unknown): string[] {
     .filter((item) => item.length > 0);
 }
 
-function getToolDirectiveRegex(): RegExp | null {
-  if (toolDirectiveRegex) return toolDirectiveRegex;
-  const toolNames = getToolsForLLM()
-    .map((tool) => tool.name)
-    .filter((name) => !name.startsWith('delegate') && name !== 'askUser' && name !== 'requestApproval')
-    .sort((a, b) => b.length - a.length);
-
-  if (toolNames.length === 0) return null;
-
-  const escaped = toolNames.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  toolDirectiveRegex = new RegExp(`\\b(?:${escaped.join('|')})\\b`, 'gi');
-  return toolDirectiveRegex;
-}
-
-export function sanitizeDelegationText(text: string): string {
-  const trimmed = text.trim();
-  if (!trimmed) return trimmed;
-  const regex = getToolDirectiveRegex();
-  if (!regex) return trimmed;
-  return trimmed.replace(regex, 'passendes Tool');
-}
-
 function normalizeDelegationContext(value: unknown): string | undefined {
   if (typeof value === 'string') {
-    const sanitized = sanitizeDelegationText(value.trim());
-    return sanitized.length > 0 ? sanitized : undefined;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
   }
   if (value && typeof value === 'object') {
     try {
-      return sanitizeDelegationText(JSON.stringify(value, null, 2));
+      return JSON.stringify(value, null, 2);
     } catch {
       return undefined;
     }
@@ -88,11 +63,10 @@ function normalizeDelegationContext(value: unknown): string | undefined {
 export function buildDelegation(target: ParallelAgent, args: Record<string, unknown>): ParallelDelegation {
   const defaultDomain = defaultDomainForAgent(target);
   const domain = normalizeDelegationDomain(args.domain, defaultDomain);
-  const objectiveRaw = readFirstString(args, ['objective', 'task', 'query']) || 'Aufgabe ausfuehren';
-  const objective = sanitizeDelegationText(objectiveRaw);
-  const contextFacts = readStringArray(args.contextFacts).map((item) => sanitizeDelegationText(item));
+  const objective = readFirstString(args, ['objective', 'task', 'query']) || 'Execute task';
+  const contextFacts = readStringArray(args.contextFacts);
   const context = normalizeDelegationContext(args.context);
-  const constraints = readStringArray(args.constraints).map((item) => sanitizeDelegationText(item));
+  const constraints = readStringArray(args.constraints);
   const expectedOutcome = readFirstString(args, ['expectedOutcome']) || objective;
   const scopeRaw = readFirstString(args, ['scope']);
   const scope: ScoutScope | undefined =
