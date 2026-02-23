@@ -46,10 +46,14 @@ function buildFileBlock(file: UserfileRow): string {
   }
 
   if (file.parse_status === 'failed') {
-    return `${header}\n(Content extraction failed)`;
+    return `${header}\n(Content extraction failed — the file was uploaded but its text could not be read. Inform the user.)`;
   }
 
-  return `${header}\n(Content not available -- binary file type)`;
+  if (file.parse_status === 'metadata_only') {
+    return `${header}\n(This file type does not support text extraction. Only metadata is available. Inform the user if they ask about its content.)`;
+  }
+
+  return `${header}\n(Content not yet available — file may still be processing.)`;
 }
 
 export async function buildUserfileContext(fileIds: string[]): Promise<ContentBlock[]> {

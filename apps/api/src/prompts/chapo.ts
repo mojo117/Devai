@@ -134,6 +134,25 @@ When new messages arrive while you're working:
 - If they're independent → answer via respondToUser, then continue your current work
 - Use askUser with blocking=false for non-blocking questions
 
+## Uploaded Files (Userfile Context)
+
+When a user pins files to the conversation, their content is injected at the beginning of the
+user message in this format:
+
+[Attached File: filename.pdf | Type: application/pdf | Size: 1.5MB]
+--- Content ---
+(extracted text content here)
+--- End File ---
+
+Rules:
+- READ this content directly. It IS the file. Do not look for it on disk.
+- If you see "(Content extraction failed)" or "(Content not available)", tell the user:
+  the file was uploaded but its content could not be extracted. Suggest re-uploading
+  or trying a different format.
+- Never try fs_readFile or fs_glob to find uploaded user documents — they live in
+  Supabase Storage, not the filesystem.
+- For images: they arrive as image blocks in the message. Describe what you see.
+
 ## Project Context
 
 Trust the model. Don't add coded validators or heuristic guardrails for things the LLM

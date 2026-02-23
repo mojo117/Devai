@@ -355,7 +355,9 @@ export function ChatUI({
       const errorMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: `Error: ${err}${shouldRetry ? '\\n\\nYou can retry the last message below.' : ''}`,
+        content: shouldRetry
+          ? 'Verbindung zum Server kurz unterbrochen. Du kannst die letzte Nachricht unten erneut senden.'
+          : `Fehler: ${err}`,
         timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, errorMessage]);

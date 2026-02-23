@@ -223,6 +223,11 @@ export class CommandHandlers {
         const fileBlocks = await buildUserfileContext(command.pinnedUserfileIds);
         if (fileBlocks.length > 0) {
           const hasImages = fileBlocks.some((b) => b.type === 'image_url');
+          console.info('[CommandDispatcher] Injected userfile context:', {
+            fileCount: command.pinnedUserfileIds!.length,
+            blockCount: fileBlocks.length,
+            hasImages,
+          });
           if (hasImages) {
             // Multimodal: keep as ContentBlock array so images pass through to the LLM
             augmentedMessage = [...fileBlocks, { type: 'text' as const, text: message }];
@@ -237,6 +242,8 @@ export class CommandHandlers {
         }
       } catch (err) {
         console.error('[CommandDispatcher] Failed to build userfile context:', err);
+        const errMsg = err instanceof Error ? err.message : 'Unknown error';
+        augmentedMessage = `[System: ${command.pinnedUserfileIds!.length} pinned file(s) could not be loaded: ${errMsg}. Tell the user about this problem.]\n\n${message}`;
       }
     }
 
