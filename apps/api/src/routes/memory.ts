@@ -9,7 +9,6 @@ import { parseOrReply400 } from './validation.js';
 
 const RememberSchema = z.object({
   content: z.string().min(1).max(4000),
-  promoteToLongTerm: z.boolean().optional().default(false),
   sessionId: z.string().optional(),
   source: z.string().optional(),
 });
@@ -17,7 +16,6 @@ const RememberSchema = z.object({
 const SearchQuerySchema = z.object({
   query: z.string().min(1),
   limit: z.coerce.number().int().min(1).max(50).optional().default(10),
-  includeLongTerm: z.coerce.boolean().optional().default(true),
 });
 
 const DailyParamsSchema = z.object({
@@ -31,7 +29,6 @@ export const memoryRoutes: FastifyPluginAsync = async (app) => {
 
     try {
       const result = await rememberNote(parsed.content, {
-        promoteToLongTerm: parsed.promoteToLongTerm,
         sessionId: parsed.sessionId,
         source: parsed.source || 'api.memory.remember',
       });
@@ -42,11 +39,6 @@ export const memoryRoutes: FastifyPluginAsync = async (app) => {
           date: result.daily.date,
           filePath: result.daily.filePath,
         },
-        longTerm: result.longTerm
-          ? {
-            filePath: result.longTerm.filePath,
-          }
-          : null,
       };
     } catch (error) {
       return reply.status(500).send({
@@ -62,7 +54,6 @@ export const memoryRoutes: FastifyPluginAsync = async (app) => {
     try {
       const result = await searchWorkspaceMemory(parsed.query, {
         limit: parsed.limit,
-        includeLongTerm: parsed.includeLongTerm,
       });
 
       return {

@@ -1,6 +1,7 @@
 import { getMessages } from '../../db/queries.js';
 import * as stateManager from '../stateManager.js';
 import { buildConversationHistoryContext } from '../conversationHistory.js';
+import { buildToolResultContent } from '../utils.js';
 
 
 export function parseYesNo(input: string): boolean | null {
@@ -31,7 +32,7 @@ export function looksLikeContinuePrompt(text: string): boolean {
   return t.includes('required more steps than allowed') || t.includes('should i continue?');
 }
 
-export function extractExplicitRememberNote(text: string): { note: string; promoteToLongTerm: boolean } | null {
+export function extractExplicitRememberNote(text: string): { note: string } | null {
   const patterns = [
     /^\s*(?:remember(?:\s+this)?|please\s+remember|note\s+this)\s*[:,-]?\s+(.+)$/i,
     /^\s*(?:merk\s+dir(?:\s+bitte)?|merke\s+dir)\s*[:,-]?\s+(.+)$/i,
@@ -45,8 +46,7 @@ export function extractExplicitRememberNote(text: string): { note: string; promo
     if (note.length < 3) return null;
     if (note.endsWith('?')) return null;
 
-    const promoteToLongTerm = /\b(always|dauerhaft|langfristig|important|wichtig)\b/i.test(text);
-    return { note, promoteToLongTerm };
+    return { note };
   }
 
   return null;
@@ -91,12 +91,4 @@ export function getProjectRootFromState(sessionId: string): string | null {
   return value && value.trim().length > 0 ? value : null;
 }
 
-export function buildToolResultContent(result: { success: boolean; result?: unknown; error?: string }): { content: string; isError: boolean } {
-  if (result.success) {
-    const value = result.result === undefined ? '' : JSON.stringify(result.result);
-    return { content: value || 'OK', isError: false };
-  }
-  const content = result.error ? `Error: ${result.error}` : 'Error: Tool failed without a message.';
-  return { content, isError: true };
-}
-
+export { buildToolResultContent };

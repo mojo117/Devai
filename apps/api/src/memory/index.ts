@@ -7,4 +7,3 @@ export type { MemoryCandidate, StoredMemory, MemoryType, MemoryPriority, MemoryS
 export { getActiveTopics, upsertTopic, runRecentTopicDecay } from './recentFocus.js';
 export type { RecentTopic } from './recentFocus.js';
 export { tagCurrentWork, cleanupSession } from './topicTagger.js';
-export { renderRecentFocusMd, syncManualEdits, buildRecentFocusBlock } from './recentFocusRenderer.js';

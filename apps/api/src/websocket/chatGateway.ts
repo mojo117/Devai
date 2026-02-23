@@ -1,6 +1,5 @@
 import type { WebSocket } from 'ws';
 import { triggerSessionEndExtraction } from '../memory/service.js';
-import { renderRecentFocusMd } from '../memory/recentFocusRenderer.js';
 import { cleanupSession } from '../memory/topicTagger.js';
 import { getMessages } from '../db/queries.js';
 
@@ -51,11 +50,6 @@ export function unregisterChatClient(ws: WebSocket, sessionId: string): void {
       triggerSessionEndExtraction(conversationText, sessionId);
     }).catch((err) => {
       console.error('[ChatGW] session-end extraction failed:', err);
-    });
-
-    // Render RECENT_FOCUS.md from current DB state
-    renderRecentFocusMd().catch((err) => {
-      console.error('[ChatGW] RECENT_FOCUS.md render failed:', err);
     });
 
     // Cleanup tagger debounce state

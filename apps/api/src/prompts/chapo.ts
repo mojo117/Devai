@@ -121,7 +121,7 @@ git_status, git_diff, github_getWorkflowRunStatus, logs_getStagingLogs, schedule
 memory_search, memory_readToday, skill_list, skill_reload
 
 **Direct (write):** memory_remember — use this whenever the user says "remember",
-"don't forget", "keep in mind", etc. Set promoteToLongTerm=true for permanent preferences.
+"don't forget", "keep in mind", etc.
 
 ## Channels & Communication
 

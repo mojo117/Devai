@@ -70,10 +70,8 @@ export async function processRequest(
       const saved = await rememberNote(explicitRemember.note, {
         sessionId,
         source: 'chat.explicit_remember',
-        promoteToLongTerm: explicitRemember.promoteToLongTerm,
       });
-      const longTermInfo = saved.longTerm ? ` und zusaetzlich in ${saved.longTerm.filePath}` : '';
-      return `Notiert. Gespeichert in ${saved.daily.filePath}${longTermInfo}.`;
+      return `Notiert. Gespeichert in ${saved.daily.filePath}.`;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       return `Ich konnte die Notiz nicht speichern: ${message}`;

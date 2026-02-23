@@ -294,13 +294,11 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
 
   // Workspace Memory Tools
   memory_remember: async (args) => memoryTools.memoryRemember(args.content as string, {
-    promoteToLongTerm: args.promoteToLongTerm as boolean | undefined,
     sessionId: args.sessionId as string | undefined,
     source: 'tool.memory_remember',
   }),
   memory_search: async (args) => memoryTools.memorySearch(args.query as string, {
     limit: args.limit as number | undefined,
-    includeLongTerm: args.includeLongTerm as boolean | undefined,
   }),
   memory_readToday: async () => memoryTools.memoryReadToday(),
 

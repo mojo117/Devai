@@ -903,10 +903,6 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
           type: 'string',
           description: 'The note to persist',
         },
-        promoteToLongTerm: {
-          type: 'boolean',
-          description: 'Also append to long-term MEMORY.md',
-        },
       },
       required: ['content'],
     },
@@ -914,7 +910,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
   },
   {
     name: 'memory_search',
-    description: 'Search persisted workspace memory (daily + optional long-term memory).',
+    description: 'Search persisted workspace memory (daily files).',
     parameters: {
       type: 'object',
       properties: {
@@ -925,10 +921,6 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
         limit: {
           type: 'number',
           description: 'Max number of results (1-50)',
-        },
-        includeLongTerm: {
-          type: 'boolean',
-          description: 'Include MEMORY.md in search',
         },
       },
       required: ['query'],
