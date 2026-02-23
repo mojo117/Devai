@@ -56,7 +56,7 @@ Rules:
 - Only propose sub-topic if work is clearly more specific than parent
 - file_paths: actual file paths mentioned or accessed
 - directories: parent directories of accessed files
-- Return ONLY the JSON object`;
+- Return ONLY the JSON object, compact, no extra whitespace`;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,7 +92,13 @@ function parseTagResponse(raw: string): TagResult | null {
     jsonString = codeBlockMatch[1].trim();
   }
 
-  const parsed: unknown = JSON.parse(jsonString);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonString);
+  } catch {
+    console.warn('[topicTagger] JSON parse failed, raw:', jsonString.slice(0, 200));
+    return null;
+  }
 
   if (typeof parsed !== 'object' || parsed === null) {
     return null;

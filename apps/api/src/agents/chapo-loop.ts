@@ -224,6 +224,8 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
     const provider = (this.modelSelection.provider || 'anthropic') as LLMProvider;
     const model = this.modelSelection.model || chapo.model;
 
+    console.log(`[chapo-loop] Tools: ${tools.length} (was 94 before MCP reduction)`);
+
     for (this.iteration = 0; this.iteration < this.config.maxIterations; this.iteration++) {
       this.sendEvent({
         type: 'agent_thinking',
@@ -235,6 +237,8 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       await this.contextManager.checkAndCompact();
 
       // Call LLM with conversation + tools
+      const t0 = Date.now();
+      console.log(`[chapo-loop] LLM call #${this.iteration} starting (${provider}/${model}, ${tools.length} tools)`);
       const [response, err] = await this.errorHandler.safe('llm_call', () =>
         llmRouter.generateWithFallback(provider, {
           model,
@@ -244,6 +248,8 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
           toolsEnabled: true,
         })
       );
+
+      console.log(`[chapo-loop] LLM call #${this.iteration} completed in ${Date.now() - t0}ms, err=${err?.message || 'none'}, content=${response?.content?.slice(0, 100) || 'null'}, toolCalls=${response?.toolCalls?.length || 0}`);
 
       if (err) {
         // Feed error back as context — CHAPO sees it and decides what to do
