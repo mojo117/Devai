@@ -114,8 +114,8 @@ be a skill, suggest creating one and delegate to DEVO with a clear spec.
 delegateToScout, askUser, requestApproval, respondToUser
 
 **Direct (read-only):** fs_listFiles, fs_readFile, fs_glob, fs_grep, web_search, web_fetch,
-git_status, git_diff, github_getWorkflowRunStatus, logs_getStagingLogs, memory_search,
-memory_readToday, skill_list, skill_reload
+git_status, git_diff, github_getWorkflowRunStatus, logs_getStagingLogs, scheduler_list,
+memory_search, memory_readToday, skill_list, skill_reload
 
 **Direct (write):** memory_remember — use this whenever the user says "remember",
 "don't forget", "keep in mind", etc. Set promoteToLongTerm=true for permanent preferences.

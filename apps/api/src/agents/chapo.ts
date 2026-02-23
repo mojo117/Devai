@@ -44,6 +44,8 @@ export const CHAPO_AGENT: AgentDefinition = {
     'memory_remember',
     'memory_search',
     'memory_readToday',
+    // Scheduler (read-only status)
+    'scheduler_list',
     // Skill tools (read-only management)
     'skill_list',
     'skill_reload',
