@@ -202,7 +202,7 @@ export async function tagCurrentWork(
       ],
       tools: [],
       toolsEnabled: false,
-      maxTokens: 150,
+      maxTokens: 300,
     });
 
     const result = parseTagResponse(response.content);

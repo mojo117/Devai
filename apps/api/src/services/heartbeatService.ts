@@ -1,5 +1,7 @@
 import { insertHeartbeatRun, updateHeartbeatRun } from '../db/queries.js'
 import type { HeartbeatRunRow } from '../db/queries.js'
+import { sendTelegramMessage } from '../external/telegram.js'
+import { config } from '../config.js'
 
 const HEARTBEAT_PROMPT = `Heartbeat-Check. Pruefe:
 
@@ -13,7 +15,7 @@ const HEARTBEAT_PROMPT = `Heartbeat-Check. Pruefe:
    Offene Erinnerungen, anstehende Aufgaben aus vorherigen Sessions?
 
 Wenn nichts ansteht: Antworte mit "NOOP" — keine Aktion, kein Output.
-Wenn etwas ansteht: Handle es oder benachrichtige den User via Telegram.`
+Wenn etwas ansteht: Fasse die Findings zusammen. Ergreife KEINE eigenstaendigen Massnahmen — der User entscheidet was passiert. Deine Aufgabe ist nur: beobachten, analysieren, berichten.`
 
 function isQuietHours(): boolean {
   const berlinHour = new Date().toLocaleString('en-US', {
@@ -64,7 +66,19 @@ export async function runHeartbeat(): Promise<void> {
       completed_at: new Date().toISOString(),
       duration_ms: durationMs,
       findings: isNoop ? null : { raw: result },
-      actions_taken: isNoop ? null : [{ type: 'agent_response', content: result.slice(0, 500) }],
+      actions_taken: isNoop ? null : [{ type: 'agent_response', content: result.slice(0, 2000) }],
+    }
+
+    if (!isNoop) {
+      const chatId = config.telegramAllowedChatId?.split(/[,\s;]+/)[0]?.trim()
+      if (chatId) {
+        const message = `🔍 *Heartbeat Report*\n\n${result.slice(0, 3500)}`
+        await sendTelegramMessage(chatId, message).catch((err) =>
+          console.error('[heartbeat] Telegram notification failed:', err)
+        )
+      } else {
+        console.warn('[heartbeat] Findings detected but no Telegram chat ID configured')
+      }
     }
 
     if (runId) await updateHeartbeatRun(runId, update)
