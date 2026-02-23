@@ -1,7 +1,4 @@
-import { resolve } from 'path';
 import * as stateManager from './stateManager.js';
-import { loadDevaiMdContext, formatDevaiMdBlock } from '../scanner/devaiMdLoader.js';
-import { loadClaudeMdContext, formatClaudeMdBlock } from '../scanner/claudeMdLoader.js';
 import { loadWorkspaceMdContext, formatWorkspaceMdBlock, type WorkspaceLoadMode } from '../scanner/workspaceMdLoader.js';
 import { getSetting } from '../db/queries.js';
 import { MEMORY_BEHAVIOR_BLOCK } from '../prompts/context.js';
@@ -127,47 +124,6 @@ function resolveWorkspaceMode(sessionId: string): WorkspaceLoadMode {
   return 'main';
 }
 
-export async function getDevaiMdBlockForSession(sessionId: string): Promise<string> {
-  const state = stateManager.getState(sessionId);
-  if (state?.taskContext.gatheredInfo.devaiMdBlock) {
-    return state.taskContext.gatheredInfo.devaiMdBlock;
-  }
-
-  const uiHost = state?.taskContext.gatheredInfo.uiHost || null;
-  try {
-    const ctx = await loadDevaiMdContext();
-    const block = formatDevaiMdBlock(ctx, { uiHost });
-    stateManager.setGatheredInfo(sessionId, 'devaiMdBlock', block);
-    stateManager.setGatheredInfo(sessionId, 'devaiMdSourcePath', ctx?.path || '');
-    return block;
-  } catch {
-    return '';
-  }
-}
-
-export async function getClaudeMdBlockForSession(sessionId: string, projectRoot: string | null): Promise<string> {
-  const state = stateManager.getState(sessionId);
-  const existing = state?.taskContext.gatheredInfo.claudeMdBlock || '';
-
-  if (!projectRoot) return existing;
-
-  const normalizedRoot = resolve(projectRoot);
-  const cachedRoot = state?.taskContext.gatheredInfo.claudeMdProjectRoot || '';
-  if (cachedRoot === normalizedRoot && existing) return existing;
-
-  try {
-    const ctx = await loadClaudeMdContext(normalizedRoot);
-    const block = formatClaudeMdBlock(ctx);
-    stateManager.setGatheredInfo(sessionId, 'claudeMdBlock', block);
-    stateManager.setGatheredInfo(sessionId, 'claudeMdSourcePaths', ctx.files.map((file) => file.path));
-    stateManager.setGatheredInfo(sessionId, 'claudeMdProjectRoot', normalizedRoot);
-    stateManager.setGatheredInfo(sessionId, 'projectRoot', normalizedRoot);
-    return block;
-  } catch {
-    return existing;
-  }
-}
-
 export async function getWorkspaceMdBlockForSession(sessionId: string): Promise<string> {
   const state = stateManager.getState(sessionId);
   const mode = resolveWorkspaceMode(sessionId);
@@ -275,34 +231,12 @@ function buildContextBlocks(sessionId: string): ContextBlock[] {
     : 'workspace/*.md';
 
   const memoryNamespaces = summarizeSources(toStringArray(info.memoryNamespaces), 'memory.search');
-  const claudeSources = summarizeSources(
-    toStringArray(info.claudeMdSourcePaths),
-    `${asNonEmptyString(info.claudeMdProjectRoot) || 'project-root'}/CLAUDE.md`,
-  );
-  const devaiSource = asNonEmptyString(info.devaiMdSourcePath) || 'devai.md';
   const platformName = asNonEmptyString(info.platform) || 'unknown';
 
+  // NOTE: devai_instructions (devai.md) and project_instructions (CLAUDE.md) were removed.
+  // Essential runtime context is now baked into the CHAPO system prompt directly,
+  // avoiding ~13KB of developer-facing CLAUDE.md content in every session.
   const primaryCandidates: ContextBlock[] = [
-    {
-      meta: {
-        kind: 'devai_instructions',
-        source: devaiSource,
-        priority: 'high',
-        freshness: 'cached',
-        sensitivity: 'medium',
-      },
-      content: asNonEmptyString(info.devaiMdBlock) || '',
-    },
-    {
-      meta: {
-        kind: 'project_instructions',
-        source: claudeSources,
-        priority: 'high',
-        freshness: 'cached',
-        sensitivity: 'medium',
-      },
-      content: asNonEmptyString(info.claudeMdBlock) || '',
-    },
     {
       meta: {
         kind: 'workspace_policy',
@@ -470,8 +404,6 @@ export async function warmSystemContextForSession(
   projectRoot: string | null,
   userMessage?: string
 ): Promise<void> {
-  await getDevaiMdBlockForSession(sessionId);
-  await getClaudeMdBlockForSession(sessionId, projectRoot);
   await getWorkspaceMdBlockForSession(sessionId);
   await refreshGlobalContextBlockForSession(sessionId);
   await warmRecentFocusBlockForSession(sessionId);

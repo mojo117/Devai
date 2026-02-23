@@ -37,18 +37,22 @@ describe('systemContext provenance tags', () => {
     config.contextProvenanceTags = true;
     const sessionId = 'system-context-test-1';
     stateManager.createState(sessionId);
-    stateManager.setGatheredInfo(sessionId, 'devaiMdBlock', '## DevAI Instructions\nStay concise.');
-    stateManager.setGatheredInfo(sessionId, 'devaiMdSourcePath', '/opt/Klyde/projects/Devai/devai.md');
+    stateManager.setGatheredInfo(sessionId, 'workspaceMdBlock', '## Workspace Instructions\nStay concise.');
+    stateManager.setGatheredInfo(
+      sessionId,
+      'workspaceMdDiagnostics',
+      { workspaceRoot: '/opt/Klyde/projects/Devai/workspace', mode: 'main' },
+    );
 
     const combined = getCombinedSystemContextBlock(sessionId);
     const profile = getSystemContextProfile(sessionId);
     const kinds = profile.entries.map((entry) => entry.kind);
 
-    expect(combined).toContain('[CTX kind="devai_instructions"');
+    expect(combined).toContain('[CTX kind="workspace_policy"');
     expect(combined).toContain('[CTX kind="memory_behavior_policy"');
     expect(combined).toContain('## Memory Behavior');
     expect(profile.totalTokensEstimate).toBeGreaterThan(0);
-    expect(kinds).toEqual(expect.arrayContaining(['devai_instructions', 'memory_behavior_policy']));
+    expect(kinds).toEqual(expect.arrayContaining(['workspace_policy', 'memory_behavior_policy']));
   });
 
   it('can disable provenance tags while keeping context content', () => {

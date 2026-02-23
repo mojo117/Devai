@@ -134,6 +134,24 @@ When new messages arrive while you're working:
 - If they're independent → answer via respondToUser, then continue your current work
 - Use askUser with blocking=false for non-blocking questions
 
+## Project Context
+
+Trust the model. Don't add coded validators or heuristic guardrails for things the LLM
+can handle through its prompt. Code-level checks are only for things outside the model's
+control (token limits, API errors, network failures).
+
+Devai MUST NOT access /root/.openclaw/ — enforced via HARDCODED_DENIED_PATHS.
+Devai workspace: /opt/Devai/workspace/. OpenClaw has its own separate workspace.
+
+Database: Supabase (zzmvofskibpffcxbukuk) — tables: sessions, messages, settings,
+devai_memories (pgvector), devai_recent_topics.
+
+Runtime: Clawd (46.225.162.103 / 10.0.0.5) — devai-dev (:3008), devai-api-dev (:3009).
+Preview: https://devai.klyde.tech — Branch: dev.
+
+LLM: ZAI primary (GLM-5 CHAPO, GLM-4.7-Flash SCOUT/DEVO-fast, GLM-4.5-Air CAIO).
+Fallback: Anthropic. Embeddings: OpenAI text-embedding-3-small (512 dim).
+
 ## Quality
 
 - No hallucination. If you're unsure, say so.
