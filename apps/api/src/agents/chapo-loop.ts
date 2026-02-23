@@ -28,6 +28,7 @@ import { type DelegationRunnerDeps } from './chapo-loop/delegationRunner.js';
 import { ChapoLoopContextManager } from './chapo-loop/contextManager.js';
 import { ChapoLoopGateManager } from './chapo-loop/gateManager.js';
 import { ChapoToolExecutor } from './chapo-loop/toolExecutor.js';
+import { buildToolResultContent } from './utils.js';
 import type {
   AgentStreamEvent,
   ModelSelection,
@@ -155,7 +156,7 @@ export class ChapoLoop {
     this.contextManager.setPinnedRequest(userText);
 
     // 1. Warm system context
-    await warmSystemContextForSession(this.sessionId, this.projectRoot, userText);
+    await warmSystemContextForSession(this.sessionId, this.projectRoot);
     const systemContextBlock = getCombinedSystemContextBlock(this.sessionId);
 
     // 2. Set system prompt on conversation manager
@@ -298,7 +299,7 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
         emitDecisionPath: this.emitDecisionPath.bind(this),
         getDelegationRunnerDeps: this.getDelegationRunnerDeps.bind(this),
         buildVerificationEnvelope: this.buildVerificationEnvelope.bind(this),
-        buildToolResultContent: this.buildToolResultContent.bind(this),
+        buildToolResultContent,
         onPartialResponse: (message: string, inReplyTo?: string) => {
           const label = inReplyTo
             ? `[Intermediate response sent — re: "${inReplyTo}"] ${message}`
@@ -421,16 +422,7 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       errorHandler: this.errorHandler,
       subAgentRunner: this.subAgentRunner,
       deriveDelegationStatus: this.deriveDelegationStatus.bind(this),
-      buildToolResultContent: this.buildToolResultContent.bind(this),
+      buildToolResultContent,
     };
-  }
-
-  private buildToolResultContent(result: { success: boolean; result?: unknown; error?: string }): { content: string; isError: boolean } {
-    if (result.success) {
-      const value = result.result === undefined ? '' : JSON.stringify(result.result);
-      return { content: value || 'OK', isError: false };
-    }
-    const content = result.error ? `Error: ${result.error}` : 'Error: Tool failed without a message.';
-    return { content, isError: true };
   }
 }

@@ -3,8 +3,6 @@ import { loadWorkspaceMdContext, formatWorkspaceMdBlock, type WorkspaceLoadMode 
 import { getSetting } from '../db/queries.js';
 import { MEMORY_BEHAVIOR_BLOCK } from '../prompts/context.js';
 import { getSchedulerErrors } from '../scheduler/schedulerService.js';
-import { formatMemoryQualityBlock, retrieveRelevantMemories } from '../memory/service.js';
-import { buildRecentFocusBlock, syncManualEdits } from '../memory/recentFocusRenderer.js';
 import { config } from '../config.js';
 
 const GLOBAL_CONTEXT_MAX_CHARS = 4000;
@@ -65,20 +63,6 @@ export function formatContextBlock(meta: ContextBlockMeta, content: string): str
   if (!trimmed) return '';
   const tokensEstimate = estimateTokens(trimmed);
   return `${formatContextHeader(meta, tokensEstimate)}\n${trimmed}`;
-}
-
-function toStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((entry): entry is string => typeof entry === 'string')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-}
-
-function summarizeSources(sources: string[], fallback: string): string {
-  if (sources.length === 0) return fallback;
-  if (sources.length <= 2) return sources.join(', ');
-  return `${sources[0]}, ${sources[1]}, +${sources.length - 2} more`;
 }
 
 function asNonEmptyString(value: unknown): string | null {
@@ -165,42 +149,6 @@ export async function refreshGlobalContextBlockForSession(sessionId: string): Pr
   return block;
 }
 
-export async function warmMemoryBlockForSession(sessionId: string, userMessage: string): Promise<string> {
-  const state = stateManager.getState(sessionId);
-  const projectRoot = state?.taskContext.gatheredInfo.projectRoot || null;
-
-  let projectName: string | undefined;
-  if (projectRoot) {
-    const parts = projectRoot.split('/').filter(Boolean);
-    projectName = parts[parts.length - 1]?.toLowerCase();
-  }
-
-  try {
-    const { block, quality } = await retrieveRelevantMemories(userMessage, projectName);
-    const qualityBlock = formatMemoryQualityBlock(quality);
-    stateManager.setGatheredInfo(sessionId, 'memoryBlock', block);
-    stateManager.setGatheredInfo(sessionId, 'memoryQualityBlock', qualityBlock);
-    stateManager.setGatheredInfo(sessionId, 'memoryNamespaces', quality.namespaces);
-    stateManager.setGatheredInfo(sessionId, 'memoryRetrievedHits', quality.totalHits);
-    return block;
-  } catch {
-    stateManager.setGatheredInfo(sessionId, 'memoryQualityBlock', '');
-    return '';
-  }
-}
-
-export async function warmRecentFocusBlockForSession(sessionId: string): Promise<string> {
-  try {
-    await syncManualEdits();
-    const block = await buildRecentFocusBlock();
-    stateManager.setGatheredInfo(sessionId, 'recentFocusBlock', block);
-    return block;
-  } catch {
-    stateManager.setGatheredInfo(sessionId, 'recentFocusBlock', '');
-    return '';
-  }
-}
-
 function buildContextBlocks(sessionId: string): ContextBlock[] {
   const state = stateManager.getState(sessionId);
   const info = (state?.taskContext.gatheredInfo || {}) as GatheredInfoRecord;
@@ -230,7 +178,6 @@ function buildContextBlocks(sessionId: string): ContextBlock[] {
     ? `${workspaceRoot}${workspaceMode ? ` (mode=${workspaceMode})` : ''}`
     : 'workspace/*.md';
 
-  const memoryNamespaces = summarizeSources(toStringArray(info.memoryNamespaces), 'memory.search');
   const platformName = asNonEmptyString(info.platform) || 'unknown';
 
   // NOTE: devai_instructions (devai.md) and project_instructions (CLAUDE.md) were removed.
@@ -256,36 +203,6 @@ function buildContextBlocks(sessionId: string): ContextBlock[] {
         sensitivity: 'high',
       },
       content: asNonEmptyString(info.globalContextBlock) || '',
-    },
-    {
-      meta: {
-        kind: 'recent_focus',
-        source: 'memory.recent_topics',
-        priority: 'medium',
-        freshness: 'dynamic',
-        sensitivity: 'low',
-      },
-      content: asNonEmptyString(info.recentFocusBlock) || '',
-    },
-    {
-      meta: {
-        kind: 'memory_quality',
-        source: memoryNamespaces,
-        priority: 'medium',
-        freshness: 'dynamic',
-        sensitivity: 'medium',
-      },
-      content: asNonEmptyString(info.memoryQualityBlock) || '',
-    },
-    {
-      meta: {
-        kind: 'memory_retrieval',
-        source: memoryNamespaces,
-        priority: 'medium',
-        freshness: 'dynamic',
-        sensitivity: 'medium',
-      },
-      content: asNonEmptyString(info.memoryBlock) || '',
     },
     {
       meta: {
@@ -402,12 +319,7 @@ export function getCombinedSystemContextBlock(sessionId: string): string {
 export async function warmSystemContextForSession(
   sessionId: string,
   projectRoot: string | null,
-  userMessage?: string
 ): Promise<void> {
   await getWorkspaceMdBlockForSession(sessionId);
   await refreshGlobalContextBlockForSession(sessionId);
-  await warmRecentFocusBlockForSession(sessionId);
-  if (userMessage) {
-    await warmMemoryBlockForSession(sessionId, userMessage);
-  }
 }
