@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { listUserfiles, uploadUserfile, deleteUserfile, getUserfileDownloadUrl } from '../api';
 import type { UserfileInfo } from '../api';
-import { ALLOWED_EXTENSIONS, MAX_FILE_SIZE, validateFile } from './ChatUI/uploadConstants';
+import { validateFile } from './ChatUI/uploadConstants';
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
