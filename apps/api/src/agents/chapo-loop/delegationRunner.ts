@@ -117,6 +117,8 @@ AUFGABE: ${delegation.objective}
 
 Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
 
+  const delegationStartMs = Date.now();
+  let subToolCount = 0;
   const devoEvidence: ToolEvidence[] = [];
   const caioEvidenceLog: CaioEvidence[] = [];
   const runResult = await deps.subAgentRunner.run({
@@ -130,6 +132,7 @@ Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
     errorHandler: deps.errorHandler,
     sendEvent: deps.sendEvent,
     handleToolCall: async ({ toolCall, turn }) => {
+      subToolCount++;
       if (target === 'devo') {
         return handleToolCall(devoStrategy, deps, delegation, devoEvidence, turn, toolCall as RunnerToolCall, delegateToAgent);
       }
@@ -171,6 +174,8 @@ Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
     result: runResult.exit === 'escalated'
       ? `${targetUpper} eskaliert: ${runResult.escalationDescription || 'unknown issue'}`
       : finalContent,
+    durationMs: Date.now() - delegationStartMs,
+    toolCount: subToolCount,
   });
 
   const toolEvidence = target === 'caio'
@@ -219,6 +224,7 @@ async function delegateToScout(
   });
 
   try {
+    const delegationStartMs = Date.now();
     const history = await loadRecentConversationHistory(deps.sessionId);
     const historyContext = formatConversationHistoryForScout(history);
     const scoutContext = [
@@ -259,6 +265,8 @@ async function delegateToScout(
       type: 'agent_complete',
       agent: 'scout',
       result: loopResult.summary,
+      durationMs: Date.now() - delegationStartMs,
+      toolCount: 1,
     });
     return loopResult;
   } catch (error) {
@@ -273,6 +281,8 @@ async function delegateToScout(
       type: 'agent_complete',
       agent: 'scout',
       result: `SCOUT Fehler: ${message}`,
+      durationMs: Date.now() - delegationStartMs,
+      toolCount: 0,
     });
     throw error;
   }
