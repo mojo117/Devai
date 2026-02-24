@@ -19,7 +19,7 @@ import {
   handleUserResponse,
 } from '../../agents/router.js';
 import type { AgentStreamEvent, InboxMessage } from '../../agents/types.js';
-import { pushToInbox } from '../../agents/inbox.js';
+import { pushToInbox, drainInbox } from '../../agents/inbox.js';
 import { SessionLogger } from '../../audit/sessionLogger.js';
 import {
   createSession,
@@ -278,6 +278,37 @@ export class CommandHandlers {
         await updateSessionTitleIfEmpty(activeSessionId, title);
       }
       sessionLogger.finalize('completed');
+
+      // Process queued messages sequentially (simple queue model)
+      let queuedMessages = drainInbox(activeSessionId);
+      while (queuedMessages.length > 0) {
+        for (const queuedMsg of queuedMessages) {
+          const queuedHistory = await getMessages(activeSessionId);
+          const recentHistory = buildConversationHistoryContext(queuedHistory);
+          const { sendEvent: qSendEvent, collectedToolEvents: qCollected } = createCollectingBridge(ctx);
+
+          const qResult = await processRequest(
+            activeSessionId,
+            queuedMsg.content,
+            recentHistory,
+            validatedProjectRoot || config.allowedRoots[0],
+            qSendEvent as (event: AgentStreamEvent) => void,
+          );
+
+          const qUserMsg = createChatMessage('user', queuedMsg.content);
+          const qResponseMsg = createChatMessage('assistant', qResult);
+          await persistAndEmitTerminalResponse({
+            ctx,
+            sessionId: activeSessionId,
+            userMessage: qUserMsg,
+            responseMessage: qResponseMsg,
+            collectedToolEvents: qCollected,
+            isError: false,
+          });
+        }
+        // Check for more messages that arrived during processing
+        queuedMessages = drainInbox(activeSessionId);
+      }
 
       return { type: 'success', sessionId: activeSessionId, responseMessage };
     } catch (err) {

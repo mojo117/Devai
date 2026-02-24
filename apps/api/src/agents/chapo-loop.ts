@@ -45,8 +45,6 @@ import type { QueueQuestionOptions } from './chapo-loop/gateManager.js';
 
 export type SendEventFn = (event: AgentStreamEvent) => void;
 
-const MEMORY_KEYWORDS = /\b(memorize|remember|merke|merk dir|don't forget|keep in mind|vergiss nicht|speicher)\b/i;
-
 interface ChapoLoopConfig {
   maxIterations: number;
 }
@@ -58,9 +56,9 @@ export class ChapoLoop {
   private sessionLogger?: SessionLogger;
   private subAgentRunner = new SubAgentRunner();
   private iteration = 0;
+  private totalTokensUsed = 0;
   private contextManager: ChapoLoopContextManager;
   private gateManager: ChapoLoopGateManager;
-  private exitGateBounces = 0;
 
   constructor(
     private sessionId: string,
@@ -208,7 +206,12 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       this.dispose();
     }
 
-    // 7. Emit completion
+    // 7. Store token usage on session state (for heartbeat / telemetry)
+    if (this.totalTokensUsed > 0) {
+      stateManager.setGatheredInfo(this.sessionId, 'lastRunTokens', this.totalTokensUsed);
+    }
+
+    // 8. Emit completion
     this.sendEvent({ type: 'agent_complete', agent: 'chapo', result: result.answer });
     this.sendEvent({
       type: 'agent_history',
@@ -238,31 +241,6 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       // Check if compaction needed before LLM call
       await this.contextManager.checkAndCompact();
 
-      // Inject current todo state so CHAPO sees progress each iteration
-      const currentState = stateManager.getOrCreateState(this.sessionId);
-      if (currentState.todos.length > 0) {
-        const pending = currentState.todos.filter((t) => t.status === 'pending');
-        const completed = currentState.todos.filter((t) => t.status === 'completed');
-        const lines = currentState.todos.map((t) => {
-          const checkbox = t.status === 'completed' ? 'x' : ' ';
-          const hint = (t.status !== 'completed' && MEMORY_KEYWORDS.test(t.content))
-            ? ' --> use memory_remember tool'
-            : '';
-          return `- [${checkbox}] ${t.content}${hint}`;
-        }).join('\n');
-        const instruction = pending.length > 0
-          ? `\nACTION REQUIRED: For each pending item, use the appropriate tool:\n` +
-            `- Questions/answers: respondToUser(message) to deliver the answer\n` +
-            `- Memory instructions (marked -->): call memory_remember FIRST, then respondToUser to confirm\n` +
-            `- All items: todoWrite() to mark completed after handling\n` +
-            `Do NOT answer without tool calls.`
-          : '';
-        this.conversation.addMessage({
-          role: 'system',
-          content: `[TODOS] ${completed.length}/${currentState.todos.length} done:\n${lines}${instruction}`,
-        });
-      }
-
       // Call LLM with conversation + tools
       const t0 = Date.now();
       console.log(`[chapo-loop] LLM call #${this.iteration} starting (${provider}/${model}, ${tools.length} tools)`);
@@ -277,6 +255,11 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       );
 
       console.log(`[chapo-loop] LLM call #${this.iteration} completed in ${Date.now() - t0}ms, err=${err?.message || 'none'}, content=${response?.content?.slice(0, 100) || 'null'}, toolCalls=${response?.toolCalls?.length || 0}`);
+
+      // Accumulate token usage
+      if (response?.usage) {
+        this.totalTokensUsed += response.usage.inputTokens + response.usage.outputTokens;
+      }
 
       if (err) {
         // Feed error back as context — CHAPO sees it and decides what to do
@@ -296,81 +279,10 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
         continue;
       }
 
-      // No tool calls → ACTION: ANSWER
+      // No tool calls → ACTION: ANSWER (direct — loop ends)
       if (!response.toolCalls || response.toolCalls.length === 0) {
-        // Check inbox before finalizing — catch late-arriving messages
-        const hasNew = await this.contextManager.checkInbox();
-        if (hasNew) {
-          const intermediateAnswer = response.content || '';
-          // Deliver the current answer to the user before processing new messages
-          if (intermediateAnswer.trim()) {
-            this.sendEvent({
-              type: 'partial_response',
-              message: intermediateAnswer,
-            });
-
-            // Auto-complete single pending todo (unambiguous) or dedup for multi-todo
-            const iState = stateManager.getOrCreateState(this.sessionId);
-            const iPending = iState.todos.filter((t) => t.status === 'pending');
-
-            if (iPending.length === 1) {
-              iPending[0].status = 'completed';
-              this.sendEvent({ type: 'todo_updated', todos: iState.todos });
-              this.conversation.addMessage({
-                role: 'system',
-                content: `[Intermediate response sent & todo completed: "${iPending[0].content}"] ${intermediateAnswer}`,
-              });
-            } else if (iPending.length > 1) {
-              const remaining = iPending.map((t) => `- ${t.content}`).join('\n');
-              this.conversation.addMessage({
-                role: 'system',
-                content: `[ALREADY SENT to user] ${intermediateAnswer}\n\nThe above answer was already delivered. Do NOT repeat it.\nRemaining pending todos:\n${remaining}\nMove on to the NEXT pending todo. Use respondToUser() + todoWrite() for each remaining item.`,
-              });
-            } else {
-              this.conversation.addMessage({
-                role: 'system',
-                content: `[Intermediate response sent] ${intermediateAnswer}`,
-              });
-            }
-
-            console.log(`[chapo-loop] Sent intermediate response (${intermediateAnswer.length} chars) before processing inbox`);
-          } else {
-            this.conversation.addMessage({
-              role: 'assistant',
-              content: '',
-            });
-          }
-          continue;
-        }
-
-        // EXIT GATE: check for unresolved todos before allowing answer
-        const state = stateManager.getOrCreateState(this.sessionId);
-        const pendingTodos = state.todos.filter((t) => t.status === 'pending');
-        if (pendingTodos.length > 0 && this.exitGateBounces < 2) {
-          this.exitGateBounces++;
-          const pendingList = pendingTodos.map((t) => {
-            const hint = MEMORY_KEYWORDS.test(t.content) ? ' --> use memory_remember tool' : '';
-            return `- [ ] ${t.content}${hint}`;
-          }).join('\n');
-          this.conversation.addMessage({
-            role: 'assistant',
-            content: response.content || '',
-          });
-          this.conversation.addMessage({
-            role: 'system',
-            content: `[EXIT GATE] You responded with text but you still have pending todos:\n${pendingList}\n\n` +
-              `You MUST use tool calls:\n` +
-              `1. For questions/answers: respondToUser(message)\n` +
-              `2. For memory instructions (marked -->): memory_remember(content) first, then respondToUser to confirm\n` +
-              `3. todoWrite([...]) to mark items completed\n\n` +
-              `Do NOT respond without tool calls. Your text response alone does not reach the user.`,
-          });
-          continue;
-        }
-
         const answer = response.content || '';
         const userText = getTextContent(userMessage);
-
         return this.answerValidator.validateAndNormalize(userText, answer, this.iteration, this.emitDecisionPath.bind(this));
       }
 
@@ -394,12 +306,6 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
         getDelegationRunnerDeps: this.getDelegationRunnerDeps.bind(this),
         buildVerificationEnvelope: this.buildVerificationEnvelope.bind(this),
         buildToolResultContent,
-        onPartialResponse: (message: string, inReplyTo?: string) => {
-          const label = inReplyTo
-            ? `[Intermediate response sent — re: "${inReplyTo}"] ${message}`
-            : `[Intermediate response sent] ${message}`;
-          this.conversation.addMessage({ role: 'system', content: label });
-        },
       });
 
       for (const toolCall of response.toolCalls) {
@@ -448,26 +354,9 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
           filePaths,
         }).catch((err) => console.error('[chapo-loop] topic tagging failed:', err));
       }
-
-      // Check inbox for new messages between iterations
-      await this.contextManager.checkInbox();
     }
 
-    // Loop exhaustion — check for unprocessed inbox messages
-    const remaining = this.contextManager.drainRemainingMessages();
-    if (remaining.length > 0) {
-      const extras = remaining.map((m) => m.content).join('; ');
-      return this.queueQuestion(
-        `I've reached my iteration limit. You also asked: "${extras}"\n\nShould I continue?`,
-        this.iteration,
-        {
-          kind: 'continue',
-          turnId: this.getActiveTurnId() || undefined,
-          fingerprint: `limit:inbox:${this.getActiveTurnId() || 'none'}:${extras}`,
-        },
-      );
-    }
-
+    // Loop exhaustion — ask user if they want to continue
     return this.queueQuestion(
       'This request needed more steps than allowed. Should I continue?',
       this.iteration,

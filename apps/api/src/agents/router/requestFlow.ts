@@ -1,13 +1,13 @@
 import type { ContentBlock } from '../../llm/types.js';
 import { getTextContent } from '../../llm/types.js';
-import { getTrustMode } from '../../db/queries.js';
+import { getTrustMode, setDefaultEngine } from '../../db/queries.js';
 import { rememberNote } from '../../memory/workspaceMemory.js';
 import * as stateManager from '../stateManager.js';
 import { warmSystemContextForSession } from '../systemContext.js';
 import { resolveModelSelection } from '../../llm/modelSelector.js';
+import { isValidEngine, formatEngineStatus, type EngineName } from '../../llm/engineProfiles.js';
 import { getAgent } from './agentAccess.js';
 import { ChapoLoop } from '../chapo-loop.js';
-import { runIntakeSeed } from '../../services/intakeSeed.js';
 import type {
   AgentName,
   UserResponse,
@@ -79,12 +79,30 @@ export async function processRequest(
     }
   }
 
+  // Handle /engine command — switch LLM engine profile (no LLM call needed)
+  const engineMatch = getTextContent(userMessage).trim().match(/^\/engine(?:\s+(.*))?$/i);
+  if (engineMatch) {
+    const arg = engineMatch[1]?.trim().toLowerCase();
+    if (!arg) {
+      const currentEngine = (stateManager.getState(sessionId)
+        ?.taskContext.gatheredInfo.engineProfile as string) || 'glm';
+      return formatEngineStatus(currentEngine as EngineName);
+    }
+    if (isValidEngine(arg)) {
+      stateManager.setGatheredInfo(sessionId, 'engineProfile', arg);
+      await stateManager.flushState(sessionId);
+      await setDefaultEngine(arg);
+      return `Engine switched to **${arg.toUpperCase()}**.\n\n${formatEngineStatus(arg)}`;
+    }
+    return `Unknown engine "${arg}". Available: glm, gemini, claude.\nUsage: /engine <glm|gemini|claude>`;
+  }
+
   // Keep the last actual request for approval/resume flows.
   stateManager.setOriginalRequest(sessionId, getTextContent(userMessage));
   await warmSystemContextForSession(sessionId, projectRoot || getProjectRootFromState(sessionId));
 
   const chapo = getAgent('chapo');
-  const modelSelection = resolveModelSelection(chapo);
+  const modelSelection = resolveModelSelection(chapo, sessionId);
 
   console.info('[agents] processRequest start', {
     sessionId,
@@ -100,18 +118,10 @@ export async function processRequest(
   const trustMode = await getTrustMode();
   stateManager.setGatheredInfo(sessionId, 'trustMode', trustMode);
 
-  // Intake Seed: extract discrete requests as initial todos
-  const textContent = getTextContent(userMessage);
-  const initialTodos = await runIntakeSeed(textContent);
-  if (initialTodos.length > 0) {
-    state.todos = initialTodos;
-    sendEvent({ type: 'todo_updated', todos: initialTodos });
-  }
-
   try {
     const loopProjectRoot = projectRoot || getProjectRootFromState(sessionId);
     const loop = new ChapoLoop(sessionId, sendEvent, loopProjectRoot, modelSelection, {
-      maxIterations: 20,
+      maxIterations: 30,
     });
     const loopResult = await loop.run(userMessage, history);
 

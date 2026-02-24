@@ -1,72 +1,24 @@
 import { compactMessages } from '../../memory/compaction.js';
-import { drainInbox, offInboxMessage, onInboxMessage } from '../inbox.js';
-import { runIntakeSeed } from '../../services/intakeSeed.js';
-import * as stateManager from '../stateManager.js';
 import type { ConversationManager } from '../conversation-manager.js';
-import type { AgentStreamEvent, InboxMessage } from '../types.js';
+import type { AgentStreamEvent } from '../types.js';
 
 const COMPACTION_THRESHOLD = 160_000;
 
 export class ChapoLoopContextManager {
-  private inboxHandler: ((msg: InboxMessage) => void) | null = null;
   private originalUserMessage = '';
 
   constructor(
     private sessionId: string,
     private sendEvent: (event: AgentStreamEvent) => void,
     private conversation: ConversationManager,
-  ) {
-    // Subscribe to inbox events for reactive awareness
-    this.inboxHandler = (msg: InboxMessage) => {
-      this.sendEvent({
-        type: 'message_queued',
-        messageId: msg.id,
-        preview: 'Got it — I\'ll handle that too',
-      });
-    };
-    onInboxMessage(this.sessionId, this.inboxHandler);
-  }
+  ) {}
 
   dispose(): void {
-    if (this.inboxHandler) {
-      offInboxMessage(this.sessionId, this.inboxHandler);
-      this.inboxHandler = null;
-    }
+    // no-op — inbox lifecycle removed (simple queue model)
   }
 
   setPinnedRequest(userMessage: string): void {
     this.originalUserMessage = userMessage;
-  }
-
-  async checkInbox(): Promise<boolean> {
-    // Always check the actual inbox to avoid missing messages queued
-    // before the handler was registered.
-    const messages = drainInbox(this.sessionId);
-
-    if (messages.length === 0) return false;
-
-    for (const msg of messages) {
-      this.conversation.addMessage({
-        role: 'user',
-        content: msg.content,
-      });
-      this.conversation.addMessage({
-        role: 'system',
-        content: '[INBOX] Neue Nachricht eingetroffen. '
-          + 'Pruefe deine Todo-Liste und fuege neue Punkte hinzu falls noetig.',
-      });
-
-      // Seed todos from inbox messages so exit gate catches them
-      const newTodos = await runIntakeSeed(msg.content);
-      if (newTodos.length > 0) {
-        const state = stateManager.getOrCreateState(this.sessionId);
-        state.todos = [...state.todos, ...newTodos];
-        this.sendEvent({ type: 'todo_updated', todos: state.todos });
-      }
-    }
-
-    this.sendEvent({ type: 'inbox_processing', count: messages.length });
-    return true;
   }
 
   async checkAndCompact(): Promise<void> {
@@ -110,7 +62,4 @@ export class ChapoLoopContextManager {
     });
   }
 
-  drainRemainingMessages(): InboxMessage[] {
-    return drainInbox(this.sessionId);
-  }
 }

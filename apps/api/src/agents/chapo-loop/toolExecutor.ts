@@ -64,7 +64,6 @@ interface ToolExecutorDeps {
   buildToolResultContent: (
     result: { success: boolean; result?: unknown; error?: string },
   ) => { content: string; isError: boolean };
-  onPartialResponse: (message: string, inReplyTo?: string) => void;
 }
 
 export class ChapoToolExecutor {
@@ -124,9 +123,6 @@ export class ChapoToolExecutor {
     if (toolCall.name === 'respondToUser') {
       const message = (toolCall.arguments.message as string) || '';
       const inReplyTo = toolCall.arguments.inReplyTo as string | undefined;
-
-      // Record what was answered so the next LLM iteration knows
-      this.deps.onPartialResponse(message, inReplyTo);
 
       // Emit partial_response event for frontend
       this.deps.sendEvent({

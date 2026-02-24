@@ -144,6 +144,8 @@ export class ExternalOutputProjection implements Projection {
   name = 'external-output';
   private readonly typingCooldownMs = 3500;
   private readonly lastTypingByChat = new Map<string, number>();
+  /** Sessions that already sent a gate event (question/approval) — suppress WF_COMPLETED for these. */
+  private readonly gateEventSentForSession = new Set<string>();
 
   private shouldSendTyping(chatId: string): boolean {
     const now = Date.now();
@@ -194,6 +196,9 @@ export class ExternalOutputProjection implements Projection {
       }
 
       if (event.eventType === WF_COMPLETED) {
+        // If a gate event (question/approval) was already sent for this session,
+        // the WF_COMPLETED answer is the same question text — skip to avoid duplicate.
+        if (this.gateEventSentForSession.delete(event.sessionId)) return;
         const answer = typeof payload.answer === 'string' ? payload.answer : '';
         if (!answer.trim()) return;
         await sendTelegramMessage(chatId, answer);
@@ -202,6 +207,7 @@ export class ExternalOutputProjection implements Projection {
       }
 
       if (event.eventType === GATE_QUESTION_QUEUED) {
+        this.gateEventSentForSession.add(event.sessionId);
         const directQuestion = typeof payload.question === 'string' ? payload.question : '';
         const nestedQuestion = payload.question && typeof payload.question === 'object'
           ? (payload.question as Record<string, unknown>).question
@@ -211,6 +217,7 @@ export class ExternalOutputProjection implements Projection {
         return;
       }
 
+      this.gateEventSentForSession.add(event.sessionId);
       const directDescription = typeof payload.description === 'string' ? payload.description : '';
       const nestedDescription = payload.request && typeof payload.request === 'object'
         ? (payload.request as Record<string, unknown>).description
