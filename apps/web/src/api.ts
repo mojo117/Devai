@@ -770,20 +770,15 @@ export async function sendAgentApproval(
   approved: boolean,
   onEvent?: (event: ChatStreamEvent) => void
 ): Promise<MultiAgentResponse> {
-  // Prefer WebSocket control plane; fall back to HTTP NDJSON.
   try {
     if (typeof window !== 'undefined' && typeof WebSocket !== 'undefined' && getAuthToken()) {
       return await sendAgentApprovalWs(sessionId, approvalId, approved, onEvent);
     }
-  } catch {
-    // fall back
+  } catch (wsErr) {
+    console.error('[api] WebSocket approval failed:', wsErr);
+    throw new Error('Verbindung zum Server verloren. Bitte Seite neu laden.');
   }
-
-  return fetchJsonOrNdjson<MultiAgentResponse>(`${API_BASE}/chat/agents/approval`, {
-    method: 'POST',
-    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ sessionId, approvalId, approved }),
-  }, onEvent);
+  throw new Error('WebSocket nicht verfügbar. Bitte Seite neu laden.');
 }
 
 export async function sendAgentQuestionResponse(
@@ -792,20 +787,15 @@ export async function sendAgentQuestionResponse(
   answer: string,
   onEvent?: (event: ChatStreamEvent) => void
 ): Promise<MultiAgentResponse> {
-  // Prefer WebSocket control plane; fall back to HTTP NDJSON.
   try {
     if (typeof window !== 'undefined' && typeof WebSocket !== 'undefined' && getAuthToken()) {
       return await sendAgentQuestionResponseWs(sessionId, questionId, answer, onEvent);
     }
-  } catch {
-    // fall back
+  } catch (wsErr) {
+    console.error('[api] WebSocket question response failed:', wsErr);
+    throw new Error('Verbindung zum Server verloren. Bitte Seite neu laden.');
   }
-
-  return fetchJsonOrNdjson<MultiAgentResponse>(`${API_BASE}/chat/agents/question`, {
-    method: 'POST',
-    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ sessionId, questionId, answer }),
-  }, onEvent);
+  throw new Error('WebSocket nicht verfügbar. Bitte Seite neu laden.');
 }
 
 export async function sendMultiAgentMessage(
@@ -816,27 +806,15 @@ export async function sendMultiAgentMessage(
   options?: MultiAgentSessionOptions,
   pinnedUserfileIds?: string[],
 ): Promise<MultiAgentResponse> {
-  // Prefer WebSocket control plane; fall back to HTTP NDJSON.
   try {
     if (typeof window !== 'undefined' && typeof WebSocket !== 'undefined' && getAuthToken()) {
       return await sendMultiAgentMessageWs(message, projectRoot, sessionId, onEvent, options, pinnedUserfileIds);
     }
-  } catch {
-    // fall back
+  } catch (wsErr) {
+    console.error('[api] WebSocket message failed:', wsErr);
+    throw new Error('Verbindung zum Server verloren. Bitte Seite neu laden.');
   }
-
-  const sessionModePayload = buildSessionModePayload(options);
-  return fetchJsonOrNdjson<MultiAgentResponse>(`${API_BASE}/chat/agents`, {
-    method: 'POST',
-    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({
-      message,
-      projectRoot,
-      sessionId,
-      ...sessionModePayload,
-      ...(pinnedUserfileIds && pinnedUserfileIds.length > 0 ? { pinnedUserfileIds } : {}),
-    }),
-  }, onEvent);
+  throw new Error('WebSocket nicht verfügbar. Bitte Seite neu laden.');
 }
 
 export async function fetchAgentState(sessionId: string): Promise<{

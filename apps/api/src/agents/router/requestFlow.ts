@@ -131,8 +131,32 @@ export async function processRequest(
 
     return loopResult.answer;
   } catch (error) {
-    stateManager.setPhase(sessionId, 'error');
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[agents] ChapoLoop crashed, attempting recovery:', errorMessage);
+
+    // Attempt recovery: let CHAPO process the error intelligently
+    try {
+      const recoveryLoop = new ChapoLoop(sessionId, sendEvent, projectRoot || getProjectRootFromState(sessionId), modelSelection, {
+        maxIterations: 3,
+      });
+      const errorHistory = [
+        ...history.slice(-6),
+        { role: 'user', content: getTextContent(userMessage) },
+        { role: 'system', content: `[CRITICAL ERROR] The previous processing attempt crashed with: ${errorMessage}. Explain what happened to the user in plain language and suggest next steps. Do NOT retry the same operation that caused the crash.` },
+      ];
+      const recovery = await recoveryLoop.run(
+        `Erkläre dem User was schiefgelaufen ist: ${errorMessage}`,
+        errorHistory,
+      );
+      if (recovery.status !== 'error') {
+        return recovery.answer;
+      }
+    } catch (recoveryErr) {
+      console.error('[agents] Recovery loop also failed:', recoveryErr);
+    }
+
+    // Absolute fallback if recovery also fails
+    stateManager.setPhase(sessionId, 'error');
 
     stateManager.addHistoryEntry(
       sessionId,

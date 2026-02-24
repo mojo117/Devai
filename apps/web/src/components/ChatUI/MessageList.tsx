@@ -446,9 +446,9 @@ function InlineSystemEvent({
         )}
         {event.type === 'tool_call' && <span className="text-[10px] shrink-0">&#9654;</span>}
         {event.type === 'tool_result' && <span className="text-[10px] shrink-0">&#9664;</span>}
-        <span className="font-mono text-[11px] whitespace-nowrap">{getEventLabel()}</span>
+        <span className="font-mono text-[11px] whitespace-nowrap select-text">{getEventLabel()}</span>
         {detail && (
-          <span className="text-[10px] text-devai-text-secondary font-mono truncate min-w-0">
+          <span className="text-[10px] text-devai-text-secondary font-mono truncate min-w-0 select-text">
             _ {detail}
           </span>
         )}
