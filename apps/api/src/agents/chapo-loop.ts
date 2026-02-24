@@ -45,6 +45,8 @@ import type { QueueQuestionOptions } from './chapo-loop/gateManager.js';
 
 export type SendEventFn = (event: AgentStreamEvent) => void;
 
+const MEMORY_KEYWORDS = /\b(memorize|remember|merke|merk dir|don't forget|keep in mind|vergiss nicht|speicher)\b/i;
+
 interface ChapoLoopConfig {
   maxIterations: number;
 }
@@ -241,11 +243,19 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       if (currentState.todos.length > 0) {
         const pending = currentState.todos.filter((t) => t.status === 'pending');
         const completed = currentState.todos.filter((t) => t.status === 'completed');
-        const lines = currentState.todos.map((t) =>
-          `- [${t.status === 'completed' ? 'x' : ' '}] ${t.content}`
-        ).join('\n');
+        const lines = currentState.todos.map((t) => {
+          const checkbox = t.status === 'completed' ? 'x' : ' ';
+          const hint = (t.status !== 'completed' && MEMORY_KEYWORDS.test(t.content))
+            ? ' --> use memory_remember tool'
+            : '';
+          return `- [${checkbox}] ${t.content}${hint}`;
+        }).join('\n');
         const instruction = pending.length > 0
-          ? `\nACTION REQUIRED: Use respondToUser() to answer each pending item, then todoWrite() to mark it completed. Do NOT answer without tool calls.`
+          ? `\nACTION REQUIRED: For each pending item, use the appropriate tool:\n` +
+            `- Questions/answers: respondToUser(message) to deliver the answer\n` +
+            `- Memory instructions (marked -->): call memory_remember FIRST, then respondToUser to confirm\n` +
+            `- All items: todoWrite() to mark completed after handling\n` +
+            `Do NOT answer without tool calls.`
           : '';
         this.conversation.addMessage({
           role: 'system',
@@ -298,10 +308,31 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
               type: 'partial_response',
               message: intermediateAnswer,
             });
-            this.conversation.addMessage({
-              role: 'system',
-              content: `[Intermediate response sent] ${intermediateAnswer}`,
-            });
+
+            // Auto-complete single pending todo (unambiguous) or dedup for multi-todo
+            const iState = stateManager.getOrCreateState(this.sessionId);
+            const iPending = iState.todos.filter((t) => t.status === 'pending');
+
+            if (iPending.length === 1) {
+              iPending[0].status = 'completed';
+              this.sendEvent({ type: 'todo_updated', todos: iState.todos });
+              this.conversation.addMessage({
+                role: 'system',
+                content: `[Intermediate response sent & todo completed: "${iPending[0].content}"] ${intermediateAnswer}`,
+              });
+            } else if (iPending.length > 1) {
+              const remaining = iPending.map((t) => `- ${t.content}`).join('\n');
+              this.conversation.addMessage({
+                role: 'system',
+                content: `[ALREADY SENT to user] ${intermediateAnswer}\n\nThe above answer was already delivered. Do NOT repeat it.\nRemaining pending todos:\n${remaining}\nMove on to the NEXT pending todo. Use respondToUser() + todoWrite() for each remaining item.`,
+              });
+            } else {
+              this.conversation.addMessage({
+                role: 'system',
+                content: `[Intermediate response sent] ${intermediateAnswer}`,
+              });
+            }
+
             console.log(`[chapo-loop] Sent intermediate response (${intermediateAnswer.length} chars) before processing inbox`);
           } else {
             this.conversation.addMessage({
@@ -317,14 +348,22 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
         const pendingTodos = state.todos.filter((t) => t.status === 'pending');
         if (pendingTodos.length > 0 && this.exitGateBounces < 2) {
           this.exitGateBounces++;
-          const pendingList = pendingTodos.map((t) => `- [ ] ${t.content}`).join('\n');
+          const pendingList = pendingTodos.map((t) => {
+            const hint = MEMORY_KEYWORDS.test(t.content) ? ' --> use memory_remember tool' : '';
+            return `- [ ] ${t.content}${hint}`;
+          }).join('\n');
           this.conversation.addMessage({
             role: 'assistant',
             content: response.content || '',
           });
           this.conversation.addMessage({
             role: 'system',
-            content: `[EXIT GATE] You responded with text but you still have pending todos:\n${pendingList}\n\nYou MUST use tool calls:\n1. respondToUser(message) — to send your answer for each pending item\n2. todoWrite([...]) — to mark items as completed\n\nDo NOT respond without tool calls. Your text response alone does not reach the user — only respondToUser() delivers messages.`,
+            content: `[EXIT GATE] You responded with text but you still have pending todos:\n${pendingList}\n\n` +
+              `You MUST use tool calls:\n` +
+              `1. For questions/answers: respondToUser(message)\n` +
+              `2. For memory instructions (marked -->): memory_remember(content) first, then respondToUser to confirm\n` +
+              `3. todoWrite([...]) to mark items completed\n\n` +
+              `Do NOT respond without tool calls. Your text response alone does not reach the user.`,
           });
           continue;
         }
