@@ -299,28 +299,17 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
         const state = stateManager.getOrCreateState(this.sessionId);
         const pendingTodos = state.todos.filter((t) => t.status === 'pending');
         if (pendingTodos.length > 0 && this.exitGateBounces < 2) {
-          // If CHAPO has a substantive answer, auto-complete todos rather than bouncing.
-          // CHAPO answered the questions but just forgot to call todoWrite.
-          const answer = (response.content || '').trim();
-          if (answer.length > 50) {
-            for (const todo of pendingTodos) {
-              todo.status = 'completed';
-            }
-            console.log(`[chapo-loop] Exit gate: auto-completed ${pendingTodos.length} todo(s) — CHAPO answered without todoWrite`);
-            // Fall through to return the answer
-          } else {
-            this.exitGateBounces++;
-            const pendingList = pendingTodos.map((t) => `- [ ] ${t.content}`).join('\n');
-            this.conversation.addMessage({
-              role: 'assistant',
-              content: answer,
-            });
-            this.conversation.addMessage({
-              role: 'system',
-              content: `[EXIT GATE] Du hast noch offene Punkte:\n${pendingList}\nBearbeite sie oder nutze todoWrite um sie als erledigt zu markieren.`,
-            });
-            continue;
-          }
+          this.exitGateBounces++;
+          const pendingList = pendingTodos.map((t) => `- [ ] ${t.content}`).join('\n');
+          this.conversation.addMessage({
+            role: 'assistant',
+            content: response.content || '',
+          });
+          this.conversation.addMessage({
+            role: 'system',
+            content: `[EXIT GATE] Du hast noch offene Punkte:\n${pendingList}\nBearbeite sie oder nutze todoWrite um sie als erledigt zu markieren.`,
+          });
+          continue;
         }
 
         const answer = response.content || '';
