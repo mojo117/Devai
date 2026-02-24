@@ -231,11 +231,16 @@ export function ChatUI({
           const ev = event as Record<string, unknown>;
           const durationMs = typeof ev.durationMs === 'number' ? ev.durationMs : undefined;
           const resultStr = typeof ev.result === 'string' ? ev.result : JSON.stringify(ev.result);
+          const isEscalated = typeof resultStr === 'string' && /eskaliert/i.test(resultStr);
+          const isFailed = resultStr.startsWith('SCOUT Fehler:') || resultStr.includes('LLM Fehler');
+          const delegationStatus = isEscalated ? 'escalated' as const
+            : isFailed ? 'failed' as const
+            : 'completed' as const;
           setDelegations(prev => prev.map(d => {
             if (d.id !== activeDelegationRef.current) return d;
             return {
               ...d,
-              status: 'completed' as const,
+              status: delegationStatus,
               durationMs: durationMs ?? (Date.now() - d.startTime),
               response: resultStr,
             };
@@ -312,7 +317,7 @@ export function ChatUI({
           setDelegations(prev => prev.map(d => {
             if (d.id !== activeDelegationRef.current) return d;
             const steps = d.toolSteps.map(s =>
-              s.id === id ? { ...s, resultPreview: resultStr.slice(0, 120), success: true } : s
+              s.id === id ? { ...s, resultPreview: resultStr.slice(0, 120), success: Boolean(ev.success ?? !ev.isError) } : s
             );
             return { ...d, toolSteps: steps };
           }));
