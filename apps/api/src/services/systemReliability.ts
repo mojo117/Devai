@@ -163,9 +163,17 @@ export async function recentTopicDecayJob(): Promise<string> {
 
 export async function backupLocalDbJob(keepLast: number = DEFAULT_BACKUP_RETENTION): Promise<string> {
   const sourcePath = config.dbPath;
-  const dbStats = await stat(sourcePath);
-  if (!dbStats.isFile()) {
-    throw new Error(`DB path is not a file: ${sourcePath}`);
+  
+  try {
+    const dbStats = await stat(sourcePath);
+    if (!dbStats.isFile()) {
+      throw new Error(`DB path is not a file: ${sourcePath}`);
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return 'Local DB backup skipped: database file does not exist';
+    }
+    throw err;
   }
 
   const backupDir = resolve(dirname(sourcePath), 'backups');
