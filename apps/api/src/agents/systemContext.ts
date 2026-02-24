@@ -83,7 +83,8 @@ function parseGlobalContextSetting(raw: string | null): { content: string; enabl
       const enabled = typeof parsed.enabled === 'boolean' ? parsed.enabled : true;
       return { content, enabled };
     }
-  } catch {
+  } catch (err) {
+    console.warn('[systemContext] Failed to parse global context:', err instanceof Error ? err.message : err);
     return { content: raw, enabled: true };
   }
 
@@ -125,7 +126,8 @@ export async function getWorkspaceMdBlockForSession(sessionId: string): Promise<
     stateManager.setGatheredInfo(sessionId, 'workspaceMdMode', mode);
     stateManager.setGatheredInfo(sessionId, 'workspaceMdDiagnostics', ctx.diagnostics);
     return block;
-  } catch {
+  } catch (err) {
+    console.warn('[systemContext] Failed to load workspace MD:', err instanceof Error ? err.message : err);
     return existing;
   }
 }
@@ -145,7 +147,8 @@ export async function warmMemoryRetrievalForSession(
       .map((m) => `- [${m.namespace}] ${m.content}`);
     const block = `## Relevant Memories (vector search)\n${lines.join('\n')}`;
     stateManager.setGatheredInfo(sessionId, 'memoryRetrievalBlock', block);
-  } catch {
+  } catch (err) {
+    console.warn('[systemContext] Memory retrieval failed:', err instanceof Error ? err.message : err);
     stateManager.setGatheredInfo(sessionId, 'memoryRetrievalBlock', '');
   }
 }

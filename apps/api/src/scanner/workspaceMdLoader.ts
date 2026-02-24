@@ -46,7 +46,7 @@ async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path);
     return true;
-  } catch {
+  } catch (_err) {
     return false;
   }
 }
@@ -118,7 +118,8 @@ export async function loadWorkspaceMdContext(
     let content: string;
     try {
       content = await readFile(path, 'utf-8');
-    } catch {
+    } catch (err) {
+      console.warn(`[workspaceMdLoader] Failed to read ${spec.relativePath}:`, err instanceof Error ? err.message : err);
       if (spec.required) missingFiles.push(spec.relativePath);
       continue;
     }

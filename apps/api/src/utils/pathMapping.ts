@@ -28,7 +28,7 @@ async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path);
     return true;
-  } catch {
+  } catch (_err) {
     return false;
   }
 }

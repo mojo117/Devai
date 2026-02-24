@@ -62,7 +62,8 @@ function getJwtExpiresIn(): string {
 export function verifyToken(token: string): JwtPayload | null {
   try {
     return jwt.verify(token, getJwtSecret()) as JwtPayload
-  } catch {
+  } catch (err) {
+    console.warn('[authService] Token verification failed:', err instanceof Error ? err.message : err)
     return null
   }
 }
@@ -92,7 +93,8 @@ export async function authenticateUser(
   let client: SupabaseClient
   try {
     client = getAuthClient()
-  } catch {
+  } catch (err) {
+    console.warn('[authService] Auth client unavailable:', err instanceof Error ? err.message : err)
     return { success: false, error: 'Authentication unavailable' }
   }
 

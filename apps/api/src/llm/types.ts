@@ -52,6 +52,8 @@ export interface ToolCall {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
+  /** Provider-specific metadata (e.g. Gemini thought_signature) preserved for round-trip */
+  providerMetadata?: Record<string, unknown>;
 }
 
 export interface GenerateResponse {

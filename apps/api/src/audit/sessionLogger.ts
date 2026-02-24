@@ -12,8 +12,8 @@ function ensureLogsDir(): void {
   if (dirReady) return;
   try {
     mkdirSync(LOGS_DIR, { recursive: true });
-  } catch {
-    // already exists
+  } catch (err) {
+    console.warn('[sessionLogger] Failed to create logs dir:', err instanceof Error ? err.message : err);
   }
   dirReady = true;
 }
@@ -40,7 +40,8 @@ function formatValue(value: unknown): string {
   if (typeof value === 'string') return value;
   try {
     return JSON.stringify(value, null, 2);
-  } catch {
+  } catch (err) {
+    console.warn('[sessionLogger] JSON stringify failed:', err instanceof Error ? err.message : err);
     return String(value);
   }
 }
@@ -260,12 +261,12 @@ export class SessionLogger {
           if (now - stats.mtimeMs > CLEANUP_AGE_MS) {
             unlinkSync(filePath);
           }
-        } catch {
-          // skip unreadable files
+        } catch (err) {
+          console.warn('[sessionLogger] Failed to stat/delete log file:', err instanceof Error ? err.message : err);
         }
       }
-    } catch {
-      // logs dir may not exist yet
+    } catch (err) {
+      console.warn('[sessionLogger] Failed to read logs dir for cleanup:', err instanceof Error ? err.message : err);
     }
   }
 }

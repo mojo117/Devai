@@ -62,5 +62,6 @@ export function formatEngineStatus(engine: EngineName): string {
     `  CHAPO: ${p.chapo?.model} (fallback: ${p.chapo?.fallbackModel})`,
     `  DEVO:  ${p.devo?.model} / fast: ${p.devo?.fastModel ?? 'none'} (fallback: ${p.devo?.fallbackModel})`,
     `  SCOUT: ${p.scout?.model} (fallback: ${p.scout?.fallbackModel})`,
+    `  CAIO:  ${p.caio?.model} (fallback: ${p.caio?.fallbackModel})`,
   ].join('\n');
 }

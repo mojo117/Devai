@@ -43,7 +43,8 @@ function resolveCronConstructor(): CronConstructor {
     const require = createRequire(import.meta.url);
     const module = require('croner') as { Cron?: CronConstructor; default?: CronConstructor };
     return module.Cron ?? module.default ?? DisabledCron;
-  } catch {
+  } catch (err) {
+    console.warn('[scheduler] Failed to load croner module:', err instanceof Error ? err.message : err);
     return DisabledCron;
   }
 }

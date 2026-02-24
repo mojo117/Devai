@@ -13,7 +13,8 @@ async function loadWorkflowConfig(): Promise<WorkflowConfig> {
     const configPath = resolve(import.meta.dirname, '../../config/workflows.json');
     const content = await readFile(configPath, 'utf-8');
     return JSON.parse(content);
-  } catch {
+  } catch (err) {
+    console.warn('[github] Failed to load workflow config:', err instanceof Error ? err.message : err);
     return {
       stagingDeployWorkflow: 'deploy-staging.yml',
       testWorkflow: 'ci.yml',
@@ -227,7 +228,7 @@ export async function createPullRequest(
         gitRoot = (await git.revparse(['--show-toplevel'])).trim();
         break;
       }
-    } catch { /* skip */ }
+    } catch (err) { console.warn('[github] Failed to check git repo:', err instanceof Error ? err.message : err); }
   }
   if (!gitRoot) throw new Error('No git repository found in allowed roots');
 
@@ -292,7 +293,7 @@ export async function createPullRequest(
           const fileData = await getFileRes.json() as { sha: string };
           fileSha = fileData.sha;
         }
-      } catch { /* file doesn't exist yet */ }
+      } catch (err) { console.warn('[github] File SHA lookup failed (may be new file):', err instanceof Error ? err.message : err); }
 
       const putBody: Record<string, unknown> = {
         message: `${title}: update ${filePath}`,

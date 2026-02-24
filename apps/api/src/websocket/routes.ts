@@ -37,13 +37,13 @@ function createWsConnectionGuards(socket: WebSocket): WsConnectionGuards {
     cleanup();
     try {
       socket.send(JSON.stringify({ type: 'error', error }));
-    } catch {
-      // Ignore send failures while closing.
+    } catch (err) {
+      console.warn('[ws] Send failed while closing:', err instanceof Error ? err.message : err);
     }
     try {
       socket.close(code, error.slice(0, 120));
-    } catch {
-      // Ignore close failures.
+    } catch (err) {
+      console.warn('[ws] Close failed:', err instanceof Error ? err.message : err);
     }
   };
 
@@ -55,8 +55,8 @@ function createWsConnectionGuards(socket: WebSocket): WsConnectionGuards {
     }
     try {
       socket.send(JSON.stringify({ type: 'ping', timestamp: new Date().toISOString() }));
-    } catch {
-      // Ignore send failures; close/error handlers will clean up.
+    } catch (err) {
+      console.warn('[ws] Heartbeat ping send failed:', err instanceof Error ? err.message : err);
     }
   }, WS_HEARTBEAT_INTERVAL_MS);
 
@@ -89,7 +89,7 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
     if (!verifyToken(token)) {
       try {
         socket.send(JSON.stringify({ type: 'error', error: 'Invalid or expired token' }));
-      } catch { /* ignore */ }
+      } catch (err) { console.warn('[ws] Failed to send auth error:', err instanceof Error ? err.message : err); }
       socket.close();
       return;
     }
@@ -159,7 +159,7 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
     if (!verifyToken(token)) {
       try {
         socket.send(JSON.stringify({ type: 'error', error: 'Invalid or expired token' }));
-      } catch { /* ignore */ }
+      } catch (err) { console.warn('[ws] Failed to send auth error (chat):', err instanceof Error ? err.message : err); }
       socket.close();
       return;
     }
@@ -203,7 +203,8 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
       let msg: Record<string, unknown>;
       try {
         msg = JSON.parse(data.toString()) as Record<string, unknown>;
-      } catch {
+      } catch (err) {
+        console.warn('[ws] Failed to parse incoming WS message:', err instanceof Error ? err.message : err);
         return;
       }
 

@@ -79,7 +79,8 @@ function normalizeAndValidateImageUrl(rawUrl: string): string | null {
     if (parsed.protocol !== 'https:') return null;
     if (!isAllowedImageHost(parsed.hostname)) return null;
     return parsed.toString();
-  } catch {
+  } catch (err) {
+    console.warn('[externalOutput] Failed to parse image URL:', err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -91,8 +92,8 @@ function filenameFromUrl(url: string): string {
     if (name && name.includes('.')) {
       return decodeURIComponent(name);
     }
-  } catch {
-    // ignore
+  } catch (err) {
+    console.warn('[externalOutput] Failed to extract filename from URL:', err instanceof Error ? err.message : err);
   }
   return `image_${Date.now()}.png`;
 }

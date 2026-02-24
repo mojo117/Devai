@@ -441,8 +441,8 @@ export async function executeTool(
         try {
           const s = await stat(join(runtimeRoot, 'context/documents'));
           if (s.isDirectory()) return runtimeRoot;
-        } catch {
-          // ignore
+        } catch (err) {
+          console.warn('[executor] Context root check failed:', err instanceof Error ? err.message : err);
         }
       }
       return await toRuntimePath(config.allowedRoots[0]);

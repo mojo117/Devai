@@ -37,7 +37,7 @@ async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path);
     return true;
-  } catch {
+  } catch (_err) {
     return false;
   }
 }
@@ -48,7 +48,7 @@ async function findCaseInsensitiveMatch(parentDir: string, targetName: string): 
     const entries = await readdir(parentDir);
     const match = entries.find(entry => entry.toLowerCase() === targetName.toLowerCase());
     return match || null;
-  } catch {
+  } catch (_err) {
     return null;
   }
 }
@@ -254,8 +254,8 @@ export async function listFiles(path: string, options?: FsOptions): Promise<List
         try {
           const stats = await stat(entryPath);
           size = stats.size;
-        } catch {
-          // Ignore stat errors
+        } catch (err) {
+          console.warn('[fs] stat failed for entry:', err instanceof Error ? err.message : err);
         }
       }
 
@@ -442,8 +442,8 @@ export async function grepFiles(
           if (matches.length >= maxMatches) break;
         }
       }
-    } catch {
-      // Skip files that can't be read
+    } catch (err) {
+      console.warn('[fs] Failed to read file during grep:', err instanceof Error ? err.message : err);
     }
 
     if (matches.length >= maxMatches) break;

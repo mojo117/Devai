@@ -382,7 +382,7 @@ const shutdown = async () => {
   console.log('Shutting down...');
   schedulerService.stop();
   if (mcpInitPromise) {
-    try { await mcpInitPromise; } catch { /* ignore */ }
+    try { await mcpInitPromise; } catch (err) { console.warn('[server] MCP init failed during shutdown:', err instanceof Error ? err.message : err); }
   }
   await mcpManager.shutdown();
   await app.close();

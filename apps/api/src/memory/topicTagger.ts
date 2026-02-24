@@ -95,8 +95,8 @@ function parseTagResponse(raw: string): TagResult | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(jsonString);
-  } catch {
-    console.warn('[topicTagger] JSON parse failed, raw:', jsonString.slice(0, 200));
+  } catch (err) {
+    console.warn('[topicTagger] JSON parse failed:', err instanceof Error ? err.message : err, 'raw:', jsonString.slice(0, 200));
     return null;
   }
 

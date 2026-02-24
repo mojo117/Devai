@@ -47,8 +47,8 @@ export async function getPermissionPatterns(userId?: string): Promise<Permission
     // Filter out expired patterns
     const now = new Date().toISOString();
     return patterns.filter(p => !p.expiresAt || p.expiresAt > now);
-  } catch {
-    console.error('[permissions] Failed to parse permission patterns');
+  } catch (err) {
+    console.error('[permissions] Failed to parse permission patterns:', err instanceof Error ? err.message : err);
     return [];
   }
 }

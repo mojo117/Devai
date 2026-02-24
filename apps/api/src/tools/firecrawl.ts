@@ -154,7 +154,8 @@ function urlMatchesDomains(url: string, domains: string[]): boolean {
   try {
     const hostname = new URL(url).hostname.toLowerCase();
     return domains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
-  } catch {
+  } catch (err) {
+    console.warn('[firecrawl] URL domain match failed:', err instanceof Error ? err.message : err);
     return false;
   }
 }
@@ -210,7 +211,8 @@ async function postFirecrawl<TResponse>(
   if (rawText) {
     try {
       parsedBody = JSON.parse(rawText);
-    } catch {
+    } catch (err) {
+      console.warn('[firecrawl] Response JSON parse failed, using raw text:', err instanceof Error ? err.message : err);
       parsedBody = rawText;
     }
   }

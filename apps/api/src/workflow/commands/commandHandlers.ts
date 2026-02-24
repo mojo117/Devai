@@ -112,8 +112,8 @@ export class CommandHandlers {
         if (isAllowed) {
           validatedProjectRoot = normalizedPath;
         }
-      } catch {
-        // ignore
+      } catch (err) {
+        console.warn('[commandHandlers] Failed to validate project root:', err instanceof Error ? err.message : err);
       }
     }
 

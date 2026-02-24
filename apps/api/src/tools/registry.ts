@@ -23,6 +23,7 @@ export type ToolName =
   // GitHub Tools
   | 'github_triggerWorkflow'
   | 'github_getWorkflowRunStatus'
+  | 'github_createPR'
   // Logs Tools
   | 'logs_getStagingLogs'
   // DevOps Tools (DEVO)

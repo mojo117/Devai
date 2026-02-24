@@ -56,7 +56,8 @@ function normalizeDelegationContext(value: unknown): string | undefined {
   if (value && typeof value === 'object') {
     try {
       return JSON.stringify(value, null, 2);
-    } catch {
+    } catch (err) {
+      console.warn('[delegationUtils] Context serialization failed:', err instanceof Error ? err.message : err);
       return undefined;
     }
   }

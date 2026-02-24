@@ -488,7 +488,7 @@ console.info('[mcp:serena] Connected');
 
 ### Code Style
 
-- **Semikolons:** Nein (Projekt-Standard ist kein Semikolon)
+- **Semikolons:** Ja (Projekt-Standard ist mit Semikolon)
 - **Quotes:** Single Quotes (`'text'`)
 - **Trailing Commas:** Ja
 - **Indentation:** 2 Spaces

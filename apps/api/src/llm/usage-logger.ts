@@ -72,7 +72,8 @@ export function logUsage(
     };
 
     appendFileSync(getLogPath(), JSON.stringify(entry) + '\n');
-  } catch {
+  } catch (err) {
     // Logging must never break the main flow
+    console.warn('[usage-logger] Failed to write usage log:', err instanceof Error ? err.message : err);
   }
 }

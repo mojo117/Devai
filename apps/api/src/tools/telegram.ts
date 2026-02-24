@@ -35,8 +35,8 @@ function parseFilenameFromContentDisposition(header: string | null): string | un
   if (encodedMatch) {
     try {
       return decodeURIComponent(encodedMatch[1]);
-    } catch {
-      // fall through
+    } catch (err) {
+      console.warn('[telegram] Failed to decode Content-Disposition filename:', err instanceof Error ? err.message : err);
     }
   }
 
@@ -60,8 +60,8 @@ function filenameFromUrl(url: string): string {
     if (lastSegment && lastSegment.includes('.')) {
       return decodeURIComponent(lastSegment);
     }
-  } catch {
-    // invalid URL, fall through
+  } catch (err) {
+    console.warn('[telegram] Failed to extract filename from URL:', err instanceof Error ? err.message : err);
   }
   return 'download';
 }

@@ -45,7 +45,8 @@ export async function assertPublicHttpUrl(url: string): Promise<URL> {
   let parsed: URL;
   try {
     parsed = new URL(url);
-  } catch {
+  } catch (err) {
+    console.warn('[urlSafety] URL parse failed:', err instanceof Error ? err.message : err);
     throw new Error(`Invalid URL: ${url}`);
   }
   if (!['http:', 'https:'].includes(parsed.protocol)) {

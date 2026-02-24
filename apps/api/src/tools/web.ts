@@ -149,8 +149,8 @@ export async function webFetch(
       try {
         const parsed = JSON.parse(content);
         content = JSON.stringify(parsed, null, 2);
-      } catch {
-        // Keep as-is if not valid JSON
+      } catch (err) {
+        console.warn('[web] JSON pretty-print failed:', err instanceof Error ? err.message : err);
       }
     }
 

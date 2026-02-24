@@ -83,10 +83,15 @@ export class GeminiProvider implements LLMProviderAdapter {
         textContent += part.text;
       } else if ('functionCall' in part && part.functionCall) {
         const name = aliasToToolName.get(part.functionCall.name) || part.functionCall.name;
+        // Preserve thought_signature for Gemini 3.1+ thinking models (required for round-trip)
+        const rawPart = part as unknown as Record<string, unknown>;
+        const providerMetadata: Record<string, unknown> | undefined =
+          rawPart.thought_signature != null ? { thought_signature: rawPart.thought_signature } : undefined;
         toolCalls.push({
           id: `gemini-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           name,
           arguments: part.functionCall.args as Record<string, unknown>,
+          providerMetadata,
         });
       }
     }
@@ -148,12 +153,17 @@ export class GeminiProvider implements LLMProviderAdapter {
         parts.push({ text: getTextContent(message.content) });
       }
       for (const tc of message.toolCalls) {
-        parts.push({
+        const fcPart: Record<string, unknown> = {
           functionCall: {
             name: toolNameToAlias.get(tc.name) || tc.name,
             args: tc.arguments,
           },
-        });
+        };
+        // Restore thought_signature for Gemini 3.1+ thinking models
+        if (tc.providerMetadata?.thought_signature != null) {
+          fcPart.thought_signature = tc.providerMetadata.thought_signature;
+        }
+        parts.push(fcPart as unknown as Part);
       }
       return { role: 'model', parts };
     }

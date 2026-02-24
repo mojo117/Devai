@@ -172,8 +172,8 @@ export async function searchDocuments(
         });
         totalMatches += matches.length;
       }
-    } catch {
-      // Skip files that can't be read
+    } catch (err) {
+      console.warn('[context] Failed to read document for search:', err instanceof Error ? err.message : err);
     }
   }
 

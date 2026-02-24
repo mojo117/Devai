@@ -51,8 +51,8 @@ export async function runHeartbeat(): Promise<void> {
 
   try {
     runId = await insertHeartbeatRun('running')
-  } catch {
-    console.error('[heartbeat] Failed to create DB record, running anyway')
+  } catch (err) {
+    console.error('[heartbeat] Failed to create DB record, running anyway:', err instanceof Error ? err.message : err)
   }
 
   const sessionId = `heartbeat-${new Date().toISOString().slice(0, 10)}`

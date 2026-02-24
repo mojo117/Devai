@@ -38,8 +38,9 @@ export class PersistenceQueue {
     this.clearDebounce();
     try {
       await this.persistNow();
-    } catch {
+    } catch (err) {
       // Best-effort; callers should not fail user-visible flows on persistence errors.
+      console.warn('[state] Flush persistence failed:', err instanceof Error ? err.message : err);
     }
   }
 

@@ -28,8 +28,9 @@ export function parseIntakeSeedResponse(raw: string): TodoItem[] {
   let parsed: unknown
   try {
     parsed = JSON.parse(cleaned)
-  } catch {
+  } catch (err) {
     // Try to salvage truncated JSON — close any open braces/brackets
+    console.warn('[intakeSeed] Initial JSON parse failed, attempting salvage:', err instanceof Error ? err.message : err)
     const salvaged = cleaned
       .replace(/,\s*$/, '')          // trailing comma
       .replace(/"[^"]*$/, '"')       // unclosed string
@@ -38,7 +39,8 @@ export function parseIntakeSeedResponse(raw: string): TodoItem[] {
       + ']'
     try {
       parsed = JSON.parse(salvaged)
-    } catch {
+    } catch (err) {
+      console.warn('[intakeSeed] Salvaged JSON parse also failed:', err instanceof Error ? err.message : err)
       return []
     }
   }

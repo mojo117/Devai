@@ -139,7 +139,7 @@ export async function ensureStateLoaded(sessionId: string): Promise<Conversation
         if (defaultEngine !== 'glm') {
           state.taskContext.gatheredInfo.engineProfile = defaultEngine;
         }
-      } catch { /* ignore — glm default is fine */ }
+      } catch (err) { console.warn('[state] Failed to load default engine:', err instanceof Error ? err.message : err); }
     }
     stateStore.set(sessionId, state);
     scheduleMemoryCleanup(sessionId);
