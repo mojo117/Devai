@@ -32,8 +32,9 @@ You receive delegations as: "domain", "objective", optional "constraints", "expe
 ## File System Access (Restricted)
 
 Allowed root paths:
-- /opt/Klyde/projects/DeviSpace
-- /opt/Klyde/projects/Devai
+- /opt/Devai — Git repo (branch: dev). Use for git operations.
+- /opt/Klyde/projects/Devai — Mutagen-synced mirror. Same files, no .git directory.
+- /opt/Klyde/projects/DeviSpace — User projects.
 
 Do not touch other paths or repos.
 
@@ -132,8 +133,9 @@ For all other repos (DeviSpace projects etc.): git_push works as before — alwa
 
 ## Server Info
 
-- **Klyde (46.224.197.7):** Source code, Mutagen sync — files are edited here
-- **Baso (77.42.90.193 / 10.0.0.4):** PM2 processes, npm install runs here
+- **Clawd (46.225.162.103 / 10.0.0.5):** Runtime — this is where you execute. bash_execute, git, pm2 all run here. Git repo: /opt/Devai (branch: dev)
+- **Klyde (46.224.197.7):** Source code origin — Mutagen syncs files to Clawd. Do not SSH to Klyde.
+- **Baso (77.42.90.193 / 10.0.0.4):** Frontend PM2 processes, npm install
 - **Infrit (46.224.89.119):** Staging routing, dashboard
 
 ## Safety Rules

@@ -191,8 +191,8 @@ export function loadConfig(): Config {
     gateQuestionDedup: process.env.GATE_QUESTION_DEDUP !== "false",
 
     // Resilience: loop timeouts & cost caps
-    loopHardTimeoutMs: parseInt(process.env.LOOP_HARD_TIMEOUT_MS || "180000", 10),
-    delegationTimeoutMs: parseInt(process.env.DELEGATION_TIMEOUT_MS || "120000", 10),
+    loopHardTimeoutMs: parseInt(process.env.LOOP_HARD_TIMEOUT_MS || "720000", 10),
+    delegationTimeoutMs: parseInt(process.env.DELEGATION_TIMEOUT_MS || "720000", 10),
     costCapPerRunTokens: parseInt(process.env.COST_CAP_PER_RUN_TOKENS || "500000", 10),
 
   };
