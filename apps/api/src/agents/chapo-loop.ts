@@ -236,6 +236,19 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       // Check if compaction needed before LLM call
       await this.contextManager.checkAndCompact();
 
+      // Inject current todo state so CHAPO sees progress each iteration
+      const currentState = stateManager.getOrCreateState(this.sessionId);
+      if (currentState.todos.length > 0) {
+        const completed = currentState.todos.filter((t) => t.status === 'completed').length;
+        const lines = currentState.todos.map((t) =>
+          `- [${t.status === 'completed' ? 'x' : ' '}] ${t.content}`
+        ).join('\n');
+        this.conversation.addMessage({
+          role: 'system',
+          content: `[TODOS] ${completed}/${currentState.todos.length} erledigt:\n${lines}`,
+        });
+      }
+
       // Call LLM with conversation + tools
       const t0 = Date.now();
       console.log(`[chapo-loop] LLM call #${this.iteration} starting (${provider}/${model}, ${tools.length} tools)`);
