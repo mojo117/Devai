@@ -274,11 +274,24 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
         // Check inbox before finalizing — catch late-arriving messages
         const hasNew = await this.contextManager.checkInbox();
         if (hasNew) {
-          // Save current answer as intermediate response, continue loop
-          this.conversation.addMessage({
-            role: 'assistant',
-            content: response.content || '',
-          });
+          const intermediateAnswer = response.content || '';
+          // Deliver the current answer to the user before processing new messages
+          if (intermediateAnswer.trim()) {
+            this.sendEvent({
+              type: 'partial_response',
+              message: intermediateAnswer,
+            });
+            this.conversation.addMessage({
+              role: 'system',
+              content: `[Intermediate response sent] ${intermediateAnswer}`,
+            });
+            console.log(`[chapo-loop] Sent intermediate response (${intermediateAnswer.length} chars) before processing inbox`);
+          } else {
+            this.conversation.addMessage({
+              role: 'assistant',
+              content: '',
+            });
+          }
           continue;
         }
 

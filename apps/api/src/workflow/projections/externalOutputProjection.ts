@@ -14,6 +14,7 @@ import {
   TOOL_CALL_STARTED,
   GATE_QUESTION_QUEUED,
   GATE_APPROVAL_QUEUED,
+  RESPONSE_PARTIAL,
 } from '../events/catalog.js';
 import { getExternalSessionBySessionId } from '../../db/schedulerQueries.js';
 import { sendTelegramMessage, sendTelegramChatAction, sendTelegramDocument } from '../../external/telegram.js';
@@ -161,7 +162,8 @@ export class ExternalOutputProjection implements Projection {
       event.eventType !== TOOL_CALL_STARTED &&
       event.eventType !== WF_COMPLETED &&
       event.eventType !== GATE_QUESTION_QUEUED &&
-      event.eventType !== GATE_APPROVAL_QUEUED
+      event.eventType !== GATE_APPROVAL_QUEUED &&
+      event.eventType !== RESPONSE_PARTIAL
     ) {
       return;
     }
@@ -181,6 +183,13 @@ export class ExternalOutputProjection implements Projection {
       ) {
         if (!this.shouldSendTyping(String(chatId))) return;
         await sendTelegramChatAction(chatId, 'typing');
+        return;
+      }
+
+      if (event.eventType === RESPONSE_PARTIAL) {
+        const message = typeof payload.message === 'string' ? payload.message : '';
+        if (!message.trim()) return;
+        await sendTelegramMessage(chatId, message);
         return;
       }
 

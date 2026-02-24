@@ -48,6 +48,10 @@ export const GATE_QUESTION_RESOLVED = 'gate.question.resolved' as const;
 export const GATE_APPROVAL_QUEUED = 'gate.approval.queued' as const;
 export const GATE_APPROVAL_RESOLVED = 'gate.approval.resolved' as const;
 
+// ── Response events ─────────────────────────────────────────────
+
+export const RESPONSE_PARTIAL = 'response.partial' as const;
+
 // ── System events ───────────────────────────────────────────────
 
 export const SYSTEM_HEARTBEAT = 'system.heartbeat' as const;
@@ -186,4 +190,5 @@ export const LEGACY_TYPE_MAP: Record<string, string> = {
   action_pending: TOOL_ACTION_PENDING,
   user_question: GATE_QUESTION_QUEUED,
   approval_request: GATE_APPROVAL_QUEUED,
+  partial_response: RESPONSE_PARTIAL,
 };
