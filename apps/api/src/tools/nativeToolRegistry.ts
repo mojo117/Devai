@@ -305,6 +305,29 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     },
     requiresConfirmation: false,
   },
+  {
+    name: 'github_createPR',
+    description: 'Create a GitHub Pull Request from locally committed changes. Pushes changed files to an ephemeral branch and opens a PR to the base branch. Use this instead of git_push for the Devai repo.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'PR title (short, descriptive)',
+        },
+        description: {
+          type: 'string',
+          description: 'PR body/description (optional — auto-generated if omitted)',
+        },
+        baseBranch: {
+          type: 'string',
+          description: 'Target branch for the PR (default: "dev")',
+        },
+      },
+      required: ['title'],
+    },
+    requiresConfirmation: true,
+  },
 
   // Logs Tools
   {

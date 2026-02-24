@@ -62,6 +62,7 @@ export const DEVO_AGENT: AgentDefinition = {
     // GitHub tools
     'github_triggerWorkflow',
     'github_getWorkflowRunStatus',
+    'github_createPR',
     // PM2 tools
     'pm2_status',
     'pm2_restart',

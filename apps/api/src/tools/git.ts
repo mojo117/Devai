@@ -175,6 +175,17 @@ export async function gitPush(
     );
   }
 
+  // Safety check: Devai repo must use PRs, not direct push
+  const remotes = await git.getRemotes(true);
+  const isDevaiRepo = remotes.some((r) =>
+    r.refs?.push?.includes('mojo117/Devai') || r.refs?.fetch?.includes('mojo117/Devai')
+  );
+  if (isDevaiRepo) {
+    throw new Error(
+      'Direct push to Devai repo is not allowed. Use github_createPR to create a pull request instead.'
+    );
+  }
+
   try {
     await git.push(remote, targetBranch);
     return {

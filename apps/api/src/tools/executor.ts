@@ -182,6 +182,11 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
     args.inputs as Record<string, string> | undefined,
   ),
   github_getWorkflowRunStatus: async (args) => githubTools.getWorkflowRunStatus(args.runId as number),
+  github_createPR: async (args) => githubTools.createPullRequest(
+    args.title as string,
+    args.description as string | undefined,
+    args.baseBranch as string | undefined,
+  ),
 
   // Logs Tools
   logs_getStagingLogs: async (args) => logsTools.getStagingLogs(args.lines as number | undefined),
