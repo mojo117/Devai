@@ -44,8 +44,11 @@ export function DelegationCard({ delegation }: { delegation: DelegationData }) {
   return (
     <div className="flex justify-start">
       <div
-        className="rounded-xl border border-devai-border bg-devai-card max-w-[85%] w-full overflow-hidden cursor-pointer hover:border-devai-border/80 transition-colors"
+        role="button"
+        tabIndex={0}
+        className="rounded-xl border border-devai-border bg-devai-card max-w-[85%] w-full overflow-hidden cursor-pointer hover:border-devai-border/80 transition-colors focus:outline-none focus:ring-2 focus:ring-devai-accent/50"
         onClick={() => setExpanded(prev => !prev)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(prev => !prev); } }}
       >
         {/* Header */}
         <div className="px-4 py-3 space-y-2">

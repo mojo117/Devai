@@ -176,6 +176,8 @@ Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
       : finalContent,
     durationMs: Date.now() - delegationStartMs,
     toolCount: subToolCount,
+    delegationStatus: runResult.exit === 'escalated' ? 'escalated'
+      : (runResult.exit === 'llm_error' ? 'failed' : 'completed'),
   });
 
   const toolEvidence = target === 'caio'
@@ -267,6 +269,7 @@ async function delegateToScout(
       result: loopResult.summary,
       durationMs: Date.now() - delegationStartMs,
       toolCount: 1,
+      delegationStatus: 'completed',
     });
     return loopResult;
   } catch (error) {
@@ -283,6 +286,7 @@ async function delegateToScout(
       result: `SCOUT Fehler: ${message}`,
       durationMs: Date.now() - delegationStartMs,
       toolCount: 0,
+      delegationStatus: 'failed',
     });
     throw error;
   }

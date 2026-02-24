@@ -360,7 +360,7 @@ export type AgentStreamEvent =
   | { type: 'parallel_start'; agents: AgentName[]; tasks: string[] }
   | { type: 'parallel_progress'; agent: AgentName; progress: string }
   | { type: 'parallel_complete'; results: DelegationResult[] }
-  | { type: 'agent_complete'; agent: AgentName; result: unknown; durationMs?: number; toolCount?: number }
+  | { type: 'agent_complete'; agent: AgentName; result: unknown; durationMs?: number; toolCount?: number; delegationStatus?: 'completed' | 'failed' | 'escalated' }
   | { type: 'error'; agent: AgentName; error: string }
   // SCOUT events
   | { type: 'scout_start'; query: string; scope: ScoutScope }
