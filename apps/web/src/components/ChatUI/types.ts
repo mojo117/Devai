@@ -54,3 +54,28 @@ export interface ChatUIProps {
   onPinUserfile?: (id: string) => void;
   onClearPinnedUserfiles?: () => void;
 }
+
+export type DelegationStatus = 'working' | 'completed' | 'failed' | 'escalated';
+
+export interface DelegationToolStep {
+  id: string;
+  name: string;
+  argsPreview: string;
+  resultPreview?: string;
+  success?: boolean;
+  durationMs?: number;
+}
+
+export interface DelegationData {
+  id: string;
+  from: AgentName;
+  to: AgentName;
+  task: string;
+  domain?: string;
+  status: DelegationStatus;
+  startTime: number;
+  durationMs?: number;
+  toolSteps: DelegationToolStep[];
+  prompt?: string;
+  response?: string;
+}
