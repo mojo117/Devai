@@ -262,7 +262,7 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
 
     // --- Resilience state ---
     const loopStartTime = Date.now();
-    let softTimeoutInjected = false;
+    let lastProgressAt = Date.now();
     let costCapInjected = false;
     let consecutiveNoProgress = 0;
     let lastErrorMessage = '';
@@ -273,27 +273,10 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
     for (this.iteration = 0; this.iteration < this.config.maxIterations; this.iteration++) {
       const elapsed = Date.now() - loopStartTime;
 
-      // --- 1.1 Soft Timeout: inject time warning as context for CHAPO ---
-      if (!softTimeoutInjected && elapsed > appConfig.loopSoftTimeoutMs) {
-        softTimeoutInjected = true;
-        const remainingSec = Math.round((appConfig.loopHardTimeoutMs - elapsed) / 1000);
-        this.conversation.addMessage({
-          role: 'system',
-          content: `[TIME WARNING] ${Math.round(elapsed / 1000)}s elapsed. ` +
-            `You have ~${remainingSec}s remaining. ` +
-            `Deliver your current result or delegate remaining work. ` +
-            `Do NOT start new complex operations.`,
-        });
-        this.sendEvent({
-          type: 'agent_thinking',
-          agent: 'chapo',
-          status: 'Time budget warning — wrapping up...',
-        });
-      }
-
-      // --- 1.1 Hard Timeout: snapshot state + ask user to continue ---
-      if (elapsed > appConfig.loopHardTimeoutMs) {
-        console.warn(`${trace}[chapo-loop] Hard timeout at ${Math.round(elapsed / 1000)}s, iteration ${this.iteration}`);
+      // --- Stall Timeout: only fires when no progress for hardTimeoutMs ---
+      const timeSinceProgress = Date.now() - lastProgressAt;
+      if (timeSinceProgress > appConfig.loopHardTimeoutMs) {
+        console.warn(`${trace}[chapo-loop] Stall timeout: ${Math.round(timeSinceProgress / 1000)}s without progress, iteration ${this.iteration}`);
         stateManager.setGatheredInfo(this.sessionId, 'timeoutSnapshot', {
           iteration: this.iteration,
           elapsed,
@@ -303,8 +286,8 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
         await stateManager.flushState(this.sessionId);
 
         return this.queueQuestion(
-          `Die Verarbeitung hat ${Math.round(elapsed / 1000)}s gedauert und das Zeitbudget überschritten. ` +
-          `Bisheriger Fortschritt: ${this.iteration} Iterationen. Soll ich weitermachen?`,
+          `Seit ${Math.round(timeSinceProgress / 1000)}s kein Fortschritt. ` +
+          `Bisheriger Stand: ${this.iteration} Iterationen, ${Math.round(elapsed / 1000)}s Laufzeit. Soll ich weitermachen?`,
           this.iteration,
           { kind: 'continue', turnId: this.getActiveTurnId() || undefined },
         );
@@ -334,6 +317,9 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
 
       const llmDuration = Date.now() - t0;
       console.log(`${trace}[chapo-loop] LLM call #${this.iteration} completed in ${llmDuration}ms, err=${err?.message || 'none'}, content=${response?.content?.slice(0, 100) || 'null'}, toolCalls=${response?.toolCalls?.length || 0}`);
+
+      // LLM responded — reset progress tracker
+      if (response) lastProgressAt = Date.now();
 
       // Accumulate token usage
       if (response?.usage) {
@@ -462,6 +448,7 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       const hadMeaningfulAction = toolResults.some((r) => !r.isError);
       if (hadMeaningfulAction) {
         consecutiveNoProgress = 0;
+        lastProgressAt = Date.now();
       } else {
         consecutiveNoProgress++;
       }
