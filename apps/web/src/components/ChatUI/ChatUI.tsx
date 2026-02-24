@@ -297,7 +297,7 @@ export function ChatUI({
         break;
       }
       case 'todo_updated': {
-        const ev = event as { todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }> };
+        const ev = event as unknown as { todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }> };
         setCurrentTodos(ev.todos || []);
         break;
       }
