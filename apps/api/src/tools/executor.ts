@@ -11,6 +11,7 @@ import * as webTools from './web.js';
 import * as firecrawlTools from './firecrawl.js';
 import * as contextTools from './context.js';
 import * as memoryTools from './memory.js';
+import * as historyTools from './history.js';
 import * as schedulerTools from './scheduler.js';
 import * as taskforgeTools from './taskforge.js';
 import * as emailTools from './email.js';
@@ -307,6 +308,17 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   }),
   memory_readToday: async () => memoryTools.memoryReadToday(),
 
+  // History Tools
+  history_search: async (args) => historyTools.historySearch({
+    query: args.query as string,
+    limit: args.limit as number | undefined,
+    role: args.role as 'user' | 'assistant' | 'system' | undefined,
+    sessionId: args.sessionId as string | undefined,
+  }),
+  history_listSessions: async (args) => historyTools.historyListSessions({
+    limit: args.limit as number | undefined,
+  }),
+
   // Scheduler Tools
   scheduler_create: async (args) => schedulerTools.schedulerCreate(
     args.name as string,
@@ -535,6 +547,8 @@ const READ_ONLY_TOOLS = new Set([
   'context_searchDocuments',
   'memory_search',
   'memory_readToday',
+  'history_search',
+  'history_listSessions',
   'scheduler_list',
   'skill_list',
   'skill_reload',

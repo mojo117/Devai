@@ -405,6 +405,28 @@ export async function setTrustMode(mode: 'default' | 'trusted'): Promise<void> {
 }
 
 // ============================================
+// Engine Profile (global default)
+// ============================================
+
+import { isValidEngine, type EngineName } from '../llm/engineProfiles.js';
+
+/**
+ * Get the global default engine profile
+ */
+export async function getDefaultEngine(): Promise<EngineName> {
+  const value = await getSetting('defaultEngine');
+  if (value && isValidEngine(value)) return value;
+  return 'glm';
+}
+
+/**
+ * Set the global default engine profile
+ */
+export async function setDefaultEngine(engine: EngineName): Promise<void> {
+  await setSetting('defaultEngine', engine);
+}
+
+// ============================================
 // Agent State Persistence (multi-agent router)
 // ============================================
 

@@ -83,6 +83,7 @@ async function delegateToSubAgent(
     agentDefinition,
     delegation.modelTier,
     baseProvider,
+    deps.sessionId,
   );
   const toolNames = getToolsForAgent(target);
   const tools = getToolsForLLM().filter((t) => toolNames.includes(t.name));

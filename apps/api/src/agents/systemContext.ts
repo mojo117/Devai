@@ -170,6 +170,35 @@ export async function refreshGlobalContextBlockForSession(sessionId: string): Pr
   return block;
 }
 
+function buildCurrentTimeBlock(): string {
+  const now = new Date();
+  const berlinParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Berlin',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  }).formatToParts(now);
+
+  const get = (type: string): string => berlinParts.find((p) => p.type === type)?.value ?? '00';
+  const berlinISO = `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}`;
+
+  // Compute Berlin UTC offset (handles CET/CEST automatically via Intl)
+  const berlinMs = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Berlin' })).getTime();
+  const offsetMin = Math.round((berlinMs - now.getTime()) / 60_000);
+  const sign = offsetMin >= 0 ? '+' : '-';
+  const oh = String(Math.floor(Math.abs(offsetMin) / 60)).padStart(2, '0');
+  const om = String(Math.abs(offsetMin) % 60).padStart(2, '0');
+  const offsetStr = `${sign}${oh}:${om}`;
+
+  return [
+    '## Current Time',
+    `Berlin (Europe/Berlin): ${berlinISO}${offsetStr}`,
+    `UTC: ${now.toISOString()}`,
+    `Timezone offset: UTC${offsetStr}`,
+    'Use Berlin time for user-facing output. Use UTC with Z suffix for tool datetime parameters.',
+  ].join('\n');
+}
+
 function buildContextBlocks(sessionId: string): ContextBlock[] {
   const state = stateManager.getState(sessionId);
   const info = (state?.taskContext.gatheredInfo || {}) as GatheredInfoRecord;
@@ -205,6 +234,16 @@ function buildContextBlocks(sessionId: string): ContextBlock[] {
   // Essential runtime context is now baked into the CHAPO system prompt directly,
   // avoiding ~13KB of developer-facing CLAUDE.md content in every session.
   const primaryCandidates: ContextBlock[] = [
+    {
+      meta: {
+        kind: 'current_time',
+        source: 'system.clock',
+        priority: 'high',
+        freshness: 'live',
+        sensitivity: 'low',
+      },
+      content: buildCurrentTimeBlock(),
+    },
     {
       meta: {
         kind: 'workspace_policy',

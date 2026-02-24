@@ -13,7 +13,7 @@ const DEFAULT_MODELS: Record<LLMProvider, string> = {
   zai: 'glm-5',
   anthropic: 'claude-sonnet-4-20250514',
   openai: 'gpt-4o',
-  gemini: 'gemini-2.0-flash',
+  gemini: 'gemini-3.1-pro-preview',
 };
 
 // Check if a model belongs to a specific provider

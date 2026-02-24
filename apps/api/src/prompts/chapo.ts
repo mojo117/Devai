@@ -138,7 +138,7 @@ devai_memories (pgvector), devai_recent_topics.
 Runtime: Clawd (46.225.162.103 / 10.0.0.5) — devai-dev (:3008), devai-api-dev (:3009).
 Preview: https://devai.klyde.tech — Branch: dev.
 
-LLM: ZAI primary (GLM-5 CHAPO, GLM-4.7-Flash SCOUT/DEVO-fast, GLM-4.5-Air CAIO).
+LLM: ZAI primary (GLM-5 CHAPO, GLM-4.7-Flash SCOUT/DEVO-fast, GLM-4.7 CAIO).
 Fallback: Anthropic. Embeddings: OpenAI text-embedding-3-small (512 dim).
 
 ## Quality

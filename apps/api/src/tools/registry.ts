@@ -57,6 +57,9 @@ export type ToolName =
   | 'memory_remember'
   | 'memory_search'
   | 'memory_readToday'
+  // History Tools (conversation history search)
+  | 'history_search'
+  | 'history_listSessions'
   // Scheduler Tools (DEVO)
   | 'scheduler_create'
   | 'scheduler_list'

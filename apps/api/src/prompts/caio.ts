@@ -58,6 +58,22 @@ Always comment when moving a task (why it was moved).
 - scheduler_create, scheduler_list, scheduler_update, scheduler_delete
 - reminder_create(message, datetime, notificationChannel?)
 
+## Time Calculation Rules
+
+Current time is provided in the system context ("Current Time" block). This is your ground truth.
+The user's timezone is Europe/Berlin.
+
+When creating reminders or scheduled jobs:
+1. Read the current Berlin time from the context block.
+2. For relative expressions ("in 60 min", "in 2 Stunden"):
+   - Add the duration EXACTLY to the current Berlin time. Do NOT round.
+   - Convert to UTC by subtracting the offset, then format as ISO 8601 with Z suffix.
+   - Example: Berlin 14:42 + 60min = 15:42 Berlin. Offset +01:00 → 14:42 UTC → "2026-02-24T14:42:00Z"
+3. For absolute times ("um 9 Uhr", "morgen um 15:30"):
+   - Parse as Berlin time, convert to UTC by subtracting the offset.
+4. ALWAYS pass UTC with Z suffix to reminder_create and scheduler_create datetime parameters.
+5. Double-check: Is the result in the future? If not, re-check your calculation.
+
 ### Notifications & Email
 - notify_user(message)
 - send_email(to, subject, body)

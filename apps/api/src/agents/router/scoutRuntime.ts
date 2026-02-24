@@ -6,6 +6,8 @@ import { getToolsForLLM } from '../../tools/registry.js';
 import type { ScoutResult, ScoutScope } from '../types.js';
 import { buildToolResultContent } from '../utils.js';
 import { getAgent, getToolsForAgent } from './agentAccess.js';
+import { resolveModelSelection } from '../../llm/modelSelector.js';
+import type { LLMProvider } from '../../llm/types.js';
 import type { SendEventFn } from './shared.js';
 
 /**
@@ -48,6 +50,9 @@ export async function spawnScout(
 
   const messages: LLMMessage[] = [{ role: 'user', content: prompt }];
 
+  // Resolve engine-aware model for SCOUT (once before loop)
+  const scoutModel = resolveModelSelection(scout, sessionId);
+
   // Run SCOUT with limited turns
   let turn = 0;
   const MAX_TURNS = 5;
@@ -56,8 +61,8 @@ export async function spawnScout(
   while (turn < MAX_TURNS) {
     turn++;
 
-    const response = await llmRouter.generateWithFallback('zai', {
-      model: scout.model,
+    const response = await llmRouter.generateWithFallback(scoutModel.provider as LLMProvider, {
+      model: scoutModel.model,
       messages,
       systemPrompt: `${scout.systemPrompt}\n${systemContextBlock}`,
       tools,

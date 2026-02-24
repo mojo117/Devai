@@ -960,10 +960,53 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
     requiresConfirmation: false,
   },
 
+  // History Tools (conversation history search)
+  {
+    name: 'history_search',
+    description: 'Search past conversation messages across all sessions. Returns matching snippets with session title, role, and timestamp.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Text to search for in message content (case-insensitive)',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max results to return (1-50, default: 20)',
+        },
+        role: {
+          type: 'string',
+          description: 'Filter by message role: user, assistant, system',
+        },
+        sessionId: {
+          type: 'string',
+          description: 'Limit search to a specific session ID (optional)',
+        },
+      },
+      required: ['query'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'history_listSessions',
+    description: 'List recent conversation sessions with titles and creation dates. Useful for browsing past conversations before searching.',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: {
+          type: 'number',
+          description: 'Max sessions to return (1-100, default: 30)',
+        },
+      },
+    },
+    requiresConfirmation: false,
+  },
+
   // Scheduler Tools (DEVO agent)
   {
     name: 'scheduler_create',
-    description: 'Create a scheduled job (cron). Runs an instruction on a recurring schedule. Use standard cron syntax (e.g. "0 8 * * *" = every day at 8am).',
+    description: 'Create a scheduled job (cron). Runs an instruction on a recurring schedule. Cron times are in UTC (e.g. "0 7 * * *" = 8am Berlin in winter/CET).',
     parameters: {
       type: 'object',
       properties: {
@@ -1055,7 +1098,7 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
         },
         datetime: {
           type: 'string',
-          description: 'ISO 8601 datetime for when to fire (e.g. "2026-02-20T09:00:00")',
+          description: 'ISO 8601 datetime in UTC with Z suffix (e.g. "2026-02-20T09:00:00Z"). Convert from Berlin time by subtracting the timezone offset.',
         },
         notificationChannel: {
           type: 'string',

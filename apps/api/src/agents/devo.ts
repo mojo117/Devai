@@ -80,6 +80,9 @@ export const DEVO_AGENT: AgentDefinition = {
     'memory_remember',
     'memory_search',
     'memory_readToday',
+    // Conversation history search
+    'history_search',
+    'history_listSessions',
     // Skill management
     'skill_create',
     'skill_update',

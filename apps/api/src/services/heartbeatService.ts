@@ -1,6 +1,7 @@
 import { insertHeartbeatRun, updateHeartbeatRun } from '../db/queries.js'
 import type { HeartbeatRunRow } from '../db/queries.js'
 import { sendTelegramMessage } from '../external/telegram.js'
+import { getState } from '../agents/stateManager.js'
 import { config } from '../config.js'
 
 const HEARTBEAT_PROMPT = `Heartbeat-Check. Pruefe:
@@ -61,10 +62,23 @@ export async function runHeartbeat(): Promise<void> {
     const durationMs = Date.now() - startTime
     const isNoop = result.trim().toUpperCase() === 'NOOP' || result.trim().length < 10
 
+    // Read token usage and model from session state (set by ChapoLoop)
+    const state = getState(sessionId)
+    const tokensUsed = typeof state?.taskContext.gatheredInfo.lastRunTokens === 'number'
+      ? state.taskContext.gatheredInfo.lastRunTokens
+      : null
+    const modelSelection = state?.taskContext.gatheredInfo.modelSelection as
+      { provider?: string; model?: string } | undefined
+    const modelUsed = modelSelection
+      ? `${modelSelection.provider}/${modelSelection.model}`
+      : null
+
     const update: Partial<HeartbeatRunRow> = {
       status: isNoop ? 'noop' : 'completed',
       completed_at: new Date().toISOString(),
       duration_ms: durationMs,
+      tokens_used: tokensUsed,
+      model: modelUsed,
       findings: isNoop ? null : { raw: result },
       actions_taken: isNoop ? null : [{ type: 'agent_response', content: result.slice(0, 2000) }],
     }
@@ -83,7 +97,7 @@ export async function runHeartbeat(): Promise<void> {
 
     if (runId) await updateHeartbeatRun(runId, update)
 
-    console.info(`[heartbeat] ${update.status} in ${durationMs}ms`)
+    console.info(`[heartbeat] ${update.status} in ${durationMs}ms, tokens=${tokensUsed ?? 'unknown'}, model=${modelUsed ?? 'unknown'}`)
   } catch (err) {
     const durationMs = Date.now() - startTime
     const errorMsg = err instanceof Error ? err.message : String(err)

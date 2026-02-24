@@ -120,13 +120,18 @@ export class GeminiProvider implements LLMProviderAdapter {
       parameters: {
         type: SchemaType.OBJECT,
         properties: Object.fromEntries(
-          Object.entries(tool.parameters.properties).map(([key, value]) => [
-            key,
-            {
+          Object.entries(tool.parameters.properties).map(([key, value]) => {
+            const prop: Record<string, unknown> = {
               type: typeMap[value.type] || SchemaType.STRING,
               description: value.description,
-            },
-          ])
+            };
+            // Gemini requires `items` for array types
+            if (value.type === 'array') {
+              const itemType = value.items?.type || 'string';
+              prop.items = { type: typeMap[itemType] || SchemaType.STRING };
+            }
+            return [key, prop];
+          })
         ),
         required: tool.parameters.required,
       },
@@ -170,6 +175,7 @@ export class GeminiProvider implements LLMProviderAdapter {
 
   listModels(): string[] {
     return [
+      'gemini-3.1-pro-preview',
       'gemini-2.0-flash',
       'gemini-1.5-pro',
       'gemini-1.5-flash',

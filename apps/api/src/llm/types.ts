@@ -33,6 +33,7 @@ export interface ToolDefinition {
     properties: Record<string, {
       type: string;
       description: string;
+      items?: { type: string };
     }>;
     required?: string[];
   };

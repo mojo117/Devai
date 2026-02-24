@@ -162,6 +162,11 @@ export async function reminderCreate(
       return { success: false, error: `Invalid datetime: ${datetime}` };
     }
 
+    // Warn if no timezone designator was provided (LLM should send UTC with Z suffix)
+    if (datetime.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/) && !datetime.match(/[Zz]|[+-]\d{2}/)) {
+      console.warn(`[reminder_create] datetime "${datetime}" has no timezone designator — parsed as UTC on this server. LLM should send UTC with Z suffix.`);
+    }
+
     if (date.getTime() <= Date.now()) {
       return { success: false, error: 'Reminder datetime must be in the future' };
     }

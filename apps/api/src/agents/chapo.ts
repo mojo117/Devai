@@ -44,6 +44,9 @@ export const CHAPO_AGENT: AgentDefinition = {
     'memory_remember',
     'memory_search',
     'memory_readToday',
+    // Conversation history search
+    'history_search',
+    'history_listSessions',
     // Scheduler (read-only status)
     'scheduler_list',
     // Skill tools (read-only management)
