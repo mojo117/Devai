@@ -71,21 +71,14 @@ export async function resolvePathCaseInsensitive(basePath: string, relativePath:
 export async function validateRealPath(filePath: string, allowedRoots: readonly string[]): Promise<string> {
   try {
     const realPath = await fsRealpath(filePath);
-    for (const root of allowedRoots) {
-      const absoluteRoot = resolve(root);
-      const translatedRoot = translatePath(absoluteRoot);
-      if (realPath.startsWith(translatedRoot + '/') || realPath === translatedRoot ||
-          realPath.startsWith(absoluteRoot + '/') || realPath === absoluteRoot) {
-        return realPath;
-      }
-    }
-    for (const denied of config.deniedPaths) {
+    // Block symlinks resolving to sensitive credential paths
+    for (const denied of READ_DENIED_PATHS) {
       const absoluteDenied = resolve(denied);
       if (realPath.startsWith(absoluteDenied + '/') || realPath === absoluteDenied) {
         throw new Error(`Access denied: symlink target "${realPath}" is in a restricted area`);
       }
     }
-    throw new Error(`Access denied: symlink target "${realPath}" is outside allowed roots`);
+    return realPath;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       return filePath;
@@ -93,6 +86,18 @@ export async function validateRealPath(filePath: string, allowedRoots: readonly 
     throw err;
   }
 }
+
+// Paths that are always blocked for reads (secrets, credentials)
+const READ_DENIED_PATHS: readonly string[] = [
+  '/root/.openclaw',
+  '/root/.ssh',
+  '/root/.gnupg',
+  '/root/.aws',
+  '/root/.config/gcloud',
+  '/root/.config/gh',
+  '/root/.git-credentials',
+  '/root/.npmrc',
+] as const;
 
 export async function validatePath(path: string, options?: FsOptions): Promise<string> {
   if (!path || path === '/' || path === '.' || path === './') {
@@ -109,35 +114,33 @@ export async function validatePath(path: string, options?: FsOptions): Promise<s
     throw new Error('Access denied: .git paths are not allowed');
   }
 
-  const allowedRoots = [...config.allowedRoots];
-
-  if (allowedRoots.length === 0) {
-    throw new Error('No allowed roots configured');
-  }
-
   const normalizedPath = resolve(path);
 
-  for (const denied of config.deniedPaths) {
+  // Block reads to sensitive credential/secret paths (always enforced)
+  for (const denied of READ_DENIED_PATHS) {
     const absoluteDenied = resolve(denied);
     if (normalizedPath.startsWith(absoluteDenied + '/') || normalizedPath === absoluteDenied) {
-      const selfRoot = resolve(config.selfInspectionRoot);
-      if (options?.selfInspection && absoluteDenied === selfRoot) {
-        const relativeToSelf = normalizedPath.slice(selfRoot.length + 1);
-        const isExcluded = config.selfInspectionExclude.some((exclude) => {
-          return relativeToSelf === exclude ||
-                 relativeToSelf.startsWith(exclude + '/') ||
-                 relativeToSelf.endsWith('/' + exclude) ||
-                 relativeToSelf.includes('/' + exclude + '/');
-        });
-        if (isExcluded) {
-          throw new Error(`Access denied: "${path}" is excluded from self-inspection`);
-        }
-        continue;
-      }
       throw new Error(`Access denied: "${path}" is in a restricted area`);
     }
   }
 
+  // Self-inspection exclusions still apply (secrets within /opt/Devai)
+  const selfRoot = resolve(config.selfInspectionRoot);
+  if (normalizedPath.startsWith(selfRoot + '/') || normalizedPath === selfRoot) {
+    const relativeToSelf = normalizedPath.slice(selfRoot.length + 1);
+    const isExcluded = config.selfInspectionExclude.some((exclude) => {
+      return relativeToSelf === exclude ||
+             relativeToSelf.startsWith(exclude + '/') ||
+             relativeToSelf.endsWith('/' + exclude) ||
+             relativeToSelf.includes('/' + exclude + '/');
+    });
+    if (isExcluded) {
+      throw new Error(`Access denied: "${path}" is excluded from self-inspection`);
+    }
+  }
+
+  // Allow reads from within allowed roots (with path translation and case-insensitive matching)
+  const allowedRoots = [...config.allowedRoots];
   for (const root of allowedRoots) {
     const absoluteRoot = resolve(root);
     if (normalizedPath.startsWith(absoluteRoot + '/') || normalizedPath === absoluteRoot) {
@@ -153,6 +156,7 @@ export async function validatePath(path: string, options?: FsOptions): Promise<s
     }
   }
 
+  // Fuzzy root matching for allowed roots
   for (const root of allowedRoots) {
     const absoluteRoot = resolve(root);
     const translatedRoot = translatePath(absoluteRoot);
@@ -180,8 +184,13 @@ export async function validatePath(path: string, options?: FsOptions): Promise<s
     }
   }
 
+  // Broad read access: allow reading any absolute path not blocked above
+  if (normalizedPath.startsWith('/') && await pathExists(normalizedPath)) {
+    return normalizedPath;
+  }
+
   throw new Error(
-    `Path "${path}" not found within allowed roots: ${allowedRoots.join(', ')}. ` +
+    `Path "${path}" not found. ` +
     `Try: fs_listFiles("${allowedRoots[0]}")`
   );
 }
