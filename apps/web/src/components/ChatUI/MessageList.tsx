@@ -1,6 +1,7 @@
 import { Fragment, useState, type RefObject } from 'react';
 import type { ChatMessage, SessionSummary } from '../../types';
-import type { ToolEvent } from './types';
+import type { ToolEvent, DelegationData } from './types';
+import { DelegationCard } from './DelegationCard';
 import { mergeConsecutiveThinking } from './mergeEvents';
 import { renderMessageContent } from './utils';
 import { getUserfileDownloadUrl } from '../../api';
@@ -29,6 +30,8 @@ interface MessageListProps {
   onSelectSession: (id: string) => void;
   onRestartChat: () => void;
   onNewChat: () => void;
+  delegations: DelegationData[];
+  messageDelegations: Record<string, DelegationData[]>;
 }
 
 interface DecisionPathPayload {
@@ -78,6 +81,8 @@ export function MessageList({
   onSelectSession,
   onRestartChat,
   onNewChat,
+  delegations,
+  messageDelegations,
 }: MessageListProps) {
   const renderToolEventsBlock = (events: ToolEvent[], live: boolean) => {
     const merged = mergeConsecutiveThinking(events);
@@ -226,13 +231,22 @@ export function MessageList({
       {/* Messages with associated tool events rendered inline */}
       {messages.map((message) => {
         const frozen = message.role === 'assistant' ? messageToolEvents[message.id] : undefined;
+        const frozenDelegations = message.role === 'assistant' ? messageDelegations[message.id] : undefined;
         return (
           <Fragment key={message.id}>
+            {frozenDelegations && frozenDelegations.map(d => (
+              <DelegationCard key={d.id} delegation={d} />
+            ))}
             {frozen && frozen.length > 0 && renderToolEventsBlock(frozen, false)}
             {renderMessage(message)}
           </Fragment>
         );
       })}
+
+      {/* Live delegation cards for current in-progress exchange */}
+      {delegations.map(d => (
+        <DelegationCard key={d.id} delegation={d} />
+      ))}
 
       {/* Live tool events for current in-progress exchange */}
       {toolEvents.length > 0 && renderToolEventsBlock(toolEvents, isLoading)}

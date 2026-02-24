@@ -4,7 +4,7 @@ import type { ChatStreamEvent } from '../../api';
 import type { ChatMessage } from '../../types';
 import type { AgentName, AgentPhase } from '../AgentStatus';
 import type { PendingAction } from '../InlineAction';
-import type { ChatUIProps, ToolEvent } from './types';
+import type { ChatUIProps, ToolEvent, DelegationData, DelegationToolStep } from './types';
 import { upsertToolEvent } from './utils';
 import { useChatSession } from './hooks/useChatSession';
 import { usePendingActions } from './hooks/usePendingActions';
@@ -44,6 +44,9 @@ export function ChatUI({
   const [messageToolEvents, setMessageToolEvents] = useState<Record<string, ToolEvent[]>>({});
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set());
   const [currentTodos, setCurrentTodos] = useState<Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }>>([]);
+  const [delegations, setDelegations] = useState<DelegationData[]>([]);
+  const [messageDelegations, setMessageDelegations] = useState<Record<string, DelegationData[]>>({});
+  const activeDelegationRef = useRef<string | null>(null);
   const [retryState, setRetryState] = useState<null | {
     input: string;
     userMessage: ChatMessage;
@@ -114,6 +117,15 @@ export function ChatUI({
       }
       return [];
     });
+    setDelegations(currentDels => {
+      if (currentDels.length > 0) {
+        setMessageDelegations(prev => ({
+          ...prev,
+          [messageId]: [...currentDels],
+        }));
+      }
+      return [];
+    });
   }, []);
 
   // --- Tool event persistence ---
@@ -124,6 +136,9 @@ export function ChatUI({
     if (!session.sessionId) return;
     setToolEvents([]);
     setCurrentTodos([]);
+    setDelegations([]);
+    setMessageDelegations({});
+    activeDelegationRef.current = null;
 
     // Load localStorage fallback (server events will overwrite via onEventsLoaded)
     try {
@@ -142,6 +157,17 @@ export function ChatUI({
     } catch {
       setMessageToolEvents({});
     }
+
+    try {
+      const delKey = `devai_delegations_${session.sessionId}`;
+      const storedDel = localStorage.getItem(delKey);
+      if (storedDel) {
+        const parsed = JSON.parse(storedDel) as Record<string, DelegationData[]>;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          setMessageDelegations(parsed);
+        }
+      }
+    } catch { /* ignore */ }
   }, [session.sessionId]);
 
   // --- Auto-scroll ---
@@ -149,6 +175,21 @@ export function ChatUI({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, toolEvents]);
+
+  // --- Delegation persistence ---
+
+  useEffect(() => {
+    if (!session.sessionId) return;
+    try {
+      const key = `devai_delegations_${session.sessionId}`;
+      const filtered = Object.fromEntries(
+        Object.entries(messageDelegations).filter(([, v]) => v.length > 0)
+      );
+      if (Object.keys(filtered).length > 0) {
+        localStorage.setItem(key, JSON.stringify(filtered));
+      }
+    } catch { /* quota exceeded — silently skip */ }
+  }, [messageDelegations, session.sessionId]);
 
   // --- Event expand toggle ---
 
@@ -184,9 +225,26 @@ export function ChatUI({
           },
         ]);
         break;
-      case 'agent_complete':
+      case 'agent_complete': {
+        const completedAgent = (event as Record<string, unknown>).agent as AgentName | undefined;
+        if (completedAgent && completedAgent !== 'chapo' && activeDelegationRef.current) {
+          const ev = event as Record<string, unknown>;
+          const durationMs = typeof ev.durationMs === 'number' ? ev.durationMs : undefined;
+          const resultStr = typeof ev.result === 'string' ? ev.result : JSON.stringify(ev.result);
+          setDelegations(prev => prev.map(d => {
+            if (d.id !== activeDelegationRef.current) return d;
+            return {
+              ...d,
+              status: 'completed' as const,
+              durationMs: durationMs ?? (Date.now() - d.startTime),
+              response: resultStr,
+            };
+          }));
+          activeDelegationRef.current = null;
+        }
         setAgentPhase('idle');
         break;
+      }
       case 'parallel_start':
         setAgentPhase('executing');
         break;
@@ -214,7 +272,21 @@ export function ChatUI({
         const id = String(ev.id || crypto.randomUUID());
         const name = (ev.toolName as string | undefined) || (ev.name as string | undefined);
         const args = ev.args ?? ev.arguments;
-        upsertToolEvent(setToolEvents, id, { type: 'tool_call', name, arguments: args, agent: eventAgent });
+        if (!activeDelegationRef.current) {
+          upsertToolEvent(setToolEvents, id, { type: 'tool_call', name, arguments: args, agent: eventAgent });
+        }
+        if (activeDelegationRef.current) {
+          const step: DelegationToolStep = {
+            id,
+            name: name || 'tool',
+            argsPreview: typeof args === 'string' ? String(args).slice(0, 80) : JSON.stringify(args).slice(0, 80),
+          };
+          setDelegations(prev => prev.map(d =>
+            d.id === activeDelegationRef.current
+              ? { ...d, toolSteps: [...d.toolSteps, step] }
+              : d
+          ));
+        }
         break;
       }
       case 'tool_result_chunk': {
@@ -222,7 +294,9 @@ export function ChatUI({
         const id = String(ev.id || crypto.randomUUID());
         const name = (ev.toolName as string | undefined) || (ev.name as string | undefined);
         const chunk = typeof ev.chunk === 'string' ? ev.chunk : '';
-        upsertToolEvent(setToolEvents, id, { type: 'tool_result', name, chunk, agent: eventAgent });
+        if (!activeDelegationRef.current) {
+          upsertToolEvent(setToolEvents, id, { type: 'tool_result', name, chunk, agent: eventAgent });
+        }
         break;
       }
       case 'tool_result': {
@@ -230,7 +304,37 @@ export function ChatUI({
         const id = String(ev.id || crypto.randomUUID());
         const name = (ev.toolName as string | undefined) || (ev.name as string | undefined);
         const result = ev.result ?? { result: ev.result, success: ev.success };
-        upsertToolEvent(setToolEvents, id, { type: 'tool_result', name, result, completed: Boolean(ev.completed), agent: eventAgent });
+        if (!activeDelegationRef.current) {
+          upsertToolEvent(setToolEvents, id, { type: 'tool_result', name, result, completed: Boolean(ev.completed), agent: eventAgent });
+        }
+        if (activeDelegationRef.current) {
+          const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
+          setDelegations(prev => prev.map(d => {
+            if (d.id !== activeDelegationRef.current) return d;
+            const steps = d.toolSteps.map(s =>
+              s.id === id ? { ...s, resultPreview: resultStr.slice(0, 120), success: true } : s
+            );
+            return { ...d, toolSteps: steps };
+          }));
+        }
+        break;
+      }
+      case 'delegation': {
+        const ev = event as Record<string, unknown>;
+        const delId = String(ev.id || crypto.randomUUID());
+        const newDelegation: DelegationData = {
+          id: delId,
+          from: (ev.from as AgentName) || 'chapo',
+          to: (ev.to as AgentName) || 'devo',
+          task: String(ev.task || ev.objective || ''),
+          domain: ev.domain as string | undefined,
+          status: 'working',
+          startTime: Date.now(),
+          toolSteps: [],
+          prompt: String(ev.objective || ev.task || ''),
+        };
+        setDelegations(prev => [...prev, newDelegation]);
+        activeDelegationRef.current = delId;
         break;
       }
       case 'action_pending': {
@@ -596,6 +700,8 @@ export function ChatUI({
         onSelectSession={session.handleSelectSession}
         onRestartChat={session.handleRestartChat}
         onNewChat={session.handleNewChat}
+        delegations={delegations}
+        messageDelegations={messageDelegations}
       />
 
       {currentTodos.length > 0 && <TodoCard todos={currentTodos} />}
