@@ -1,0 +1,36 @@
+{
+  "id": "firecrawl-scrape",
+  "name": "Firecrawl Scrape",
+  "description": "Scrape JS-heavy websites or PDFs using Firecrawl API. Extracts clean markdown, HTML, or other formats.",
+  "version": "1.0.0",
+  "parameters": {
+    "url": {
+      "type": "string",
+      "description": "The URL to scrape (webpage or PDF).",
+      "required": true
+    },
+    "formats": {
+      "type": "array",
+      "description": "List of formats to extract. Options: 'markdown', 'html', 'rawHtml', 'links', 'screenshot', 'extract'. Defaults to ['markdown'].",
+      "required": false
+    },
+    "waitFor": {
+      "type": "number",
+      "description": "Wait time in milliseconds before scraping. Useful for JS-heavy sites.",
+      "required": false
+    },
+    "onlyMainContent": {
+      "type": "boolean",
+      "description": "If true, only extracts the main content of the page.",
+      "required": false
+    }
+  },
+  "createdBy": "devo",
+  "tags": [
+    "web",
+    "scraping",
+    "firecrawl",
+    "extraction",
+    "pdf"
+  ]
+}

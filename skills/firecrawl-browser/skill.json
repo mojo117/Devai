@@ -1,0 +1,47 @@
+{
+  "id": "firecrawl-browser",
+  "name": "Firecrawl Browser",
+  "description": "Launch and control browser sessions via Firecrawl Browser Sandbox API. Open PDFs, interact with JS-heavy pages, click elements, fill forms, and navigate dynamic content.",
+  "version": "1.0.0",
+  "parameters": {
+    "action": {
+      "type": "string",
+      "description": "Action to perform: 'create' (new session), 'execute' (run code in session), 'list' (list sessions), 'close' (delete session), 'shorthand' (quick command with auto-session)",
+      "required": true
+    },
+    "sessionId": {
+      "type": "string",
+      "description": "Session ID for execute/close actions",
+      "required": false
+    },
+    "code": {
+      "type": "string",
+      "description": "Code to execute (Playwright for node/python, or agent-browser commands for bash). E.g. 'agent-browser open https://example.com' or 'await page.goto(\"https://example.com\")'",
+      "required": false
+    },
+    "language": {
+      "type": "string",
+      "description": "Language for code execution: 'bash' (agent-browser CLI), 'node' (JavaScript/Playwright), 'python' (Python/Playwright). Default: 'bash'",
+      "required": false
+    },
+    "ttl": {
+      "type": "number",
+      "description": "Session max lifetime in seconds (30-3600). Default: 300",
+      "required": false
+    },
+    "activityTtl": {
+      "type": "number",
+      "description": "Auto-close after inactivity in seconds (10-3600). Default: 120",
+      "required": false
+    }
+  },
+  "createdBy": "devo",
+  "tags": [
+    "web",
+    "browser",
+    "firecrawl",
+    "pdf",
+    "interaction",
+    "automation"
+  ]
+}
