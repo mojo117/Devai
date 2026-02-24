@@ -239,13 +239,17 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       // Inject current todo state so CHAPO sees progress each iteration
       const currentState = stateManager.getOrCreateState(this.sessionId);
       if (currentState.todos.length > 0) {
-        const completed = currentState.todos.filter((t) => t.status === 'completed').length;
+        const pending = currentState.todos.filter((t) => t.status === 'pending');
+        const completed = currentState.todos.filter((t) => t.status === 'completed');
         const lines = currentState.todos.map((t) =>
           `- [${t.status === 'completed' ? 'x' : ' '}] ${t.content}`
         ).join('\n');
+        const instruction = pending.length > 0
+          ? `\nACTION REQUIRED: Use respondToUser() to answer each pending item, then todoWrite() to mark it completed. Do NOT answer without tool calls.`
+          : '';
         this.conversation.addMessage({
           role: 'system',
-          content: `[TODOS] ${completed}/${currentState.todos.length} erledigt:\n${lines}`,
+          content: `[TODOS] ${completed.length}/${currentState.todos.length} done:\n${lines}${instruction}`,
         });
       }
 
@@ -320,7 +324,7 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
           });
           this.conversation.addMessage({
             role: 'system',
-            content: `[EXIT GATE] Du hast noch offene Punkte:\n${pendingList}\nBearbeite sie oder nutze todoWrite um sie als erledigt zu markieren.`,
+            content: `[EXIT GATE] You responded with text but you still have pending todos:\n${pendingList}\n\nYou MUST use tool calls:\n1. respondToUser(message) — to send your answer for each pending item\n2. todoWrite([...]) — to mark items as completed\n\nDo NOT respond without tool calls. Your text response alone does not reach the user — only respondToUser() delivers messages.`,
           });
           continue;
         }
