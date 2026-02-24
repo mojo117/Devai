@@ -29,6 +29,8 @@ import { ChapoLoopContextManager } from './chapo-loop/contextManager.js';
 import { ChapoLoopGateManager } from './chapo-loop/gateManager.js';
 import { ChapoToolExecutor } from './chapo-loop/toolExecutor.js';
 import { buildToolResultContent } from './utils.js';
+import { config as appConfig } from '../config.js';
+import { logSchedulerExecution } from '../db/schedulerQueries.js';
 import type {
   AgentStreamEvent,
   ModelSelection,
@@ -59,6 +61,11 @@ export class ChapoLoop {
   private totalTokensUsed = 0;
   private contextManager: ChapoLoopContextManager;
   private gateManager: ChapoLoopGateManager;
+  private traceId = '';
+
+  // Execution metrics for structured logging (3.2)
+  private toolCallLog: Array<{ name: string; durationMs: number; success: boolean }> = [];
+  private delegationLog: Array<{ target: string; durationMs: number; status: string }> = [];
 
   constructor(
     private sessionId: string,
@@ -66,6 +73,7 @@ export class ChapoLoop {
     private projectRoot: string | null,
     private modelSelection: ModelSelection,
     private config: ChapoLoopConfig,
+    traceId?: string,
   ) {
     this.errorHandler = new AgentErrorHandler(3);
     this.conversation = new ConversationManager(180_000);
@@ -73,6 +81,7 @@ export class ChapoLoop {
     this.answerValidator = new AnswerValidator(this.sessionLogger);
     this.contextManager = new ChapoLoopContextManager(this.sessionId, this.sendEvent, this.conversation);
     this.gateManager = new ChapoLoopGateManager(this.sessionId, this.sendEvent);
+    this.traceId = traceId || '';
   }
 
   dispose(): void {
@@ -152,6 +161,7 @@ export class ChapoLoop {
   }
 
   async run(userMessage: string | ContentBlock[], conversationHistory: Array<{ role: string; content: string }>): Promise<ChapoLoopResult> {
+    const runStartTime = Date.now();
     const userText = getTextContent(userMessage);
     stateManager.ensureActiveTurnId(this.sessionId);
     this.contextManager.setPinnedRequest(userText);
@@ -211,6 +221,26 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       stateManager.setGatheredInfo(this.sessionId, 'lastRunTokens', this.totalTokensUsed);
     }
 
+    // 7b. Structured execution log (3.2)
+    const runDurationMs = Date.now() - runStartTime;
+    logSchedulerExecution({
+      jobId: `chapo-loop:${this.sessionId}`,
+      jobName: 'chapo-loop',
+      executionType: 'internal',
+      phase: result.status === 'error' ? 'failure' : 'success',
+      message: `Loop completed: ${result.totalIterations || this.iteration} iterations, ${this.totalTokensUsed} tokens, ${runDurationMs}ms`,
+      metadata: {
+        traceId: this.traceId || undefined,
+        iterations: result.totalIterations || this.iteration,
+        totalTokens: this.totalTokensUsed,
+        durationMs: runDurationMs,
+        exitReason: result.status,
+        provider: `${this.modelSelection.provider || 'anthropic'}/${this.modelSelection.model}`,
+        toolCalls: this.toolCallLog.length,
+        delegations: this.delegationLog.length,
+      },
+    }).catch((logErr) => console.error('[chapo-loop] execution log failed:', logErr));
+
     // 8. Emit completion
     this.sendEvent({ type: 'agent_complete', agent: 'chapo', result: result.answer });
     this.sendEvent({
@@ -228,10 +258,58 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
 
     const provider = (this.modelSelection.provider || 'anthropic') as LLMProvider;
     const model = this.modelSelection.model || chapo.model;
+    const trace = this.traceId ? `[trace:${this.traceId}] ` : '';
 
-    console.log(`[chapo-loop] Tools: ${tools.length} (was 94 before MCP reduction)`);
+    // --- Resilience state ---
+    const loopStartTime = Date.now();
+    let softTimeoutInjected = false;
+    let costCapInjected = false;
+    let consecutiveNoProgress = 0;
+    let lastErrorMessage = '';
+    const PROGRESS_THRESHOLD = 3;
+
+    console.log(`${trace}[chapo-loop] Tools: ${tools.length}`);
 
     for (this.iteration = 0; this.iteration < this.config.maxIterations; this.iteration++) {
+      const elapsed = Date.now() - loopStartTime;
+
+      // --- 1.1 Soft Timeout: inject time warning as context for CHAPO ---
+      if (!softTimeoutInjected && elapsed > appConfig.loopSoftTimeoutMs) {
+        softTimeoutInjected = true;
+        const remainingSec = Math.round((appConfig.loopHardTimeoutMs - elapsed) / 1000);
+        this.conversation.addMessage({
+          role: 'system',
+          content: `[TIME WARNING] ${Math.round(elapsed / 1000)}s elapsed. ` +
+            `You have ~${remainingSec}s remaining. ` +
+            `Deliver your current result or delegate remaining work. ` +
+            `Do NOT start new complex operations.`,
+        });
+        this.sendEvent({
+          type: 'agent_thinking',
+          agent: 'chapo',
+          status: 'Time budget warning — wrapping up...',
+        });
+      }
+
+      // --- 1.1 Hard Timeout: snapshot state + ask user to continue ---
+      if (elapsed > appConfig.loopHardTimeoutMs) {
+        console.warn(`${trace}[chapo-loop] Hard timeout at ${Math.round(elapsed / 1000)}s, iteration ${this.iteration}`);
+        stateManager.setGatheredInfo(this.sessionId, 'timeoutSnapshot', {
+          iteration: this.iteration,
+          elapsed,
+          tokensUsed: this.totalTokensUsed,
+          timestamp: new Date().toISOString(),
+        });
+        await stateManager.flushState(this.sessionId);
+
+        return this.queueQuestion(
+          `Die Verarbeitung hat ${Math.round(elapsed / 1000)}s gedauert und das Zeitbudget überschritten. ` +
+          `Bisheriger Fortschritt: ${this.iteration} Iterationen. Soll ich weitermachen?`,
+          this.iteration,
+          { kind: 'continue', turnId: this.getActiveTurnId() || undefined },
+        );
+      }
+
       this.sendEvent({
         type: 'agent_thinking',
         agent: 'chapo',
@@ -243,7 +321,7 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
 
       // Call LLM with conversation + tools
       const t0 = Date.now();
-      console.log(`[chapo-loop] LLM call #${this.iteration} starting (${provider}/${model}, ${tools.length} tools)`);
+      console.log(`${trace}[chapo-loop] LLM call #${this.iteration} starting (${provider}/${model}, ${tools.length} tools)`);
       const [response, err] = await this.errorHandler.safe('llm_call', () =>
         llmRouter.generateWithFallback(provider, {
           model,
@@ -254,19 +332,39 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
         })
       );
 
-      console.log(`[chapo-loop] LLM call #${this.iteration} completed in ${Date.now() - t0}ms, err=${err?.message || 'none'}, content=${response?.content?.slice(0, 100) || 'null'}, toolCalls=${response?.toolCalls?.length || 0}`);
+      const llmDuration = Date.now() - t0;
+      console.log(`${trace}[chapo-loop] LLM call #${this.iteration} completed in ${llmDuration}ms, err=${err?.message || 'none'}, content=${response?.content?.slice(0, 100) || 'null'}, toolCalls=${response?.toolCalls?.length || 0}`);
 
       // Accumulate token usage
       if (response?.usage) {
         this.totalTokensUsed += response.usage.inputTokens + response.usage.outputTokens;
       }
 
-      if (err) {
-        // Feed error back as context — CHAPO sees it and decides what to do
+      // --- 2.5 Cost Safety Cap ---
+      if (!costCapInjected && this.totalTokensUsed > appConfig.costCapPerRunTokens) {
+        costCapInjected = true;
         this.conversation.addMessage({
           role: 'system',
-          content: `[LLM Error] ${this.errorHandler.formatForLLM(err)}`,
+          content: `[COST WARNING] Token budget exhausted (${this.totalTokensUsed} tokens used, limit: ${appConfig.costCapPerRunTokens}). Deliver final answer NOW.`,
         });
+        console.warn(`${trace}[chapo-loop] Cost cap reached: ${this.totalTokensUsed} tokens`);
+      }
+
+      if (err) {
+        // --- 2.2 Error Deduplication ---
+        const errorText = this.errorHandler.formatForLLM(err);
+        if (errorText !== lastErrorMessage) {
+          this.conversation.addMessage({
+            role: 'system',
+            content: `[LLM Error] ${errorText}`,
+          });
+          lastErrorMessage = errorText;
+        } else {
+          this.conversation.addMessage({
+            role: 'system',
+            content: `[LLM Error] Same error repeated (${errorText.slice(0, 80)}...). Trying different approach.`,
+          });
+        }
         this.sendEvent({ type: 'error', agent: 'chapo', error: err.message });
 
         if (!this.errorHandler.canRetry('llm_call')) {
@@ -276,6 +374,7 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
             totalIterations: this.iteration + 1,
           };
         }
+        consecutiveNoProgress++;
         continue;
       }
 
@@ -309,25 +408,48 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       });
 
       for (const toolCall of response.toolCalls) {
-        const outcome = await toolExecutor.execute({
-          id: toolCall.id,
-          name: toolCall.name,
-          arguments: toolCall.arguments,
-        });
-        if (outcome.earlyReturn) {
-          earlyReturn = outcome.earlyReturn;
-          break;
-        }
-        if (outcome.toolResult) {
-          toolResults.push(outcome.toolResult);
-          // Structured reflection: inject thinking after tool failures
-          if (outcome.toolResult.isError) {
-            this.conversation.addThinking(
-              `Tool "${toolCall.name}" failed: ${outcome.toolResult.result}. ` +
-              `Before retrying or trying a different approach, consider: ` +
-              `Why did this fail? Is there a different approach? Should I inform the user?`
-            );
+        // --- 1.5 Iteration Try-Catch: wrap each tool execution ---
+        const toolT0 = Date.now();
+        try {
+          const outcome = await toolExecutor.execute({
+            id: toolCall.id,
+            name: toolCall.name,
+            arguments: toolCall.arguments,
+          });
+          const toolDuration = Date.now() - toolT0;
+          if (outcome.earlyReturn) {
+            earlyReturn = outcome.earlyReturn;
+            // Log delegation metrics if this was a delegation
+            if (toolCall.name.startsWith('delegate')) {
+              this.delegationLog.push({
+                target: toolCall.name.replace('delegateTo', '').replace('delegateParallel', 'parallel'),
+                durationMs: toolDuration,
+                status: earlyReturn.status,
+              });
+            }
+            break;
           }
+          if (outcome.toolResult) {
+            toolResults.push(outcome.toolResult);
+            this.toolCallLog.push({ name: toolCall.name, durationMs: toolDuration, success: !outcome.toolResult.isError });
+            // Structured reflection: inject thinking after tool failures
+            if (outcome.toolResult.isError) {
+              this.conversation.addThinking(
+                `Tool "${toolCall.name}" failed: ${outcome.toolResult.result}. ` +
+                `Before retrying or trying a different approach, consider: ` +
+                `Why did this fail? Is there a different approach? Should I inform the user?`
+              );
+            }
+          }
+        } catch (toolError) {
+          const msg = toolError instanceof Error ? toolError.message : String(toolError);
+          console.error(`${trace}[chapo-loop] Uncaught tool error (${toolCall.name}):`, msg);
+          toolResults.push({
+            toolUseId: toolCall.id,
+            result: `[INTERNAL ERROR] Tool "${toolCall.name}" crashed: ${msg}. This is a system error, not a tool error.`,
+            isError: true,
+          });
+          this.toolCallLog.push({ name: toolCall.name, durationMs: Date.now() - toolT0, success: false });
         }
       }
 
@@ -336,12 +458,39 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
         return earlyReturn;
       }
 
+      // --- 2.1 Deadlock Detection ---
+      const hadMeaningfulAction = toolResults.some((r) => !r.isError);
+      if (hadMeaningfulAction) {
+        consecutiveNoProgress = 0;
+      } else {
+        consecutiveNoProgress++;
+      }
+      if (consecutiveNoProgress >= PROGRESS_THRESHOLD) {
+        this.conversation.addMessage({
+          role: 'system',
+          content: `[PROGRESS WARNING] ${consecutiveNoProgress} consecutive iterations without successful tool execution. ` +
+            `Either: (1) deliver a partial answer, (2) try a different approach, or (3) ask the user for help. ` +
+            `Do NOT repeat the same failing approach.`,
+        });
+        consecutiveNoProgress = 0;
+      }
+
       // Feed tool results back to LLM for the next iteration
       this.conversation.addMessage({
         role: 'user',
         content: '',
         toolResults,
       });
+
+      // --- 2.3 Checkpoint after significant operations ---
+      if (toolResults.length > 0) {
+        stateManager.setGatheredInfo(this.sessionId, 'loopCheckpoint', {
+          iteration: this.iteration,
+          tokensUsed: this.totalTokensUsed,
+          timestamp: new Date().toISOString(),
+        });
+        // Debounced flush is sufficient for checkpoints (not crash-critical like gates)
+      }
 
       // Fire-and-forget: tag current work topic for recent focus
       if (response.toolCalls && response.toolCalls.length > 0) {
@@ -352,7 +501,7 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
           toolCalls: toolNames,
           assistantResponse: (response.content || '').slice(0, 300),
           filePaths,
-        }).catch((err) => console.error('[chapo-loop] topic tagging failed:', err));
+        }).catch((tagErr) => console.error(`${trace}[chapo-loop] topic tagging failed:`, tagErr));
       }
     }
 

@@ -105,6 +105,12 @@ export interface Config {
   gateQuestionTtlMs: number;
   gateQuestionDedup: boolean;
 
+  // Resilience: loop timeouts & cost caps
+  loopSoftTimeoutMs: number;
+  loopHardTimeoutMs: number;
+  delegationTimeoutMs: number;
+  costCapPerRunTokens: number;
+
 }
 
 export interface EnvValidationIssue {
@@ -184,6 +190,12 @@ export function loadConfig(): Config {
     contextProvenanceTags: process.env.CONTEXT_PROVENANCE_TAGS !== "false",
     gateQuestionTtlMs: Math.max(0, parseInt(process.env.GATE_QUESTION_TTL_MS || "600000", 10)),
     gateQuestionDedup: process.env.GATE_QUESTION_DEDUP !== "false",
+
+    // Resilience: loop timeouts & cost caps
+    loopSoftTimeoutMs: parseInt(process.env.LOOP_SOFT_TIMEOUT_MS || "90000", 10),
+    loopHardTimeoutMs: parseInt(process.env.LOOP_HARD_TIMEOUT_MS || "180000", 10),
+    delegationTimeoutMs: parseInt(process.env.DELEGATION_TIMEOUT_MS || "120000", 10),
+    costCapPerRunTokens: parseInt(process.env.COST_CAP_PER_RUN_TOKENS || "500000", 10),
 
   };
 }

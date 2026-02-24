@@ -4,6 +4,7 @@ import { OpenAIProvider } from './providers/openai.js';
 import { GeminiProvider } from './providers/gemini.js';
 import { ZAIProvider } from './providers/zai.js';
 import { logUsage } from './usage-logger.js';
+import { circuitBreaker } from './circuitBreaker.js';
 
 // Default fallback chain
 const DEFAULT_FALLBACK_CHAIN: LLMProvider[] = ['zai', 'anthropic', 'openai', 'gemini'];
@@ -104,11 +105,12 @@ export class LLMRouter {
         lastError = error instanceof Error ? error : new Error(String(error));
         const errorMsg = lastError.message;
 
-        // 429 → extend retries up to 5 with longer backoff (2s, 4s, 8s, 16s, 32s)
+        // 429 → extend retries up to 5 with longer backoff (2s, 4s, 8s, 16s, 32s) + jitter
         if (isRateLimit(errorMsg)) {
           const rateMaxRetries = Math.max(maxRetries, 5);
           if (attempt < rateMaxRetries) {
-            const backoffMs = Math.pow(2, attempt + 1) * 1000;
+            const jitter = 1 + Math.random() * 0.3;
+            const backoffMs = Math.round(Math.pow(2, attempt + 1) * 1000 * jitter);
             console.warn(`[llm] Rate-limited, retry ${attempt + 1}/${rateMaxRetries} for ${providerName} after ${backoffMs}ms`);
             await sleep(backoffMs);
             // Extend the loop bound so we keep retrying
@@ -134,8 +136,9 @@ export class LLMRouter {
           throw lastError;
         }
 
-        // Exponential backoff: 1s, 2s, 4s...
-        const backoffMs = Math.pow(2, attempt) * 1000;
+        // Exponential backoff with jitter: 1s, 2s, 4s... (+ 0-30% random)
+        const jitter = 1 + Math.random() * 0.3;
+        const backoffMs = Math.round(Math.pow(2, attempt) * 1000 * jitter);
         console.warn(`[llm] Retry ${attempt + 1}/${maxRetries} for ${providerName} after ${backoffMs}ms:`, errorMsg);
         await sleep(backoffMs);
       }
@@ -168,6 +171,12 @@ export class LLMRouter {
         continue;
       }
 
+      if (!circuitBreaker.isAvailable(providerName)) {
+        console.info(`[llm] Skipping ${providerName} — circuit breaker open`);
+        errors.push({ provider: providerName, error: 'circuit breaker open' });
+        continue;
+      }
+
       // Adjust model if it doesn't match the current provider
       let adjustedRequest = request;
       if (originalModel && !isModelForProvider(originalModel, providerName)) {
@@ -178,9 +187,11 @@ export class LLMRouter {
 
       try {
         const response = await this.generateWithRetry(providerName, adjustedRequest);
+        circuitBreaker.recordSuccess(providerName);
         return { ...response, usedProvider: providerName };
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
+        circuitBreaker.recordError(providerName, errorMsg);
         errors.push({ provider: providerName, error: errorMsg });
         console.warn(`[llm] Provider ${providerName} failed, trying next...`, errorMsg);
       }
@@ -199,3 +210,5 @@ export class LLMRouter {
 
 // Singleton instance
 export const llmRouter = new LLMRouter();
+
+export { circuitBreaker } from './circuitBreaker.js';

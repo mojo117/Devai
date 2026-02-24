@@ -1,3 +1,4 @@
+import { nanoid } from 'nanoid';
 import type { ContentBlock } from '../../llm/types.js';
 import { getTextContent } from '../../llm/types.js';
 import { getTrustMode, setDefaultEngine } from '../../db/queries.js';
@@ -32,6 +33,7 @@ export async function processRequest(
   sendEvent: SendEventFn,
 ): Promise<string> {
   await stateManager.ensureStateLoaded(sessionId);
+  const traceId = nanoid(12);
   // Default to empty array if not provided
   const history = conversationHistory ?? [];
 
@@ -104,7 +106,7 @@ export async function processRequest(
   const chapo = getAgent('chapo');
   const modelSelection = resolveModelSelection(chapo, sessionId);
 
-  console.info('[agents] processRequest start', {
+  console.info(`[trace:${traceId}] processRequest start`, {
     sessionId,
     projectRoot: projectRoot || null,
     messageLength: getTextContent(userMessage).length,
@@ -122,7 +124,7 @@ export async function processRequest(
     const loopProjectRoot = projectRoot || getProjectRootFromState(sessionId);
     const loop = new ChapoLoop(sessionId, sendEvent, loopProjectRoot, modelSelection, {
       maxIterations: 30,
-    });
+    }, traceId);
     const loopResult = await loop.run(userMessage, history);
 
     if (loopResult.status === 'error') {
@@ -132,15 +134,22 @@ export async function processRequest(
     return loopResult.answer;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('[agents] ChapoLoop crashed, attempting recovery:', errorMessage);
+    console.error(`[trace:${traceId}] ChapoLoop crashed, attempting recovery:`, errorMessage);
 
     // Attempt recovery: let CHAPO process the error intelligently
     try {
       const recoveryLoop = new ChapoLoop(sessionId, sendEvent, projectRoot || getProjectRootFromState(sessionId), modelSelection, {
         maxIterations: 3,
-      });
+      }, traceId);
+      // Sanitize history to prevent re-triggering crashes from oversized/malformed messages
+      const sanitizedHistory = history.slice(-6).map(msg => ({
+        ...msg,
+        content: typeof msg.content === 'string'
+          ? msg.content.slice(0, 5000)
+          : String(msg.content).slice(0, 5000),
+      }));
       const errorHistory = [
-        ...history.slice(-6),
+        ...sanitizedHistory,
         { role: 'user', content: getTextContent(userMessage) },
         { role: 'system', content: `[CRITICAL ERROR] The previous processing attempt crashed with: ${errorMessage}. Explain what happened to the user in plain language and suggest next steps. Do NOT retry the same operation that caused the crash.` },
       ];

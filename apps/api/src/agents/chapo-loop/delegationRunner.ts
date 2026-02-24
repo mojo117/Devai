@@ -24,6 +24,7 @@ import {
 } from '../router/requestUtils.js';
 import { formatDelegationContext, isDelegationSuccessful, type ParallelDelegation } from './delegationUtils.js';
 import { handleToolCall, devoStrategy, caioStrategy, type RunnerToolCall } from './toolCallHandler.js';
+import { config as appConfig } from '../../config.js';
 
 export type DelegationSourceAgent = 'chapo' | 'devo' | 'caio';
 
@@ -321,10 +322,22 @@ export async function delegateToAgent(
   delegation: ParallelDelegation,
   fromAgent: DelegationSourceAgent,
 ): Promise<LoopDelegationResult> {
-  if (delegation.target === 'scout') {
-    return delegateToScout(deps, delegation, fromAgent);
-  }
-  return delegateToSubAgent(deps, delegation, fromAgent);
+  const timeoutMs = appConfig.delegationTimeoutMs;
+  const timeoutPromise = new Promise<LoopDelegationResult>((resolve) => {
+    setTimeout(() => {
+      resolve({
+        status: 'failed',
+        summary: `Delegation timeout after ${timeoutMs / 1000}s — sub-agent may still be running but CHAPO can't wait longer.`,
+        toolEvidence: [],
+      });
+    }, timeoutMs);
+  });
+
+  const workPromise = delegation.target === 'scout'
+    ? delegateToScout(deps, delegation, fromAgent)
+    : delegateToSubAgent(deps, delegation, fromAgent);
+
+  return Promise.race([workPromise, timeoutPromise]);
 }
 
 export async function delegateParallel(
@@ -333,18 +346,33 @@ export async function delegateParallel(
   buildVerificationEnvelope: (delegation: ParallelDelegation, result: LoopDelegationResult) => string,
 ): Promise<ParallelDelegationSummary> {
   const jobs = delegations.map(async (delegation): Promise<ParallelJobResult> => {
-    try {
-      const loopResult = await delegateToAgent(deps, delegation, 'chapo');
-      return {
-        ...delegation,
-        success: isDelegationSuccessful(loopResult.status),
-        result: loopResult.summary,
-        loopResult,
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { ...delegation, success: false, error: message };
-    }
+    const timeoutMs = appConfig.delegationTimeoutMs;
+    const timeoutPromise = new Promise<ParallelJobResult>((resolve) => {
+      setTimeout(() => {
+        resolve({
+          ...delegation,
+          success: false,
+          error: `Delegation timeout after ${timeoutMs / 1000}s — sub-agent may still be running but CHAPO can't wait longer.`,
+        });
+      }, timeoutMs);
+    });
+
+    const workPromise = (async (): Promise<ParallelJobResult> => {
+      try {
+        const loopResult = await delegateToAgent(deps, delegation, 'chapo');
+        return {
+          ...delegation,
+          success: isDelegationSuccessful(loopResult.status),
+          result: loopResult.summary,
+          loopResult,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { ...delegation, success: false, error: message };
+      }
+    })();
+
+    return Promise.race([workPromise, timeoutPromise]);
   });
 
   const settled = await Promise.allSettled(jobs);

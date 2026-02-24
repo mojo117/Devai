@@ -51,6 +51,7 @@ export interface CompactionResult {
   summary: string;
   droppedTokens: number;
   summaryTokens: number;
+  failed?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,12 +129,13 @@ export async function compactMessages(
       `[compaction] Compaction failed for session ${sessionId}: ${errorMsg}`,
     );
 
-    // Fallback: return a minimal summary so the conversation can continue
-    const fallbackSummary = '[Context wurde kompaktiert.]';
+    // Compaction failed — signal the caller to keep original messages instead of replacing
+    // with a fake summary that causes context drift
     return {
-      summary: fallbackSummary,
-      droppedTokens,
-      summaryTokens: Math.ceil(fallbackSummary.length / 4),
+      summary: '',
+      droppedTokens: 0,
+      summaryTokens: 0,
+      failed: true,
     };
   }
 }

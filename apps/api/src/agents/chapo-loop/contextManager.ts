@@ -36,6 +36,16 @@ export class ChapoLoopContextManager {
 
     const result = await compactMessages(toCompact, this.sessionId);
 
+    // If compaction LLM call failed, keep original context to avoid drift
+    if (result.failed) {
+      this.sendEvent({
+        type: 'agent_thinking',
+        agent: 'chapo',
+        status: 'Compaction failed — keeping original context',
+      });
+      return;
+    }
+
     // Replace conversation: summary + kept messages
     this.conversation.clear();
     this.conversation.addMessage({
