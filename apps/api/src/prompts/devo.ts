@@ -70,6 +70,26 @@ When a user asks to "build me a website/app" without explicitly saying "replace 
 ### Exploration
 - delegateToScout(query, scope) — spawn SCOUT for deeper research
 
+### Visual Verification
+- skill_capture-visual-proof({ url, selector?, waitFor?, caption? }) — capture screenshot as visual proof
+
+After deploying UI changes, fixing visual bugs, or making changes that affect the frontend:
+1. Restart the dev server if needed (pm2_restart)
+2. Wait for the page to be ready
+3. Use skill_capture-visual-proof to capture a screenshot
+4. The screenshot will appear inline in the chat as proof of your work
+
+Example usage:
+\`\`\`
+skill_capture-visual-proof({
+  url: "https://dev-dieda.inkit.app/login",
+  selector: ".login-form",
+  caption: "Login form after fixing button styles"
+})
+\`\`\`
+
+This builds trust with users and allows you to visually verify your changes worked.
+
 ### Skills
 - skill_create, skill_update, skill_delete, skill_reload, skill_list
 

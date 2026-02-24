@@ -1,0 +1,40 @@
+{
+  "id": "capture-visual-proof",
+  "name": "Capture Visual Proof",
+  "description": "Capture a screenshot as visual evidence of deployed changes. Use after making UI changes, deployments, or to verify page state. Returns an inline-renderable image in the chat.",
+  "version": "1.0.0",
+  "parameters": {
+    "url": {
+      "type": "string",
+      "description": "Full URL to capture (e.g. 'https://dev-dieda.inkit.app/login')",
+      "required": true
+    },
+    "selector": {
+      "type": "string",
+      "description": "Optional CSS selector to capture only a specific element (e.g. '.login-form', '#main-content')",
+      "required": false
+    },
+    "waitFor": {
+      "type": "string",
+      "description": "Optional CSS selector to wait for before capturing (e.g. '.loaded', '[data-ready]')",
+      "required": false
+    },
+    "viewport": {
+      "type": "object",
+      "description": "Viewport dimensions",
+      "required": false
+    },
+    "fullPage": {
+      "type": "boolean",
+      "description": "Capture full scrollable page (default: false, viewport only)",
+      "required": false
+    },
+    "caption": {
+      "type": "string",
+      "description": "Human-readable caption for the screenshot",
+      "required": false
+    }
+  },
+  "createdBy": "devo",
+  "tags": ["visual", "screenshot", "proof", "verification", "browser", "evidence"]
+}

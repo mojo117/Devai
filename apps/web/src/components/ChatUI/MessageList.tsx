@@ -2,6 +2,7 @@ import { Fragment, useState, type RefObject } from 'react';
 import type { ChatMessage, SessionSummary } from '../../types';
 import type { ToolEvent, DelegationData } from './types';
 import { DelegationCard } from './DelegationCard';
+import { VisualProofCard } from './VisualProofCard';
 import { mergeConsecutiveThinking } from './mergeEvents';
 import { renderMessageContent } from './utils';
 import { getUserfileDownloadUrl } from '../../api';
@@ -89,6 +90,17 @@ export function MessageList({
     return (
       <div className="space-y-1.5">
         {merged.map((event) => {
+          const visualProof = getVisualProofPayload(event);
+          if (visualProof) {
+            return (
+              <VisualProofCard
+                key={event.id}
+                imageUrl={visualProof.imageUrl}
+                caption={visualProof.caption}
+                sourceUrl={visualProof.sourceUrl}
+              />
+            );
+          }
           const doc = getDocumentDelivery(event);
           if (doc) {
             return (
@@ -281,6 +293,20 @@ function getDocumentDelivery(event: ToolEvent): { fileId: string; filename: stri
     downloadUrl: r.downloadUrl as string,
     mimeType: typeof r.mimeType === 'string' ? r.mimeType : undefined,
     description: r.description as string | undefined,
+  };
+}
+
+/** Check if a tool_result event represents a visual proof screenshot */
+function getVisualProofPayload(event: ToolEvent): { imageUrl: string; caption?: string; sourceUrl?: string } | null {
+  if (event.type !== 'tool_result') return null;
+  if (event.name !== 'capture_visual_proof' && event.name !== 'skill_capture-visual-proof') return null;
+  const r = event.result as Record<string, unknown> | undefined;
+  if (!r || typeof r !== 'object') return null;
+  if (typeof r.imageUrl !== 'string') return null;
+  return {
+    imageUrl: r.imageUrl as string,
+    caption: r.caption as string | undefined,
+    sourceUrl: r.url as string | undefined,
   };
 }
 
