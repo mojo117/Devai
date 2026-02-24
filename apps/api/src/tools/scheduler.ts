@@ -176,6 +176,18 @@ export async function reminderCreate(
     const explicitChannel = notificationChannel?.trim();
     let resolvedChannel = explicitChannel || undefined;
     let deliveryPlatform = explicitChannel ? 'custom' : 'default';
+
+    // If channel looks like a platform name (not a numeric chat ID), resolve it
+    if (resolvedChannel && !/^\d+$/.test(resolvedChannel)) {
+      const defaultChannel = await getDefaultNotificationChannel();
+      if (defaultChannel?.external_chat_id) {
+        resolvedChannel = defaultChannel.external_chat_id;
+        deliveryPlatform = defaultChannel.platform || 'default';
+      } else {
+        resolvedChannel = undefined;
+      }
+    }
+
     if (!resolvedChannel) {
       const defaultChannel = await getDefaultNotificationChannel();
       if (defaultChannel?.external_chat_id) {

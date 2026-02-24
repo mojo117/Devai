@@ -198,6 +198,13 @@ const start = async () => {
 
     const sendSchedulerNotification = async (message: string, targetChannel?: string | null) => {
       let chatId = targetChannel ? String(targetChannel) : '';
+
+      // If channel looks like a platform name (not a numeric chat ID), resolve it
+      if (chatId && !/^\d+$/.test(chatId)) {
+        const defaultChannel = await getDefaultNotificationChannel();
+        chatId = defaultChannel?.external_chat_id || '';
+      }
+
       if (!chatId) {
         const defaultChannel = await getDefaultNotificationChannel();
         chatId = defaultChannel?.external_chat_id || '';
