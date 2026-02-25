@@ -163,6 +163,11 @@ export class CommandHandlers {
         // Parallel mode: fire-and-forget a new loop concurrently
         const parallelTurnId = command.requestId;
 
+        // Snapshot history BEFORE persisting the new user message so the parallel
+        // loop sees prior conversation context but not messages from other parallel loops.
+        const historySnapshot = await getMessages(activeSessionId);
+        const snapshotHistory = buildConversationHistoryContext(historySnapshot);
+
         // Persist user message immediately so it's visible in chat history
         const parallelUserMsg = createChatMessage('user', typeof command.message === 'string' ? command.message : '[multimodal content]');
         saveMessage(activeSessionId, parallelUserMsg).catch((err) =>
@@ -195,7 +200,7 @@ export class CommandHandlers {
         // Start the parallel loop in background — don't await
         this.runParallelLoop(
           activeSessionId, parallelMessage, parallelTurnId,
-          validatedProjectRoot, ctx, pSendEvent, pCollected, message,
+          validatedProjectRoot, ctx, pSendEvent, pCollected, message, snapshotHistory,
         ).catch((err) => console.error('[commandHandlers] Parallel loop error:', err));
 
         return { type: 'queued', sessionId: activeSessionId };
@@ -419,11 +424,11 @@ export class CommandHandlers {
     sendEvent: (event: AgentStreamEvent) => void,
     collectedToolEvents: CollectedToolEvent[],
     originalMessage: string,
+    historySnapshot: Array<{ role: string; content: string }>,
   ): Promise<void> {
-    // Parallel loops get NO shared conversation history — each loop only sees its own
-    // user message. The parallel context buffer provides awareness of other loops.
-    // Loading full history caused loops to answer the wrong (previous) question.
-    const recentHistory: Array<{ role: string; content: string }> = [];
+    // Use the pre-snapshotted history — captured before the parallel user message
+    // was persisted, so this loop sees prior conversation but not other parallel loops.
+    const recentHistory = historySnapshot;
 
     try {
       const result = await processRequest(
