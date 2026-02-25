@@ -15,7 +15,7 @@ import { PendingActionsBar } from './PendingActionsBar';
 import { DropOverlay } from './DropOverlay';
 import { validateFile } from './uploadConstants';
 import { TodoCard } from '../TodoCard';
-import { getLatestArtifact } from '../PreviewPanel/artifactParser';
+import { getLatestArtifact, parseToolEventArtifacts } from '../PreviewPanel/artifactParser';
 import type { Artifact } from '../PreviewPanel/artifactParser';
 
 export function ChatUI({
@@ -185,8 +185,25 @@ export function ChatUI({
 
   useEffect(() => {
     if (!onArtifactDetected) return;
-    onArtifactDetected(getLatestArtifact(messages));
-  }, [messages, onArtifactDetected]);
+
+    // Check frozen tool events first (completed messages)
+    const artifact = getLatestArtifact(messages, messageToolEvents);
+    if (artifact) {
+      onArtifactDetected(artifact);
+      return;
+    }
+
+    // Also check live tool events (still streaming)
+    if (toolEvents.length > 0) {
+      const liveArtifacts = parseToolEventArtifacts(toolEvents);
+      if (liveArtifacts.length > 0) {
+        onArtifactDetected(liveArtifacts[liveArtifacts.length - 1]);
+        return;
+      }
+    }
+
+    onArtifactDetected(null);
+  }, [messages, messageToolEvents, toolEvents, onArtifactDetected]);
 
   // --- Delegation persistence ---
 
