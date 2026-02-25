@@ -333,7 +333,14 @@ export class CommandHandlers {
       );
 
       const responseMessage = createChatMessage('assistant', result);
-      const userMessage = createChatMessage('user', message);
+      // Persist file reference headers with the message so CHAPO can find userfileIds in history
+      const persistedContent = typeof augmentedMessage === 'string'
+        ? augmentedMessage
+        : augmentedMessage
+            .filter((b): b is TextContentBlock => b.type === 'text')
+            .map((b) => b.text)
+            .join('\n\n');
+      const userMessage = createChatMessage('user', persistedContent || message);
 
       await persistAndEmitTerminalResponse({
         ctx,
