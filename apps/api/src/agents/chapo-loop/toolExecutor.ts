@@ -25,6 +25,8 @@ import {
 import {
   setChapoPlan,
 } from './chapoControlTools.js';
+import { getUserfileById, listUserfiles } from '../../db/userfileQueries.js';
+import { createUserfileSignedUrl } from '../../services/userfileService.js';
 
 interface ToolCallLike {
   id: string;
@@ -88,6 +90,106 @@ export class ChapoToolExecutor {
           isError: !result.success,
         },
       };
+    }
+
+    // ACTION: SHOW IN PREVIEW — display uploaded userfile in preview panel
+    if (toolCall.name === 'show_in_preview') {
+      const userfileId = toolCall.arguments.userfileId as string;
+      if (!userfileId) {
+        return {
+          toolResult: {
+            toolUseId: toolCall.id,
+            result: 'Error: userfileId ist erforderlich.',
+            isError: true,
+          },
+        };
+      }
+
+      const file = await getUserfileById(userfileId);
+      if (!file) {
+        return {
+          toolResult: {
+            toolUseId: toolCall.id,
+            result: `Error: Datei mit ID "${userfileId}" nicht gefunden.`,
+            isError: true,
+          },
+        };
+      }
+
+      try {
+        const signed = await createUserfileSignedUrl(file.storage_path);
+
+        // Emit tool_call event with preview metadata so frontend artifact detection picks it up
+        this.deps.sendEvent({
+          type: 'tool_call',
+          agent: 'chapo',
+          toolName: 'show_in_preview',
+          args: {
+            signedUrl: signed.url,
+            filename: file.original_name,
+            mimeType: file.mime_type,
+            userfileId,
+          },
+        });
+
+        return {
+          toolResult: {
+            toolUseId: toolCall.id,
+            result: `Datei "${file.original_name}" wird in der Preview angezeigt.`,
+            isError: false,
+          },
+        };
+      } catch (err) {
+        return {
+          toolResult: {
+            toolUseId: toolCall.id,
+            result: `Error: Signed URL konnte nicht erstellt werden: ${err instanceof Error ? err.message : String(err)}`,
+            isError: true,
+          },
+        };
+      }
+    }
+
+    // ACTION: SEARCH FILES — list/search uploaded userfiles
+    if (toolCall.name === 'search_files') {
+      const query = (toolCall.arguments.query as string)?.trim().toLowerCase() || '';
+      try {
+        const allFiles = await listUserfiles();
+        const filtered = query
+          ? allFiles.filter((f) => f.original_name.toLowerCase().includes(query))
+          : allFiles.slice(0, 20);
+
+        if (filtered.length === 0) {
+          return {
+            toolResult: {
+              toolUseId: toolCall.id,
+              result: query
+                ? `Keine Dateien gefunden für "${query}".`
+                : 'Keine hochgeladenen Dateien vorhanden.',
+              isError: false,
+            },
+          };
+        }
+
+        const lines = filtered.map((f) =>
+          `- **${f.original_name}** | ID: \`${f.id}\` | ${f.mime_type} | ${Math.round(f.size_bytes / 1024)}KB | ${new Date(f.uploaded_at).toLocaleDateString('de-DE')}`
+        );
+        return {
+          toolResult: {
+            toolUseId: toolCall.id,
+            result: `${filtered.length} Datei(en) gefunden:\n${lines.join('\n')}`,
+            isError: false,
+          },
+        };
+      } catch (err) {
+        return {
+          toolResult: {
+            toolUseId: toolCall.id,
+            result: `Error: ${err instanceof Error ? err.message : String(err)}`,
+            isError: true,
+          },
+        };
+      }
     }
 
     // ACTION: TODO — update self-managed todo list

@@ -54,6 +54,8 @@ export const CHAPO_AGENT: AgentDefinition = {
     'skill_reload',
     // CHAPO control tools
     'chapo_plan_set',
+    'show_in_preview',
+    'search_files',
     // Meta-tools for coordination
     'delegateToDevo',
     'delegateToCaio',
@@ -401,6 +403,36 @@ export const CHAPO_META_TOOLS = [
         },
       },
       required: ['message'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'show_in_preview',
+    description: 'Zeigt eine hochgeladene Datei (PDF, Bild) in der Preview-Leiste an. Nutze dies wenn der User eine angehängte Datei in der Preview sehen will. Benötigt die userfileId aus den angehängten Dateien (z.B. "uf_abc123" oder die Nanoid aus der Datei-Kopfzeile).',
+    parameters: {
+      type: 'object',
+      properties: {
+        userfileId: {
+          type: 'string',
+          description: 'Die ID der hochgeladenen Datei.',
+        },
+      },
+      required: ['userfileId'],
+    },
+    requiresConfirmation: false,
+  },
+  {
+    name: 'search_files',
+    description: 'Sucht in den hochgeladenen Dateien des Users. Ohne query werden die letzten 20 Dateien angezeigt. Mit query wird nach Dateinamen gesucht. Nutze dies wenn du eine userfileId brauchst aber sie nicht im Kontext findest.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Optional: Suchbegriff für den Dateinamen (z.B. ".md", "screenshot", "report").',
+        },
+      },
+      required: [],
     },
     requiresConfirmation: false,
   },
