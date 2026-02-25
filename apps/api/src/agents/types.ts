@@ -17,7 +17,7 @@ export type RiskLevel = 'low' | 'medium' | 'high';
 
 export type TaskComplexity = 'simple' | 'moderate' | 'complex';
 
-export type LLMProviderName = 'anthropic' | 'openai' | 'gemini' | 'zai';
+export type LLMProviderName = 'anthropic' | 'openai' | 'gemini' | 'zai' | 'moonshot';
 
 export interface ModelSelection {
   provider: LLMProviderName;
@@ -374,7 +374,11 @@ export type AgentStreamEvent =
   | { type: 'todo_updated'; todos: TodoItem[] }
   // Inbox events
   | { type: 'message_queued'; messageId: string; preview: string }
-  | { type: 'inbox_processing'; count: number };
+  | { type: 'inbox_processing'; count: number }
+  // Parallel loop events
+  | { type: 'loop_started'; turnId: string; taskLabel: string }
+  | { type: 'loop_completed'; turnId: string; taskLabel: string }
+  | { type: 'mode_changed'; mode: 'serial' | 'parallel' };
 
 // Agent Response
 export interface AgentResponse {
@@ -457,7 +461,7 @@ export interface LoopDelegationResult {
 
 export interface ChapoLoopResult {
   answer: string;
-  status: 'completed' | 'waiting_for_user' | 'error';
+  status: 'completed' | 'waiting_for_user' | 'error' | 'aborted';
   totalIterations: number;
   question?: string; // if status === 'waiting_for_user'
 }

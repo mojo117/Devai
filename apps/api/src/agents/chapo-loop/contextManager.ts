@@ -1,6 +1,8 @@
 import { compactMessages } from '../../memory/compaction.js';
 import type { ConversationManager } from '../conversation-manager.js';
 import type { AgentStreamEvent } from '../types.js';
+import { getOtherLoopContexts } from '../stateManager.js';
+import type { ParallelLoopEntry } from '../stateManager.js';
 
 const COMPACTION_THRESHOLD = 160_000;
 
@@ -72,4 +74,55 @@ export class ChapoLoopContextManager {
     });
   }
 
+  /**
+   * Build a system message showing what other parallel loops are doing.
+   * Returns null if no other loops are active.
+   */
+  buildParallelContextMessage(turnId: string): string | null {
+    const others = getOtherLoopContexts(this.sessionId, turnId);
+    if (others.length === 0) return null;
+
+    const loopSections = others.map((entry) => formatLoopEntry(entry));
+    const activeCount = others.filter((e) => e.status === 'running').length;
+    const completedCount = others.filter((e) => e.status === 'completed').length;
+    const parts = [];
+    if (activeCount > 0) parts.push(`${activeCount} running`);
+    if (completedCount > 0) parts.push(`${completedCount} completed`);
+
+    return [
+      `[Parallel Context — ${parts.join(', ')}]`,
+      '',
+      ...loopSections,
+      '[Hinweis: Vermeide Konflikte mit Dateien die andere Loops bearbeiten.]',
+    ].join('\n');
+  }
+
+}
+
+const MAX_ACTIONS_IN_CONTEXT = 20;
+
+function formatLoopEntry(entry: ParallelLoopEntry): string {
+  const promptPreview = entry.originalPrompt.length > 120
+    ? entry.originalPrompt.slice(0, 117) + '...'
+    : entry.originalPrompt;
+
+  const lines: string[] = [
+    `Loop "${entry.taskLabel}" (User: "${promptPreview}"):`,
+    `  Status: ${entry.status}`,
+  ];
+
+  // Show last N actions
+  const actions = entry.actions.slice(-MAX_ACTIONS_IN_CONTEXT);
+  for (const action of actions) {
+    lines.push(`  - ${action.tool} → ${action.summary}`);
+  }
+
+  if (entry.status === 'completed' && entry.finalAnswer) {
+    const answer = entry.finalAnswer.length > 200
+      ? entry.finalAnswer.slice(0, 197) + '...'
+      : entry.finalAnswer;
+    lines.push(`  Result: ${answer}`);
+  }
+
+  return lines.join('\n');
 }

@@ -414,6 +414,51 @@ export function ChatUI({
         ]);
         break;
       }
+      case 'loop_started': {
+        const ev = event as unknown as { turnId: string; taskLabel: string };
+        setToolEvents((prev) => [
+          ...prev,
+          {
+            id: ev.turnId || crypto.randomUUID(),
+            type: 'status',
+            name: 'parallel_loop',
+            result: `Parallel Loop gestartet: ${ev.taskLabel}`,
+            completed: false,
+            agent: 'chapo' as AgentName,
+          },
+        ]);
+        break;
+      }
+      case 'loop_completed': {
+        const ev = event as unknown as { turnId: string; taskLabel: string };
+        setToolEvents((prev) => [
+          ...prev,
+          {
+            id: ev.turnId || crypto.randomUUID(),
+            type: 'status',
+            name: 'parallel_loop',
+            result: `Loop fertig: ${ev.taskLabel}`,
+            completed: true,
+            agent: 'chapo' as AgentName,
+          },
+        ]);
+        break;
+      }
+      case 'mode_changed': {
+        const ev = event as unknown as { mode: string };
+        setToolEvents((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            type: 'status',
+            name: 'mode',
+            result: ev.mode === 'parallel' ? 'Parallel Mode aktiviert' : 'Serial Mode aktiviert',
+            completed: true,
+            agent: 'chapo' as AgentName,
+          },
+        ]);
+        break;
+      }
       case 'partial_response': {
         const partialMessage: ChatMessage = {
           id: crypto.randomUUID(),

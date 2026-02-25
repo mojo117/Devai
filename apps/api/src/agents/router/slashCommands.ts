@@ -11,7 +11,14 @@ import {
   getState,
   setGatheredInfo,
   flushState,
+  getSessionMode,
+  setSessionMode,
+  abortAllLoops,
+  getActiveLoopCount,
 } from '../stateManager.js';
+import type { SessionMode } from '../stateManager.js';
+import { clearInbox } from '../inbox.js';
+import { abortLoopInstances } from '../chapo-loop.js';
 
 /**
  * Try to handle a slash command instantly, without routing through the LLM.
@@ -47,6 +54,36 @@ export async function tryHandleSlashCommand(
     const arg = previewMatch[1]?.toLowerCase();
     if (!arg) return 'Preview: `/preview on` or `/preview off`. This is a client-side UI feature.';
     return `Preview mode **${arg === 'on' ? 'ON' : 'OFF'}**. (Note: This takes effect in the web UI only.)`;
+  }
+
+  // /mode [serial|parallel]
+  const modeMatch = trimmed.match(/^\/mode(?:\s+(.*))?$/i);
+  if (modeMatch) {
+    const arg = modeMatch[1]?.trim().toLowerCase();
+    if (!arg) {
+      const current = getSessionMode(sessionId);
+      return `Current mode: **${current}**.\nUsage: \`/mode serial\` or \`/mode parallel\``;
+    }
+    if (arg === 'serial' || arg === 'parallel') {
+      setSessionMode(sessionId, arg as SessionMode);
+      await flushState(sessionId);
+      return arg === 'parallel'
+        ? '**Parallel Mode** aktiviert. Neue Nachrichten starten sofort einen eigenen Loop.'
+        : '**Serial Mode** aktiviert. Nachrichten werden nacheinander verarbeitet.';
+    }
+    return `Unknown mode "${arg}". Available: serial, parallel.\nUsage: \`/mode <serial|parallel>\``;
+  }
+
+  // /stop — abort all running loops
+  if (trimmed === '/stop') {
+    const loopCount = getActiveLoopCount(sessionId);
+    if (loopCount === 0) {
+      return 'Keine aktiven Loops.';
+    }
+    const abortedTurnIds = abortAllLoops(sessionId);
+    abortLoopInstances(sessionId);
+    clearInbox(sessionId);
+    return `${abortedTurnIds.length} Loop(s) abgebrochen.`;
   }
 
   return null;

@@ -14,7 +14,29 @@ import type {
   UserQuestion,
 } from '../types.js';
 
-// Runtime-only loop activity map. This must not be reconstructed from persisted state.
+// --- Parallel Loop Types ---
+
+export interface ParallelLoopAction {
+  iteration: number;
+  tool: string;
+  summary: string;
+}
+
+export interface ParallelLoopEntry {
+  turnId: string;
+  taskLabel: string;
+  originalPrompt: string;
+  status: 'running' | 'completed' | 'aborted';
+  finalAnswer?: string;
+  actions: ParallelLoopAction[];
+}
+
+export type SessionMode = 'serial' | 'parallel';
+
+// Runtime-only: sessionId → Map<turnId, ParallelLoopEntry>
+const activeLoops = new Map<string, Map<string, ParallelLoopEntry>>();
+
+// Backwards-compatible: tracks whether ANY loop is active for a session
 const activeLoopSessions = new Set<string>();
 
 // Phase Management
@@ -115,6 +137,142 @@ export function isLoopActive(sessionId: string): boolean {
   }
   return false;
 }
+
+// --- Parallel Loop Management ---
+
+export function getSessionMode(sessionId: string): SessionMode {
+  const state = getState(sessionId);
+  const mode = state?.taskContext.gatheredInfo.sessionMode;
+  return mode === 'parallel' ? 'parallel' : 'serial';
+}
+
+export function setSessionMode(sessionId: string, mode: SessionMode): void {
+  const state = getOrCreateState(sessionId);
+  state.taskContext.gatheredInfo.sessionMode = mode;
+  schedulePersist(sessionId);
+}
+
+export function registerParallelLoop(
+  sessionId: string,
+  turnId: string,
+  taskLabel: string,
+  originalPrompt: string,
+): void {
+  let sessionLoops = activeLoops.get(sessionId);
+  if (!sessionLoops) {
+    sessionLoops = new Map();
+    activeLoops.set(sessionId, sessionLoops);
+  }
+  sessionLoops.set(turnId, {
+    turnId,
+    taskLabel,
+    originalPrompt,
+    status: 'running',
+    actions: [],
+  });
+  // Keep activeLoopSessions in sync
+  activeLoopSessions.add(sessionId);
+}
+
+export function unregisterParallelLoop(sessionId: string, turnId: string): void {
+  const sessionLoops = activeLoops.get(sessionId);
+  if (!sessionLoops) return;
+  sessionLoops.delete(turnId);
+  if (sessionLoops.size === 0) {
+    activeLoops.delete(sessionId);
+    activeLoopSessions.delete(sessionId);
+    // Also clear persisted flag
+    const state = getState(sessionId);
+    if (state) state.isLoopRunning = false;
+  }
+}
+
+const MAX_ACTIONS_PER_LOOP = 50;
+
+export function appendLoopAction(
+  sessionId: string,
+  turnId: string,
+  action: ParallelLoopAction,
+): void {
+  const entry = activeLoops.get(sessionId)?.get(turnId);
+  if (!entry) return;
+  entry.actions.push(action);
+  // Trim oldest actions if over limit
+  if (entry.actions.length > MAX_ACTIONS_PER_LOOP) {
+    entry.actions = entry.actions.slice(-MAX_ACTIONS_PER_LOOP);
+  }
+}
+
+export function getOtherLoopContexts(
+  sessionId: string,
+  excludeTurnId: string,
+): ParallelLoopEntry[] {
+  const sessionLoops = activeLoops.get(sessionId);
+  if (!sessionLoops) return [];
+  const entries: ParallelLoopEntry[] = [];
+  for (const [turnId, entry] of sessionLoops) {
+    if (turnId !== excludeTurnId) entries.push(entry);
+  }
+  return entries;
+}
+
+export function updateLoopStatus(
+  sessionId: string,
+  turnId: string,
+  status: 'completed' | 'aborted',
+  finalAnswer?: string,
+): void {
+  const entry = activeLoops.get(sessionId)?.get(turnId);
+  if (!entry) return;
+  entry.status = status;
+  if (finalAnswer) entry.finalAnswer = finalAnswer;
+
+  // Auto-cleanup after 5 minutes
+  setTimeout(() => {
+    const sessions = activeLoops.get(sessionId);
+    if (sessions) {
+      sessions.delete(turnId);
+      if (sessions.size === 0) {
+        activeLoops.delete(sessionId);
+        activeLoopSessions.delete(sessionId);
+      }
+    }
+  }, 5 * 60 * 1000);
+}
+
+export function updateLoopLabel(
+  sessionId: string,
+  turnId: string,
+  taskLabel: string,
+): void {
+  const entry = activeLoops.get(sessionId)?.get(turnId);
+  if (entry) entry.taskLabel = taskLabel;
+}
+
+export function getActiveLoopCount(sessionId: string): number {
+  const sessionLoops = activeLoops.get(sessionId);
+  if (!sessionLoops) return 0;
+  let count = 0;
+  for (const entry of sessionLoops.values()) {
+    if (entry.status === 'running') count++;
+  }
+  return count;
+}
+
+export function abortAllLoops(sessionId: string): string[] {
+  const sessionLoops = activeLoops.get(sessionId);
+  if (!sessionLoops) return [];
+  const turnIds: string[] = [];
+  for (const [turnId, entry] of sessionLoops) {
+    if (entry.status === 'running') {
+      entry.status = 'aborted';
+      turnIds.push(turnId);
+    }
+  }
+  return turnIds;
+}
+
+// --- Approvals ---
 
 export function grantApproval(sessionId: string): void {
   const state = getOrCreateState(sessionId);

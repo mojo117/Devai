@@ -31,6 +31,7 @@ export async function processRequest(
   conversationHistory: Array<{ role: string; content: string }> | undefined,
   projectRoot: string | null,
   sendEvent: SendEventFn,
+  parallelTurnId?: string,
 ): Promise<string> {
   await stateManager.ensureStateLoaded(sessionId);
   const traceId = nanoid(12);
@@ -110,7 +111,7 @@ export async function processRequest(
     const loopProjectRoot = projectRoot || getProjectRootFromState(sessionId);
     const loop = new ChapoLoop(sessionId, sendEvent, loopProjectRoot, modelSelection, {
       maxIterations: 30,
-    }, traceId);
+    }, traceId, parallelTurnId);
     const loopResult = await loop.run(userMessage, history);
 
     if (loopResult.status === 'error') {

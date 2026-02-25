@@ -52,6 +52,18 @@ interface ChapoLoopConfig {
   maxIterations: number;
 }
 
+// Module-level map for /stop to reach running loop instances
+const activeLoopInstances = new Map<string, Map<string, ChapoLoop>>();
+
+/** Abort all running ChapoLoop instances for a session (called by /stop). */
+export function abortLoopInstances(sessionId: string): void {
+  const instances = activeLoopInstances.get(sessionId);
+  if (!instances) return;
+  for (const loop of instances.values()) {
+    loop.abort();
+  }
+}
+
 export class ChapoLoop {
   private errorHandler: AgentErrorHandler;
   private answerValidator: AnswerValidator;
@@ -68,6 +80,10 @@ export class ChapoLoop {
   private toolCallLog: Array<{ name: string; durationMs: number; success: boolean }> = [];
   private delegationLog: Array<{ target: string; durationMs: number; status: string }> = [];
 
+  // Parallel loop support
+  private parallelTurnId: string | undefined;
+  private abortController = new AbortController();
+
   constructor(
     private sessionId: string,
     private sendEvent: SendEventFn,
@@ -75,6 +91,7 @@ export class ChapoLoop {
     private modelSelection: ModelSelection,
     private config: ChapoLoopConfig,
     traceId?: string,
+    parallelTurnId?: string,
   ) {
     this.errorHandler = new AgentErrorHandler(3);
     this.conversation = new ConversationManager(180_000);
@@ -83,6 +100,12 @@ export class ChapoLoop {
     this.contextManager = new ChapoLoopContextManager(this.sessionId, this.sendEvent, this.conversation);
     this.gateManager = new ChapoLoopGateManager(this.sessionId, this.sendEvent);
     this.traceId = traceId || '';
+    this.parallelTurnId = parallelTurnId;
+  }
+
+  /** Signal this loop to abort (used by /stop). */
+  abort(): void {
+    this.abortController.abort();
   }
 
   dispose(): void {
@@ -167,6 +190,20 @@ export class ChapoLoop {
     stateManager.ensureActiveTurnId(this.sessionId);
     this.contextManager.setPinnedRequest(userText);
 
+    // Register in parallel loop buffer if this is a parallel loop
+    if (this.parallelTurnId) {
+      const words = userText.split(/\s+/).slice(0, 8).join(' ');
+      const taskLabel = words.length < userText.length ? words + '...' : words;
+      stateManager.registerParallelLoop(this.sessionId, this.parallelTurnId, taskLabel, userText.slice(0, 500));
+      // Track instance for /stop
+      let sessionInstances = activeLoopInstances.get(this.sessionId);
+      if (!sessionInstances) {
+        sessionInstances = new Map();
+        activeLoopInstances.set(this.sessionId, sessionInstances);
+      }
+      sessionInstances.set(this.parallelTurnId, this);
+    }
+
     // 1. Warm system context + query-relevant memories
     await warmSystemContextForSession(this.sessionId, this.projectRoot);
     await warmMemoryRetrievalForSession(this.sessionId, userText);
@@ -208,12 +245,28 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
     this.sendEvent({ type: 'agent_start', agent: 'chapo', phase: 'execution' });
 
     // 6. Enter runLoop with inbox lifecycle
-    stateManager.setLoopRunning(this.sessionId, true);
+    if (!this.parallelTurnId) {
+      // Serial mode: use global loop flag
+      stateManager.setLoopRunning(this.sessionId, true);
+    }
     let result: ChapoLoopResult;
     try {
       result = await this.runLoop(userMessage);
     } finally {
-      stateManager.setLoopRunning(this.sessionId, false);
+      if (this.parallelTurnId) {
+        // Parallel mode: update loop status and unregister
+        const answer = result!?.answer || '';
+        stateManager.updateLoopStatus(this.sessionId, this.parallelTurnId, 'completed', answer.slice(0, 500));
+        stateManager.unregisterParallelLoop(this.sessionId, this.parallelTurnId);
+        // Remove from instance map
+        const sessionInstances = activeLoopInstances.get(this.sessionId);
+        if (sessionInstances) {
+          sessionInstances.delete(this.parallelTurnId);
+          if (sessionInstances.size === 0) activeLoopInstances.delete(this.sessionId);
+        }
+      } else {
+        stateManager.setLoopRunning(this.sessionId, false);
+      }
       this.dispose();
     }
 
@@ -290,6 +343,14 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
     console.log(`${trace}[chapo-loop] Tools: ${tools.length}`);
 
     for (this.iteration = 0; this.iteration < this.config.maxIterations; this.iteration++) {
+      // --- Abort check (for /stop command) ---
+      if (this.abortController.signal.aborted) {
+        if (this.parallelTurnId) {
+          stateManager.updateLoopStatus(this.sessionId, this.parallelTurnId, 'aborted');
+        }
+        return { answer: 'Loop abgebrochen.', status: 'aborted' as const, totalIterations: this.iteration };
+      }
+
       const elapsed = Date.now() - loopStartTime;
 
       // --- Stall Timeout: only fires when no progress for hardTimeoutMs ---
@@ -320,6 +381,14 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
 
       // Check if compaction needed before LLM call
       await this.contextManager.checkAndCompact();
+
+      // Inject parallel context from other running loops
+      if (this.parallelTurnId) {
+        const parallelMsg = this.contextManager.buildParallelContextMessage(this.parallelTurnId);
+        if (parallelMsg) {
+          this.conversation.addMessage({ role: 'system', content: parallelMsg });
+        }
+      }
 
       // Call LLM with conversation + tools
       const t0 = Date.now();
@@ -427,17 +496,30 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
             earlyReturn = outcome.earlyReturn;
             // Log delegation metrics if this was a delegation
             if (toolCall.name.startsWith('delegate')) {
-              this.delegationLog.push({
-                target: toolCall.name.replace('delegateTo', '').replace('delegateParallel', 'parallel'),
-                durationMs: toolDuration,
-                status: earlyReturn.status,
-              });
+              const target = toolCall.name.replace('delegateTo', '').replace('delegateParallel', 'parallel');
+              this.delegationLog.push({ target, durationMs: toolDuration, status: earlyReturn.status });
+              // Log to parallel buffer
+              if (this.parallelTurnId) {
+                stateManager.appendLoopAction(this.sessionId, this.parallelTurnId, {
+                  iteration: this.iteration,
+                  tool: toolCall.name,
+                  summary: `${target.toUpperCase()} delegation: ${earlyReturn.status}`,
+                });
+              }
             }
             break;
           }
           if (outcome.toolResult) {
             toolResults.push(outcome.toolResult);
             this.toolCallLog.push({ name: toolCall.name, durationMs: toolDuration, success: !outcome.toolResult.isError });
+            // Log action to parallel buffer
+            if (this.parallelTurnId) {
+              stateManager.appendLoopAction(this.sessionId, this.parallelTurnId, {
+                iteration: this.iteration,
+                tool: toolCall.name,
+                summary: buildActionSummary(toolCall.name, toolCall.arguments, outcome.toolResult),
+              });
+            }
             // Structured reflection: inject thinking after tool failures
             if (outcome.toolResult.isError) {
               this.conversation.addThinking(
@@ -564,4 +646,56 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       buildToolResultContent,
     };
   }
+}
+
+/** Build a short 1-line summary for the parallel context buffer. */
+function buildActionSummary(
+  toolName: string,
+  args: Record<string, unknown>,
+  toolResult: { result: string; isError: boolean },
+): string {
+  const resultPreview = toolResult.result.slice(0, 80);
+  const success = toolResult.isError ? 'Fehler' : 'OK';
+
+  // File operations
+  if (toolName === 'fs_readFile' || toolName === 'fs_glob' || toolName === 'fs_grep') {
+    const path = typeof args.path === 'string' ? args.path.split('/').pop() : '?';
+    return `${path} gelesen (${success})`;
+  }
+  if (toolName === 'fs_listFiles') {
+    const path = typeof args.path === 'string' ? args.path : '?';
+    return `${path} aufgelistet`;
+  }
+
+  // Delegations
+  if (toolName === 'delegateToDevo') {
+    const obj = typeof args.objective === 'string' ? args.objective.slice(0, 60) : '?';
+    return `DEVO: ${obj}`;
+  }
+  if (toolName === 'delegateToCaio') {
+    const obj = typeof args.objective === 'string' ? args.objective.slice(0, 60) : '?';
+    return `CAIO: ${obj}`;
+  }
+  if (toolName === 'delegateToScout') {
+    const obj = typeof args.objective === 'string' ? args.objective.slice(0, 60) : '?';
+    return `SCOUT: ${obj}`;
+  }
+
+  // Web
+  if (toolName === 'web_search') {
+    const query = typeof args.query === 'string' ? args.query.slice(0, 40) : '?';
+    return `Web-Suche: ${query}`;
+  }
+  if (toolName === 'web_fetch') {
+    const url = typeof args.url === 'string' ? args.url.slice(0, 50) : '?';
+    return `Web-Fetch: ${url}`;
+  }
+
+  // Git
+  if (toolName === 'git_status' || toolName === 'git_diff') {
+    return `${toolName} (${success})`;
+  }
+
+  // Generic fallback
+  return `${toolName}: ${resultPreview}`;
 }

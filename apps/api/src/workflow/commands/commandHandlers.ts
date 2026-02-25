@@ -37,13 +37,14 @@ import {
   setPhase,
   isLoopActive,
   setLoopRunning,
+  getSessionMode,
 } from '../../agents/stateManager.js';
 import { config } from '../../config.js';
 import type { ChatMessage } from '@devai/shared';
 import { buildUserfileContext } from '../../services/userfileContext.js';
 import type { ContentBlock, TextContentBlock } from '../../llm/types.js';
 import { buildConversationHistoryContext } from '../../agents/conversationHistory.js';
-import { createCollectingBridge, persistAndEmitTerminalResponse } from './eventBridge.js';
+import { createCollectingBridge, persistAndEmitTerminalResponse, type CollectedToolEvent } from './eventBridge.js';
 import { classifyInboundText } from '../../agents/intakeClassifier.js';
 import { tryHandleSlashCommand } from '../../agents/router/slashCommands.js';
 
@@ -154,8 +155,53 @@ export class CommandHandlers {
       return { type: 'success', sessionId: activeSessionId, responseMessage: assistantMsg };
     }
 
-    // Multi-message: if a loop is already running, queue instead of starting a new one
+    // Multi-message: if a loop is already running...
     if (isLoopActive(activeSessionId)) {
+      const sessionMode = getSessionMode(activeSessionId);
+
+      if (sessionMode === 'parallel') {
+        // Parallel mode: fire-and-forget a new loop concurrently
+        const parallelTurnId = command.requestId;
+
+        // Persist user message immediately so it's visible in chat history
+        const parallelUserMsg = createChatMessage('user', typeof command.message === 'string' ? command.message : '[multimodal content]');
+        saveMessage(activeSessionId, parallelUserMsg).catch((err) =>
+          console.error('[commandHandlers] Failed to persist parallel user message:', err),
+        );
+
+        const { sendEvent: pSendEvent, collectedToolEvents: pCollected } = createCollectingBridge(ctx);
+        pSendEvent({ type: 'loop_started', turnId: parallelTurnId, taskLabel: buildSessionTitle(message) || 'Task' });
+
+        // Build augmented message (userfile injection) for the parallel loop
+        let parallelMessage: string | ContentBlock[] = message;
+        if (command.pinnedUserfileIds && command.pinnedUserfileIds.length > 0) {
+          try {
+            const fileBlocks = await buildUserfileContext(command.pinnedUserfileIds);
+            if (fileBlocks.length > 0) {
+              const hasImages = fileBlocks.some((b) => b.type === 'image_url');
+              if (hasImages) {
+                parallelMessage = [...fileBlocks, { type: 'text' as const, text: message }];
+              } else {
+                const textContext = fileBlocks
+                  .filter((b): b is TextContentBlock => b.type === 'text')
+                  .map((b) => b.text)
+                  .join('\n\n');
+                parallelMessage = textContext ? textContext + '\n\n' + message : message;
+              }
+            }
+          } catch { /* fallback to plain message */ }
+        }
+
+        // Start the parallel loop in background — don't await
+        this.runParallelLoop(
+          activeSessionId, parallelMessage, parallelTurnId,
+          validatedProjectRoot, ctx, pSendEvent, pCollected, message,
+        ).catch((err) => console.error('[commandHandlers] Parallel loop error:', err));
+
+        return { type: 'queued', sessionId: activeSessionId };
+      }
+
+      // Serial mode (status quo): queue to inbox
       setGatheredInfo(activeSessionId, 'queuedIntakeKind', intake.kind);
       const inboxMsg: InboxMessage = {
         id: nanoid(),
@@ -358,6 +404,67 @@ export class CommandHandlers {
       sessionLogger.finalize('error');
 
       return { type: 'error', sessionId: activeSessionId, responseMessage };
+    }
+  }
+
+  /**
+   * Run a parallel CHAPO loop in the background. Fire-and-forget from handleRequest.
+   */
+  private async runParallelLoop(
+    sessionId: string,
+    augmentedMessage: string | ContentBlock[],
+    parallelTurnId: string,
+    validatedProjectRoot: string | null,
+    ctx: RequestContext,
+    sendEvent: (event: AgentStreamEvent) => void,
+    collectedToolEvents: CollectedToolEvent[],
+    originalMessage: string,
+  ): Promise<void> {
+    const historyMessages = await getMessages(sessionId);
+    const recentHistory = buildConversationHistoryContext(historyMessages);
+
+    try {
+      const result = await processRequest(
+        sessionId,
+        augmentedMessage,
+        recentHistory,
+        validatedProjectRoot || config.allowedRoots[0],
+        sendEvent,
+        parallelTurnId,
+      );
+
+      const responseMessage = createChatMessage('assistant', result);
+      const userMessage = createChatMessage('user', originalMessage);
+
+      await persistAndEmitTerminalResponse({
+        ctx,
+        sessionId,
+        userMessage,
+        responseMessage,
+        collectedToolEvents,
+        isError: false,
+      });
+
+      sendEvent({
+        type: 'loop_completed',
+        turnId: parallelTurnId,
+        taskLabel: buildSessionTitle(originalMessage) || 'Task',
+      });
+    } catch (err) {
+      const errorContent = `Error: ${err instanceof Error ? err.message : 'Unknown error'}`;
+      const userMessage = createChatMessage('user', originalMessage);
+      const responseMessage = createChatMessage('assistant', errorContent);
+
+      await persistAndEmitTerminalResponse({
+        ctx,
+        sessionId,
+        userMessage,
+        responseMessage,
+        collectedToolEvents,
+        isError: true,
+      });
+
+      console.error('[commandHandlers] Parallel loop failed:', err instanceof Error ? err.message : err);
     }
   }
 
