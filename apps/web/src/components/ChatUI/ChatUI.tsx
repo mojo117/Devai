@@ -30,6 +30,7 @@ export function ChatUI({
   pinnedUserfileIds,
   onPinUserfile,
   onClearPinnedUserfiles,
+  onSetPreview,
 }: ChatUIProps) {
   // Core state shared across sub-components
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -511,6 +512,16 @@ export function ChatUI({
     }
   }, [session.sessionId]);
 
+  const handleSetPreview = useCallback((enabled: boolean) => {
+    onSetPreview?.(enabled);
+    setMessages(prev => [...prev, {
+      id: `preview-${Date.now()}`,
+      role: 'system' as const,
+      content: enabled ? 'Preview pane enabled.' : 'Preview pane disabled.',
+      timestamp: new Date().toISOString(),
+    }]);
+  }, [onSetPreview]);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -736,6 +747,7 @@ export function ChatUI({
         onFileUpload={handleFileUpload}
         isTranscribing={isTranscribing}
         onTranscribe={handleTranscription}
+        onSetPreview={handleSetPreview}
       />
     </div>
   );

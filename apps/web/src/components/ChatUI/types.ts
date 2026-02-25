@@ -53,6 +53,8 @@ export interface ChatUIProps {
   pinnedUserfileIds?: string[];
   onPinUserfile?: (id: string) => void;
   onClearPinnedUserfiles?: () => void;
+  /** Toggle the preview pane on or off via /preview command. */
+  onSetPreview?: (enabled: boolean) => void;
 }
 
 export type DelegationStatus = 'working' | 'completed' | 'failed' | 'escalated';
