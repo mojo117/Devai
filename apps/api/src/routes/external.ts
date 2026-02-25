@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
 import { commandDispatcher } from '../workflow/commands/dispatcher.js';
-import { ensureStateLoaded, getState, isLoopActive, setGatheredInfo, flushState } from '../agents/stateManager.js';
+import { ensureStateLoaded, getState, isLoopActive, getSessionMode, setGatheredInfo, flushState } from '../agents/stateManager.js';
 import { pushToInbox } from '../agents/inbox.js';
 import type { InboxMessage } from '../agents/types.js';
 import {
@@ -213,8 +213,8 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
             answer: intake.questionAnswer || messageText,
           };
         } else {
-          // Multi-message: if loop is running, queue and acknowledge via Telegram
-          if (isLoopActive(externalSession.session_id)) {
+          // Multi-message: if loop is running, queue (serial) or let dispatcher handle (parallel)
+          if (isLoopActive(externalSession.session_id) && getSessionMode(externalSession.session_id) === 'serial') {
             const inboxMsg: InboxMessage = {
               id: nanoid(),
               content: messageText,

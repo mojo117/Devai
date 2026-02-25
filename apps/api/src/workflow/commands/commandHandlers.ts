@@ -420,8 +420,10 @@ export class CommandHandlers {
     collectedToolEvents: CollectedToolEvent[],
     originalMessage: string,
   ): Promise<void> {
-    const historyMessages = await getMessages(sessionId);
-    const recentHistory = buildConversationHistoryContext(historyMessages);
+    // Parallel loops get NO shared conversation history — each loop only sees its own
+    // user message. The parallel context buffer provides awareness of other loops.
+    // Loading full history caused loops to answer the wrong (previous) question.
+    const recentHistory: Array<{ role: string; content: string }> = [];
 
     try {
       const result = await processRequest(
