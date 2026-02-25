@@ -266,7 +266,14 @@ function App() {
             </div>
           </Panel>
           <PanelResizeHandle className="w-1.5 bg-devai-border hover:bg-devai-accent/40 transition-colors cursor-col-resize" />
-          <Panel defaultSize={45} minSize={20} collapsible collapsedSize={3}>
+          <Panel
+            defaultSize={45}
+            minSize={20}
+            collapsible
+            collapsedSize={3}
+            onCollapse={() => setPreviewCollapsed(true)}
+            onExpand={() => setPreviewCollapsed(false)}
+          >
             <PreviewPanel
               artifact={currentArtifact}
               onClose={() => setPreviewEnabled(false)}
@@ -291,6 +298,7 @@ function App() {
               pinnedUserfileIds={settings.pinnedUserfileIds}
               onPinUserfile={settings.togglePinnedUserfile}
               onClearPinnedUserfiles={settings.clearPinnedUserfiles}
+              onArtifactDetected={setCurrentArtifact}
               onSetPreview={setPreviewEnabled}
               previewEnabled={previewEnabled}
             />
