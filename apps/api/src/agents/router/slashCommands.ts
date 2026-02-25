@@ -56,22 +56,15 @@ export async function tryHandleSlashCommand(
     return `Preview mode **${arg === 'on' ? 'ON' : 'OFF'}**. (Note: This takes effect in the web UI only.)`;
   }
 
-  // /mode [serial|parallel]
-  const modeMatch = trimmed.match(/^\/mode(?:\s+(.*))?$/i);
-  if (modeMatch) {
-    const arg = modeMatch[1]?.trim().toLowerCase();
-    if (!arg) {
-      const current = getSessionMode(sessionId);
-      return `Current mode: **${current}**.\nUsage: \`/mode serial\` or \`/mode parallel\``;
-    }
-    if (arg === 'serial' || arg === 'parallel') {
-      setSessionMode(sessionId, arg as SessionMode);
-      await flushState(sessionId);
-      return arg === 'parallel'
-        ? '**Parallel Mode** aktiviert. Neue Nachrichten starten sofort einen eigenen Loop.'
-        : '**Serial Mode** aktiviert. Nachrichten werden nacheinander verarbeitet.';
-    }
-    return `Unknown mode "${arg}". Available: serial, parallel.\nUsage: \`/mode <serial|parallel>\``;
+  // /mode — toggle between serial and parallel
+  if (trimmed === '/mode') {
+    const current = getSessionMode(sessionId);
+    const next: SessionMode = current === 'serial' ? 'parallel' : 'serial';
+    setSessionMode(sessionId, next);
+    await flushState(sessionId);
+    return next === 'parallel'
+      ? '**Parallel Mode** — Neue Nachrichten starten sofort einen eigenen Loop.'
+      : '**Serial Mode** — Nachrichten werden nacheinander verarbeitet.';
   }
 
   // /stop — abort all running loops
