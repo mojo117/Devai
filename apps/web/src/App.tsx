@@ -59,14 +59,14 @@ function App() {
     touchStartRef.current = null;
     // Must be fast horizontal swipe (>80px, <400ms, more horizontal than vertical)
     if (dt > 400 || Math.abs(dx) < 80 || Math.abs(dy) > Math.abs(dx)) return;
-    if (dx < 0 && !mobilePreviewOpen && previewEnabled) {
-      // Swipe left → open preview
+    if (dx < 0 && !mobilePreviewOpen && currentArtifact) {
+      // Swipe left → open preview (when there's an artifact)
       setMobilePreviewOpen(true);
     } else if (dx > 0 && mobilePreviewOpen) {
       // Swipe right → close preview
       setMobilePreviewOpen(false);
     }
-  }, [mobilePreviewOpen, previewEnabled]);
+  }, [mobilePreviewOpen, currentArtifact]);
 
   useEffect(() => {
     try { localStorage.setItem('devai_preview', previewEnabled ? 'on' : 'off'); }
@@ -434,126 +434,83 @@ function App() {
         </div>
       )}
 
-      {/* Main Content - Chat centered, optionally split with preview */}
+      {/* Main Content */}
       <div
         className="flex-1 flex w-full overflow-hidden min-h-0 relative"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
+        {/* Desktop: side-by-side panels when preview enabled */}
         {previewEnabled ? (
-          <>
-            {/* Desktop: side-by-side panels */}
-            <div className="hidden md:flex flex-1 min-h-0 overflow-hidden">
-              <PanelGroup direction="horizontal" className="flex-1 w-full overflow-hidden min-h-0">
-                <Panel defaultSize={55} minSize={30}>
-                  <div className="flex flex-col min-w-0 min-h-0 overflow-hidden h-full max-w-4xl mx-auto w-full">
-                    <ChatUI
-                      projectRoot={health?.projectRoot}
-                      allowedRoots={health?.allowedRoots}
-                      ignorePatterns={settings.ignorePatterns}
-                      onPinFile={settings.addPinnedFile}
-                      onLoadingChange={setChatLoading}
-                      onAgentChange={handleAgentChange}
-                      showSessionControls={false}
-                      sessionCommand={sessionCommand}
-                      onSessionStateChange={setChatSessionState}
-                      pinnedUserfileIds={settings.pinnedUserfileIds}
-                      onPinUserfile={settings.togglePinnedUserfile}
-                      onClearPinnedUserfiles={settings.clearPinnedUserfiles}
-                      onArtifactDetected={setDetectedArtifact}
-                      onSetPreview={setPreviewEnabled}
-                      previewEnabled={previewEnabled}
-                    />
-                  </div>
-                </Panel>
-                <PanelResizeHandle className="w-1.5 bg-devai-border hover:bg-devai-accent/40 transition-colors cursor-col-resize" />
-                <Panel
-                  defaultSize={45}
-                  minSize={20}
-                  collapsible
-                  collapsedSize={3}
-                  onCollapse={() => setPreviewCollapsed(true)}
-                  onExpand={() => setPreviewCollapsed(false)}
-                >
-                  <PreviewPanel
-                    artifact={currentArtifact}
-                    onClose={() => setPreviewEnabled(false)}
-                    collapsed={previewCollapsed}
-                    onToggleCollapse={() => setPreviewCollapsed(p => !p)}
-                    onScrapeFallback={handleScrapeFallback}
-                  />
-                </Panel>
-              </PanelGroup>
-            </div>
-
-            {/* Mobile: chat full-width + edge arrow to open preview */}
-            <div className="flex md:hidden flex-1 min-h-0 overflow-hidden relative">
-              <div className="flex flex-col min-w-0 min-h-0 overflow-hidden flex-1 max-w-4xl mx-auto w-full">
-                <ChatUI
-                  projectRoot={health?.projectRoot}
-                  allowedRoots={health?.allowedRoots}
-                  ignorePatterns={settings.ignorePatterns}
-                  onPinFile={settings.addPinnedFile}
-                  onLoadingChange={setChatLoading}
-                  onAgentChange={handleAgentChange}
-                  showSessionControls={false}
-                  sessionCommand={sessionCommand}
-                  onSessionStateChange={setChatSessionState}
-                  pinnedUserfileIds={settings.pinnedUserfileIds}
-                  onPinUserfile={settings.togglePinnedUserfile}
-                  onClearPinnedUserfiles={settings.clearPinnedUserfiles}
-                  onArtifactDetected={setDetectedArtifact}
-                  onSetPreview={setPreviewEnabled}
-                  previewEnabled={previewEnabled}
-                />
-              </div>
-              {/* Right-edge arrow to open preview */}
-              {!mobilePreviewOpen && (
-                <button
-                  onClick={() => setMobilePreviewOpen(true)}
-                  className="absolute right-0 top-1/2 -translate-y-1/2 z-30 bg-devai-accent/80 hover:bg-devai-accent text-white rounded-l-lg py-4 px-1.5 shadow-lg transition-colors"
-                  title="Preview öffnen"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                  </svg>
-                </button>
-              )}
-            </div>
-
-            {/* Mobile slide-over preview */}
-            {mobilePreviewOpen && (
-              <div className="md:hidden fixed inset-0 z-50 flex">
-                {/* Backdrop */}
-                <div
-                  className="absolute inset-0 bg-black/50"
-                  onClick={() => setMobilePreviewOpen(false)}
-                />
-                {/* Left-edge arrow to go back */}
-                <button
-                  onClick={() => setMobilePreviewOpen(false)}
-                  className="absolute left-0 top-1/2 -translate-y-1/2 z-[60] bg-devai-accent/80 hover:bg-devai-accent text-white rounded-r-lg py-4 px-1.5 shadow-lg transition-colors"
-                  title="Zurück zum Chat"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
-                {/* Panel slides in from right */}
-                <div className="absolute inset-y-0 right-0 w-full bg-devai-bg shadow-xl animate-slide-in-right">
-                  <PreviewPanel
-                    artifact={currentArtifact}
-                    onClose={() => { setMobilePreviewOpen(false); setPreviewEnabled(false); }}
-                    collapsed={false}
-                    onToggleCollapse={() => setMobilePreviewOpen(false)}
-                    onScrapeFallback={handleScrapeFallback}
+          <div className="hidden md:flex flex-1 min-h-0 overflow-hidden">
+            <PanelGroup direction="horizontal" className="flex-1 w-full overflow-hidden min-h-0">
+              <Panel defaultSize={55} minSize={30}>
+                <div className="flex flex-col min-w-0 min-h-0 overflow-hidden h-full max-w-4xl mx-auto w-full">
+                  <ChatUI
+                    projectRoot={health?.projectRoot}
+                    allowedRoots={health?.allowedRoots}
+                    ignorePatterns={settings.ignorePatterns}
+                    onPinFile={settings.addPinnedFile}
+                    onLoadingChange={setChatLoading}
+                    onAgentChange={handleAgentChange}
+                    showSessionControls={false}
+                    sessionCommand={sessionCommand}
+                    onSessionStateChange={setChatSessionState}
+                    pinnedUserfileIds={settings.pinnedUserfileIds}
+                    onPinUserfile={settings.togglePinnedUserfile}
+                    onClearPinnedUserfiles={settings.clearPinnedUserfiles}
+                    onArtifactDetected={setDetectedArtifact}
+                    onSetPreview={setPreviewEnabled}
+                    previewEnabled={previewEnabled}
                   />
                 </div>
-              </div>
-            )}
-          </>
+              </Panel>
+              <PanelResizeHandle className="w-1.5 bg-devai-border hover:bg-devai-accent/40 transition-colors cursor-col-resize" />
+              <Panel
+                defaultSize={45}
+                minSize={20}
+                collapsible
+                collapsedSize={3}
+                onCollapse={() => setPreviewCollapsed(true)}
+                onExpand={() => setPreviewCollapsed(false)}
+              >
+                <PreviewPanel
+                  artifact={currentArtifact}
+                  onClose={() => setPreviewEnabled(false)}
+                  collapsed={previewCollapsed}
+                  onToggleCollapse={() => setPreviewCollapsed(p => !p)}
+                  onScrapeFallback={handleScrapeFallback}
+                />
+              </Panel>
+            </PanelGroup>
+          </div>
         ) : (
-          <div className="flex flex-col min-w-0 min-h-0 overflow-hidden flex-1 max-w-4xl mx-auto w-full">
+          <div className="hidden md:flex flex-1 min-h-0 overflow-hidden">
+            <div className="flex flex-col min-w-0 min-h-0 overflow-hidden flex-1 max-w-4xl mx-auto w-full">
+              <ChatUI
+                projectRoot={health?.projectRoot}
+                allowedRoots={health?.allowedRoots}
+                ignorePatterns={settings.ignorePatterns}
+                onPinFile={settings.addPinnedFile}
+                onLoadingChange={setChatLoading}
+                onAgentChange={handleAgentChange}
+                showSessionControls={false}
+                sessionCommand={sessionCommand}
+                onSessionStateChange={setChatSessionState}
+                pinnedUserfileIds={settings.pinnedUserfileIds}
+                onPinUserfile={settings.togglePinnedUserfile}
+                onClearPinnedUserfiles={settings.clearPinnedUserfiles}
+                onArtifactDetected={setDetectedArtifact}
+                onSetPreview={setPreviewEnabled}
+                previewEnabled={previewEnabled}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Mobile: always full-width chat + preview arrow + slide-over */}
+        <div className="flex md:hidden flex-1 min-h-0 overflow-hidden relative">
+          <div className="flex flex-col min-w-0 min-h-0 overflow-hidden flex-1 w-full">
             <ChatUI
               projectRoot={health?.projectRoot}
               allowedRoots={health?.allowedRoots}
@@ -571,6 +528,44 @@ function App() {
               onSetPreview={setPreviewEnabled}
               previewEnabled={previewEnabled}
             />
+          </div>
+          {/* Right-edge arrow — always visible on mobile when there's an artifact */}
+          {currentArtifact && !mobilePreviewOpen && (
+            <button
+              onClick={() => setMobilePreviewOpen(true)}
+              className="absolute right-0 top-1/2 -translate-y-1/2 z-30 bg-devai-accent/80 active:bg-devai-accent text-white rounded-l-lg py-5 px-2 shadow-lg"
+              title="Preview"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+          )}
+        </div>
+
+        {/* Mobile slide-over preview */}
+        {mobilePreviewOpen && (
+          <div className="md:hidden fixed inset-0 z-50">
+            {/* Left-edge arrow to go back */}
+            <button
+              onClick={() => setMobilePreviewOpen(false)}
+              className="absolute left-0 top-1/2 -translate-y-1/2 z-[60] bg-devai-accent/80 active:bg-devai-accent text-white rounded-r-lg py-5 px-2 shadow-lg"
+              title="Zurück"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+            {/* Full-screen preview */}
+            <div className="absolute inset-0 bg-devai-bg animate-slide-in-right">
+              <PreviewPanel
+                artifact={currentArtifact}
+                onClose={() => setMobilePreviewOpen(false)}
+                collapsed={false}
+                onToggleCollapse={() => setMobilePreviewOpen(false)}
+                onScrapeFallback={handleScrapeFallback}
+              />
+            </div>
           </div>
         )}
       </div>
