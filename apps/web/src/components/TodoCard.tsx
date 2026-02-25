@@ -40,7 +40,7 @@ export function TodoCard({ todos }: TodoCardProps) {
       <div className="todo-header">Chapo's Aufgaben</div>
       <ul className="todo-list">
         {todos.map((todo, i) => (
-          <li key={i} className={STATUS_CLASS[todo.status]}>
+          <li key={`${todo.content.slice(0, 30)}-${i}`} className={STATUS_CLASS[todo.status]}>
             <span className="todo-icon">{STATUS_ICON[todo.status]}</span>
             <span className={todo.status === 'completed' ? 'todo-text-done' : 'todo-text'}>
               {todo.content}

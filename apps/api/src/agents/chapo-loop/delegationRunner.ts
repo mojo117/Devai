@@ -2,6 +2,7 @@ import { getCombinedSystemContextBlock } from '../systemContext.js';
 import { getAgent, getToolsForAgent, spawnScout } from '../router.js';
 import { getToolsForLLM } from '../../tools/registry.js';
 import { resolveDelegationModel } from '../../llm/modelSelector.js';
+import { logAgentExecution } from '../../db/agentExecutionQueries.js';
 import type { AgentErrorHandler } from '../error-handler.js';
 import type { SubAgentRunner } from '../sub-agent-runner.js';
 import type {
@@ -169,17 +170,34 @@ Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
       ? `${targetUpper} eskaliert an ${fromAgent.toUpperCase()}`
       : `${targetUpper} Delegation abgeschlossen`,
   });
+  const durationMs = Date.now() - delegationStartMs;
   deps.sendEvent({
     type: 'agent_complete',
     agent: target,
     result: runResult.exit === 'escalated'
       ? `${targetUpper} eskaliert: ${runResult.escalationDescription || 'unknown issue'}`
       : finalContent,
-    durationMs: Date.now() - delegationStartMs,
+    durationMs,
     toolCount: subToolCount,
     delegationStatus: runResult.exit === 'escalated' ? 'escalated'
       : (runResult.exit === 'llm_error' ? 'failed' : 'completed'),
   });
+
+  const phase = runResult.exit === 'escalated' ? 'escalated' 
+    : (runResult.exit === 'llm_error' ? 'failure' : 'success');
+  logAgentExecution({
+    sessionId: deps.sessionId,
+    agent: target,
+    delegatedFrom: fromAgent,
+    phase,
+    durationMs,
+    iterations: runResult.turns || 1,
+    toolCount: subToolCount,
+    model: delegationModel,
+    provider,
+    delegationObjective: delegation.objective,
+    errorMessage: runResult.llmError || runResult.escalationDescription,
+  }).catch((err) => console.error('[delegationRunner] Failed to log execution:', err));
 
   const toolEvidence = target === 'caio'
     ? mapCaioEvidence(caioEvidenceLog)
@@ -226,8 +244,8 @@ async function delegateToScout(
     expectedOutcome: delegation.expectedOutcome,
   });
 
+  const delegationStartMs = Date.now();
   try {
-    const delegationStartMs = Date.now();
     const history = await loadRecentConversationHistory(deps.sessionId);
     const historyContext = formatConversationHistoryForScout(history);
     const scoutContext = [
@@ -264,17 +282,29 @@ async function delegateToScout(
       to: fromAgent,
       reason: 'SCOUT Delegation abgeschlossen',
     });
+    const durationMs = Date.now() - delegationStartMs;
     deps.sendEvent({
       type: 'agent_complete',
       agent: 'scout',
       result: loopResult.summary,
-      durationMs: Date.now() - delegationStartMs,
+      durationMs,
       toolCount: 1,
       delegationStatus: 'completed',
     });
+    logAgentExecution({
+      sessionId: deps.sessionId,
+      agent: 'scout',
+      delegatedFrom: fromAgent,
+      phase: 'success',
+      durationMs,
+      iterations: 1,
+      toolCount: 1,
+      delegationObjective: delegation.objective,
+    }).catch((err) => console.error('[delegationRunner] Failed to log scout execution:', err));
     return loopResult;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const durationMs = Date.now() - delegationStartMs;
     deps.sendEvent({
       type: 'agent_switch',
       from: 'scout',
@@ -285,10 +315,21 @@ async function delegateToScout(
       type: 'agent_complete',
       agent: 'scout',
       result: `SCOUT Fehler: ${message}`,
-      durationMs: Date.now() - delegationStartMs,
+      durationMs,
       toolCount: 0,
       delegationStatus: 'failed',
     });
+    logAgentExecution({
+      sessionId: deps.sessionId,
+      agent: 'scout',
+      delegatedFrom: fromAgent,
+      phase: 'failure',
+      durationMs,
+      iterations: 1,
+      toolCount: 0,
+      delegationObjective: delegation.objective,
+      errorMessage: message,
+    }).catch((err) => console.error('[delegationRunner] Failed to log scout failure:', err));
     throw error;
   }
 }

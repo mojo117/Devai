@@ -301,6 +301,9 @@ export class CommandHandlers {
 
       // Process queued messages sequentially (simple queue model)
       let queuedMessages = drainInbox(activeSessionId);
+      if (queuedMessages.length > 0) {
+        sendEvent({ type: 'inbox_processing', count: queuedMessages.length });
+      }
       while (queuedMessages.length > 0) {
         for (const queuedMsg of queuedMessages) {
           const queuedHistory = await getMessages(activeSessionId);

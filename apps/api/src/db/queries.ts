@@ -4,3 +4,4 @@ export * from './settingsQueries.js';
 export * from './actionQueries.js';
 export * from './agentStateQueries.js';
 export * from './heartbeatQueries.js';
+export * from './agentExecutionQueries.js';

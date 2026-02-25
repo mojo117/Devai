@@ -304,9 +304,7 @@ export function ChatUI({
         const id = String(ev.id || crypto.randomUUID());
         const name = (ev.toolName as string | undefined) || (ev.name as string | undefined);
         const args = ev.args ?? ev.arguments;
-        if (!activeDelegationRef.current) {
-          upsertToolEvent(setToolEvents, id, { type: 'tool_call', name, arguments: args, agent: eventAgent });
-        }
+        upsertToolEvent(setToolEvents, id, { type: 'tool_call', name, arguments: args, agent: eventAgent });
         if (activeDelegationRef.current) {
           const step: DelegationToolStep = {
             id,
@@ -326,9 +324,7 @@ export function ChatUI({
         const id = String(ev.id || crypto.randomUUID());
         const name = (ev.toolName as string | undefined) || (ev.name as string | undefined);
         const chunk = typeof ev.chunk === 'string' ? ev.chunk : '';
-        if (!activeDelegationRef.current) {
-          upsertToolEvent(setToolEvents, id, { type: 'tool_result', name, chunk, agent: eventAgent });
-        }
+        upsertToolEvent(setToolEvents, id, { type: 'tool_result', name, chunk, agent: eventAgent });
         break;
       }
       case 'tool_result': {
@@ -336,9 +332,7 @@ export function ChatUI({
         const id = String(ev.id || crypto.randomUUID());
         const name = (ev.toolName as string | undefined) || (ev.name as string | undefined);
         const result = ev.result ?? { result: ev.result, success: ev.success };
-        if (!activeDelegationRef.current) {
-          upsertToolEvent(setToolEvents, id, { type: 'tool_result', name, result, completed: Boolean(ev.completed), agent: eventAgent });
-        }
+        upsertToolEvent(setToolEvents, id, { type: 'tool_result', name, result, completed: Boolean(ev.completed), agent: eventAgent });
         if (activeDelegationRef.current) {
           const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
           setDelegations(prev => prev.map(d => {
@@ -453,6 +447,7 @@ export function ChatUI({
     setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
     setToolEvents([]);
+    setCurrentTodos([]);
     fileHintState.fileHints.length > 0; // clear hints via effect
     setAgentPhase('idle');
     setActiveAgent(null);

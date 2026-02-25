@@ -242,6 +242,48 @@ export async function getLatestHealthWatchdogEvent(): Promise<SchedulerExecution
   return rows[0] || null;
 }
 
+export interface ChapoLoopStatsRow {
+  id: string;
+  session_id: string | null;
+  phase: string;
+  duration_ms: number | null;
+  iterations: number | null;
+  tokens: number | null;
+  provider: string | null;
+  tool_calls: number | null;
+  delegations: number | null;
+  created_at: string;
+}
+
+export async function getChapoLoopStats(sinceMinutes: number = 90): Promise<ChapoLoopStatsRow[]> {
+  const since = new Date(Date.now() - sinceMinutes * 60 * 1000).toISOString();
+  
+  const { data, error } = await getSupabase()
+    .from('scheduler_execution_logs')
+    .select('*')
+    .eq('job_name', 'chapo-loop')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('[Scheduler] Failed to fetch chapo-loop stats:', error);
+    return [];
+  }
+
+  return (data || []).map((row) => ({
+    id: row.id,
+    session_id: row.job_id?.replace('chapo-loop:', '') || null,
+    phase: row.phase,
+    duration_ms: row.metadata?.durationMs ?? null,
+    iterations: row.metadata?.iterations ?? null,
+    tokens: row.metadata?.totalTokens ?? null,
+    provider: row.metadata?.provider ?? null,
+    tool_calls: row.metadata?.toolCalls ?? null,
+    delegations: row.metadata?.delegations ?? null,
+    created_at: row.created_at,
+  })) as ChapoLoopStatsRow[];
+}
+
 async function appendSchedulerFallbackLog(
   row: Record<string, unknown>,
   insertError: string,

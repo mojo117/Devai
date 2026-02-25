@@ -31,6 +31,7 @@ import { ChapoToolExecutor } from './chapo-loop/toolExecutor.js';
 import { buildToolResultContent } from './utils.js';
 import { config as appConfig } from '../config.js';
 import { logSchedulerExecution } from '../db/schedulerQueries.js';
+import { logAgentExecution } from '../db/agentExecutionQueries.js';
 import type {
   AgentStreamEvent,
   ModelSelection,
@@ -240,6 +241,23 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
         delegations: this.delegationLog.length,
       },
     }).catch((logErr) => console.error('[chapo-loop] execution log failed:', logErr));
+
+    logAgentExecution({
+      sessionId: this.sessionId,
+      agent: 'chapo',
+      phase: result.status === 'error' ? 'failure' : 'success',
+      durationMs: runDurationMs,
+      iterations: result.totalIterations || this.iteration,
+      tokensUsed: this.totalTokensUsed,
+      toolCount: this.toolCallLog.length,
+      model: this.modelSelection.model,
+      provider: this.modelSelection.provider,
+      errorMessage: result.status === 'error' ? result.answer : undefined,
+      metadata: {
+        delegations: this.delegationLog.length,
+        traceId: this.traceId || undefined,
+      },
+    }).catch((logErr) => console.error('[chapo-loop] agent execution log failed:', logErr));
 
     // 8. Emit completion
     this.sendEvent({ type: 'agent_complete', agent: 'chapo', result: result.answer });
