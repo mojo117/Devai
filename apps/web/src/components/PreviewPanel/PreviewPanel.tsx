@@ -1,5 +1,6 @@
 import type { Artifact } from './artifactParser';
 import { HtmlRenderer } from './HtmlRenderer';
+import { MarkdownRenderer } from './MarkdownRenderer';
 import { UrlRenderer } from './UrlRenderer';
 import { PdfRenderer } from './PdfRenderer';
 
@@ -98,6 +99,12 @@ export function PreviewPanel({
             {hasRemoteUrl ? (
               (remote?.type || artifact.type) === 'pdf' ? (
                 <PdfRenderer url={remote!.signedUrl!} />
+              ) : remote?.mimeType?.startsWith('image/') ? (
+                <img
+                  src={remote.signedUrl!}
+                  alt={artifact.title || 'Preview'}
+                  className="w-full h-full object-contain bg-black/20"
+                />
               ) : (
                 <UrlRenderer url={remote!.signedUrl!} title={artifact.title || 'Artifact preview'} />
               )
@@ -105,6 +112,8 @@ export function PreviewPanel({
               <div className="h-full flex items-center justify-center p-6">
                 <p className="text-devai-text-muted text-sm">PDF preview is waiting for artifact build.</p>
               </div>
+            ) : artifact.type === 'markdown' && artifact.content ? (
+              <MarkdownRenderer content={artifact.content} />
             ) : artifact.content ? (
               <HtmlRenderer content={artifact.content} />
             ) : (
