@@ -1,5 +1,11 @@
 import { nanoid } from 'nanoid';
-import { getOrCreateState, getState, schedulePersist } from './core.js';
+import { getOrCreateState, getState, schedulePersist, deleteState } from './core.js';
+import {
+  acquireSessionLock,
+  tryAcquireSessionLock,
+  updateSessionActivity,
+  cleanupAllLocks,
+} from './loopLock.js';
 import type {
   AgentAction,
   AgentHistoryEntry,
@@ -38,6 +44,9 @@ const activeLoops = new Map<string, Map<string, ParallelLoopEntry>>();
 
 // Backwards-compatible: tracks whether ANY loop is active for a session
 const activeLoopSessions = new Set<string>();
+
+// Module-level lock for Set operations
+const loopSetLock = new Map<string, Promise<void>>();
 
 // Phase Management
 export function setPhase(sessionId: string, phase: AgentPhase): void {
@@ -115,7 +124,24 @@ export function ensureActiveTurnId(sessionId: string, preferredTurnId?: string):
   return nextTurnId;
 }
 
-export function setLoopRunning(sessionId: string, running: boolean): void {
+export async function setLoopRunning(sessionId: string, running: boolean): Promise<void> {
+  const release = await acquireSessionLock(sessionId);
+  try {
+    const state = getOrCreateState(sessionId);
+    state.isLoopRunning = running;
+    if (running) {
+      activeLoopSessions.add(sessionId);
+    } else {
+      activeLoopSessions.delete(sessionId);
+    }
+    updateSessionActivity(sessionId);
+  } finally {
+    release();
+  }
+}
+
+/** Synchronous version for contexts where we already hold the lock */
+export function setLoopRunningSync(sessionId: string, running: boolean): void {
   const state = getOrCreateState(sessionId);
   state.isLoopRunning = running;
   if (running) {
@@ -123,19 +149,46 @@ export function setLoopRunning(sessionId: string, running: boolean): void {
   } else {
     activeLoopSessions.delete(sessionId);
   }
+  updateSessionActivity(sessionId);
 }
 
-export function isLoopActive(sessionId: string): boolean {
-  if (activeLoopSessions.has(sessionId)) {
-    return true;
-  }
+export async function isLoopActive(sessionId: string): Promise<boolean> {
+  const release = await acquireSessionLock(sessionId);
+  try {
+    if (activeLoopSessions.has(sessionId)) {
+      return true;
+    }
 
-  // Self-heal stale persisted flags from older runs/restarts.
-  const state = getState(sessionId);
-  if (state?.isLoopRunning) {
-    state.isLoopRunning = false;
+    // Self-heal stale persisted flags from older runs/restarts.
+    const state = getState(sessionId);
+    if (state?.isLoopRunning) {
+      state.isLoopRunning = false;
+    }
+    return false;
+  } finally {
+    release();
   }
-  return false;
+}
+
+/** Non-blocking check - returns null if can't acquire lock immediately */
+export function isLoopActiveSync(sessionId: string): boolean | null {
+  const release = tryAcquireSessionLock(sessionId);
+  if (!release) {
+    // Lock is held - loop is definitely active
+    return null; // Indicate "unknown - check async version"
+  }
+  try {
+    if (activeLoopSessions.has(sessionId)) {
+      return true;
+    }
+    const state = getState(sessionId);
+    if (state?.isLoopRunning) {
+      state.isLoopRunning = false;
+    }
+    return false;
+  } finally {
+    release();
+  }
 }
 
 // --- Parallel Loop Management ---
@@ -152,38 +205,50 @@ export function setSessionMode(sessionId: string, mode: SessionMode): void {
   schedulePersist(sessionId);
 }
 
-export function registerParallelLoop(
+export async function registerParallelLoop(
   sessionId: string,
   turnId: string,
   taskLabel: string,
   originalPrompt: string,
-): void {
-  let sessionLoops = activeLoops.get(sessionId);
-  if (!sessionLoops) {
-    sessionLoops = new Map();
-    activeLoops.set(sessionId, sessionLoops);
+): Promise<void> {
+  const release = await acquireSessionLock(sessionId);
+  try {
+    let sessionLoops = activeLoops.get(sessionId);
+    if (!sessionLoops) {
+      sessionLoops = new Map();
+      activeLoops.set(sessionId, sessionLoops);
+    }
+    sessionLoops.set(turnId, {
+      turnId,
+      taskLabel,
+      originalPrompt,
+      status: 'running',
+      actions: [],
+    });
+    // Keep activeLoopSessions in sync
+    activeLoopSessions.add(sessionId);
+    updateSessionActivity(sessionId);
+  } finally {
+    release();
   }
-  sessionLoops.set(turnId, {
-    turnId,
-    taskLabel,
-    originalPrompt,
-    status: 'running',
-    actions: [],
-  });
-  // Keep activeLoopSessions in sync
-  activeLoopSessions.add(sessionId);
 }
 
-export function unregisterParallelLoop(sessionId: string, turnId: string): void {
-  const sessionLoops = activeLoops.get(sessionId);
-  if (!sessionLoops) return;
-  sessionLoops.delete(turnId);
-  if (sessionLoops.size === 0) {
-    activeLoops.delete(sessionId);
-    activeLoopSessions.delete(sessionId);
-    // Also clear persisted flag
-    const state = getState(sessionId);
-    if (state) state.isLoopRunning = false;
+export async function unregisterParallelLoop(sessionId: string, turnId: string): Promise<void> {
+  const release = await acquireSessionLock(sessionId);
+  try {
+    const sessionLoops = activeLoops.get(sessionId);
+    if (!sessionLoops) return;
+    sessionLoops.delete(turnId);
+    if (sessionLoops.size === 0) {
+      activeLoops.delete(sessionId);
+      activeLoopSessions.delete(sessionId);
+      // Also clear persisted flag
+      const state = getState(sessionId);
+      if (state) state.isLoopRunning = false;
+    }
+    updateSessionActivity(sessionId);
+  } finally {
+    release();
   }
 }
 
@@ -216,27 +281,42 @@ export function getOtherLoopContexts(
   return entries;
 }
 
-export function updateLoopStatus(
+export async function updateLoopStatus(
   sessionId: string,
   turnId: string,
   status: 'completed' | 'aborted',
   finalAnswer?: string,
-): void {
-  const entry = activeLoops.get(sessionId)?.get(turnId);
-  if (!entry) return;
-  entry.status = status;
-  if (finalAnswer) entry.finalAnswer = finalAnswer;
+): Promise<void> {
+  const release = await acquireSessionLock(sessionId);
+  try {
+    const entry = activeLoops.get(sessionId)?.get(turnId);
+    if (!entry) return;
+    entry.status = status;
+    if (finalAnswer) entry.finalAnswer = finalAnswer;
+    updateSessionActivity(sessionId);
+  } finally {
+    release();
+  }
 
-  // Auto-cleanup after 5 minutes
+  // Auto-cleanup after 5 minutes (outside lock to avoid blocking)
   setTimeout(() => {
-    const sessions = activeLoops.get(sessionId);
-    if (sessions) {
-      sessions.delete(turnId);
-      if (sessions.size === 0) {
-        activeLoops.delete(sessionId);
-        activeLoopSessions.delete(sessionId);
+    void (async () => {
+      const cleanupRelease = await acquireSessionLock(sessionId);
+      try {
+        const sessions = activeLoops.get(sessionId);
+        if (sessions) {
+          sessions.delete(turnId);
+          if (sessions.size === 0) {
+            activeLoops.delete(sessionId);
+            activeLoopSessions.delete(sessionId);
+            // Clean up session from memory after all loops done
+            deleteState(sessionId);
+          }
+        }
+      } finally {
+        cleanupRelease();
       }
-    }
+    })();
   }, 5 * 60 * 1000);
 }
 
@@ -259,17 +339,23 @@ export function getActiveLoopCount(sessionId: string): number {
   return count;
 }
 
-export function abortAllLoops(sessionId: string): string[] {
-  const sessionLoops = activeLoops.get(sessionId);
-  if (!sessionLoops) return [];
-  const turnIds: string[] = [];
-  for (const [turnId, entry] of sessionLoops) {
-    if (entry.status === 'running') {
-      entry.status = 'aborted';
-      turnIds.push(turnId);
+export async function abortAllLoops(sessionId: string): Promise<string[]> {
+  const release = await acquireSessionLock(sessionId);
+  try {
+    const sessionLoops = activeLoops.get(sessionId);
+    if (!sessionLoops) return [];
+    const turnIds: string[] = [];
+    for (const [turnId, entry] of sessionLoops) {
+      if (entry.status === 'running') {
+        entry.status = 'aborted';
+        turnIds.push(turnId);
+      }
     }
+    updateSessionActivity(sessionId);
+    return turnIds;
+  } finally {
+    release();
   }
-  return turnIds;
 }
 
 // --- Approvals ---

@@ -75,7 +75,7 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
           } else {
             await sendTelegramMessage(
               extracted.chatId,
-              `Unknown engine "${arg}". Available: glm, gemini, claude`,
+              `Unknown engine "${arg}". Available: glm, gemini, claude, kimi`,
             );
           }
           return;
@@ -214,7 +214,8 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
           };
         } else {
           // Multi-message: if loop is running, queue (serial) or let dispatcher handle (parallel)
-          if (isLoopActive(externalSession.session_id) && getSessionMode(externalSession.session_id) === 'serial') {
+          const loopActive = await isLoopActive(externalSession.session_id);
+          if (loopActive && getSessionMode(externalSession.session_id) === 'serial') {
             const inboxMsg: InboxMessage = {
               id: nanoid(),
               content: messageText,
@@ -230,7 +231,15 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
               role: 'user',
               content: messageText,
               timestamp: new Date().toISOString(),
-            }).catch((err) => console.error('[external] Failed to persist queued message:', err));
+            }).catch(async (err) => {
+              const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+              console.error('[external] Failed to persist queued message:', errorMsg);
+              // Surface error to user via Telegram
+              await sendTelegramMessage(
+                extracted.chatId,
+                `⚠️ Nachricht konnte nicht gespeichert werden: ${errorMsg}`,
+              );
+            });
 
             await sendTelegramMessage(
               extracted.chatId,

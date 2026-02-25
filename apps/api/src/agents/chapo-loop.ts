@@ -194,7 +194,7 @@ export class ChapoLoop {
     if (this.parallelTurnId) {
       const words = userText.split(/\s+/).slice(0, 8).join(' ');
       const taskLabel = words.length < userText.length ? words + '...' : words;
-      stateManager.registerParallelLoop(this.sessionId, this.parallelTurnId, taskLabel, userText.slice(0, 500));
+      await stateManager.registerParallelLoop(this.sessionId, this.parallelTurnId, taskLabel, userText.slice(0, 500));
       // Track instance for /stop
       let sessionInstances = activeLoopInstances.get(this.sessionId);
       if (!sessionInstances) {
@@ -247,7 +247,7 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
     // 6. Enter runLoop with inbox lifecycle
     if (!this.parallelTurnId) {
       // Serial mode: use global loop flag
-      stateManager.setLoopRunning(this.sessionId, true);
+      await stateManager.setLoopRunning(this.sessionId, true);
     }
     let result: ChapoLoopResult;
     try {
@@ -256,8 +256,8 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       if (this.parallelTurnId) {
         // Parallel mode: update loop status and unregister
         const answer = result!?.answer || '';
-        stateManager.updateLoopStatus(this.sessionId, this.parallelTurnId, 'completed', answer.slice(0, 500));
-        stateManager.unregisterParallelLoop(this.sessionId, this.parallelTurnId);
+        await stateManager.updateLoopStatus(this.sessionId, this.parallelTurnId, 'completed', answer.slice(0, 500));
+        await stateManager.unregisterParallelLoop(this.sessionId, this.parallelTurnId);
         // Remove from instance map
         const sessionInstances = activeLoopInstances.get(this.sessionId);
         if (sessionInstances) {
@@ -265,7 +265,7 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
           if (sessionInstances.size === 0) activeLoopInstances.delete(this.sessionId);
         }
       } else {
-        stateManager.setLoopRunning(this.sessionId, false);
+        await stateManager.setLoopRunning(this.sessionId, false);
       }
       this.dispose();
     }

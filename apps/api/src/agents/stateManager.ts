@@ -81,3 +81,6 @@ export {
   getStateSummary,
 } from './state-manager/sessionState.js';
 
+// Test utilities
+export { cleanupAllLocks } from './state-manager/loopLock.js';
+

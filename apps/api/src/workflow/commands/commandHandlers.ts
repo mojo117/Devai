@@ -156,7 +156,8 @@ export class CommandHandlers {
     }
 
     // Multi-message: if a loop is already running...
-    if (isLoopActive(activeSessionId)) {
+    const loopActive = await isLoopActive(activeSessionId);
+    if (loopActive) {
       const sessionMode = getSessionMode(activeSessionId);
 
       if (sessionMode === 'parallel') {
@@ -201,7 +202,16 @@ export class CommandHandlers {
         this.runParallelLoop(
           activeSessionId, parallelMessage, parallelTurnId,
           validatedProjectRoot, ctx, pSendEvent, pCollected, message, snapshotHistory,
-        ).catch((err) => console.error('[commandHandlers] Parallel loop error:', err));
+        ).catch((err) => {
+          const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+          console.error('[commandHandlers] Parallel loop error:', errorMsg);
+          // Surface error to user
+          pSendEvent({
+            type: 'error',
+            agent: 'chapo',
+            error: `Parallel loop failed: ${errorMsg}`,
+          });
+        });
 
         return { type: 'queued', sessionId: activeSessionId };
       }
@@ -321,7 +331,7 @@ export class CommandHandlers {
     // Claim the loop IMMEDIATELY so concurrent messages are queued.
     // ChapoLoop.run() will clear this flag in its own finally block;
     // if we fail before reaching the loop, the catch below clears it.
-    setLoopRunning(activeSessionId, true);
+    await setLoopRunning(activeSessionId, true);
 
     try {
       const result = await processRequest(
@@ -394,7 +404,7 @@ export class CommandHandlers {
       return { type: 'success', sessionId: activeSessionId, responseMessage };
     } catch (err) {
       // Ensure the loop flag is cleared if we never reached ChapoLoop.run()
-      setLoopRunning(activeSessionId, false);
+      await setLoopRunning(activeSessionId, false);
 
       const errorContent = `Error: ${err instanceof Error ? err.message : 'Unknown error'}`;
       const userMessage = createChatMessage('user', message);
