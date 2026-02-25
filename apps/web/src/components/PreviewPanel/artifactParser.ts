@@ -1,6 +1,6 @@
 export interface Artifact {
   id: string;
-  type: 'html' | 'svg' | 'webapp' | 'pdf' | 'scrape';
+  type: 'html' | 'svg' | 'webapp' | 'pdf' | 'scrape' | 'markdown';
   language: string;
   content?: string;
   title?: string;
@@ -14,7 +14,7 @@ export interface Artifact {
     signedUrlExpiresAt?: string;
     error?: string | null;
     mimeType?: string | null;
-    type?: 'html' | 'svg' | 'webapp' | 'pdf' | 'scrape';
+    type?: 'html' | 'svg' | 'webapp' | 'pdf' | 'scrape' | 'markdown';
   };
 }
 
@@ -35,6 +35,8 @@ const SUPPORTED_TYPES: Record<string, Artifact['type']> = {
   javascript: 'webapp',
   typescript: 'webapp',
   pdf: 'pdf',
+  markdown: 'markdown',
+  md: 'markdown',
 };
 
 /** File extensions that map to artifact types */
@@ -49,6 +51,8 @@ const FILE_EXT_MAP: Record<string, Artifact['type']> = {
   '.mjs': 'webapp',
   '.cjs': 'webapp',
   '.pdf': 'pdf',
+  '.md': 'markdown',
+  '.markdown': 'markdown',
 };
 
 /** Tool names that write file content */
@@ -58,6 +62,14 @@ const WRITE_TOOLS = new Set([
   'create_text_file',
   'writeFile',
 ]);
+
+/** Mime-type prefix → artifact type (order matters — specific before generic) */
+const MIME_TYPE_MAP: [string, Artifact['type']][] = [
+  ['application/pdf', 'pdf'],
+  ['image/svg+xml', 'svg'],
+  ['text/html', 'html'],
+  ['image/', 'html'],
+];
 
 /** djb2 hash → first 8 hex chars for stable IDs */
 function djb2Hash(str: string): string {
@@ -106,10 +118,47 @@ export function parseToolEventArtifacts(events: ToolEventLike[]): Artifact[] {
 
   for (const ev of events) {
     if (ev.type !== 'tool_call' || !ev.name) continue;
-    if (!WRITE_TOOLS.has(ev.name)) continue;
 
     const args = ev.arguments as Record<string, unknown> | null;
     if (!args) continue;
+
+    // Handle show_in_preview — userfile with signed URL ready to display
+    if (ev.name === 'show_in_preview') {
+      const signedUrl = args.signedUrl as string | undefined;
+      const filename = args.filename as string | undefined;
+      const mimeType = args.mimeType as string | undefined;
+      const userfileId = args.userfileId as string | undefined;
+      if (!signedUrl) continue;
+
+      // Resolve artifact type from mime type
+      let artifactType: Artifact['type'] = 'html';
+      if (mimeType) {
+        for (const [prefix, type] of MIME_TYPE_MAP) {
+          if (mimeType === prefix || mimeType.startsWith(prefix)) {
+            artifactType = type;
+            break;
+          }
+        }
+      }
+
+      artifacts.push({
+        id: djb2Hash(userfileId || signedUrl),
+        type: artifactType,
+        language: artifactType,
+        title: filename || 'Preview',
+        sourceKind: 'tool_event',
+        remote: {
+          id: userfileId || djb2Hash(signedUrl),
+          status: 'ready',
+          signedUrl,
+          mimeType,
+          type: artifactType,
+        },
+      });
+      continue;
+    }
+
+    if (!WRITE_TOOLS.has(ev.name)) continue;
 
     // Extract file path and content from arguments
     const filePath = String(args.path ?? args.filePath ?? args.file_path ?? '');
@@ -152,14 +201,8 @@ export function getLatestArtifact(
     const msg = messages[i];
     if (msg.role !== 'assistant') continue;
 
-    // First check fenced code blocks in message text
-    const textArtifacts = parseArtifacts(msg.content);
-    if (textArtifacts.length > 0) {
-      const latest = textArtifacts[textArtifacts.length - 1];
-      return { ...latest, messageId: msg.id };
-    }
-
-    // Then check tool events for file-write operations
+    // First check tool events — explicit tool actions (show_in_preview, fs_writeFile)
+    // take priority over incidental fenced code blocks in message text
     if (messageToolEvents && msg.id) {
       const events = messageToolEvents[msg.id];
       if (events) {
@@ -169,6 +212,13 @@ export function getLatestArtifact(
           return { ...latest, messageId: msg.id };
         }
       }
+    }
+
+    // Then check fenced code blocks in message text
+    const textArtifacts = parseArtifacts(msg.content);
+    if (textArtifacts.length > 0) {
+      const latest = textArtifacts[textArtifacts.length - 1];
+      return { ...latest, messageId: msg.id };
     }
   }
 
