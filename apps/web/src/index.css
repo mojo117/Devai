@@ -79,3 +79,12 @@ body {
 [data-panel-resize-handle-id][data-resize-handle-active] {
   background-color: #3d6b52 !important;
 }
+
+/* Mobile preview slide-in */
+@keyframes slide-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+.animate-slide-in-right {
+  animation: slide-in-right 200ms ease-out;
+}

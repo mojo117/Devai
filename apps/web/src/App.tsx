@@ -41,7 +41,32 @@ function App() {
   const [detectedArtifact, setDetectedArtifact] = useState<Artifact | null>(null);
   const [currentArtifact, setCurrentArtifact] = useState<Artifact | null>(null);
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
+  const [mobilePreviewOpen, setMobilePreviewOpen] = useState(false);
   const lastSubmittedArtifactKeyRef = useRef<string | null>(null);
+
+  // Swipe gesture detection for mobile preview panel
+  const touchStartRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY, t: Date.now() };
+  }, []);
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (!touchStartRef.current) return;
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - touchStartRef.current.x;
+    const dy = touch.clientY - touchStartRef.current.y;
+    const dt = Date.now() - touchStartRef.current.t;
+    touchStartRef.current = null;
+    // Must be fast horizontal swipe (>80px, <400ms, more horizontal than vertical)
+    if (dt > 400 || Math.abs(dx) < 80 || Math.abs(dy) > Math.abs(dx)) return;
+    if (dx < 0 && !mobilePreviewOpen && previewEnabled) {
+      // Swipe left → open preview
+      setMobilePreviewOpen(true);
+    } else if (dx > 0 && mobilePreviewOpen) {
+      // Swipe right → close preview
+      setMobilePreviewOpen(false);
+    }
+  }, [mobilePreviewOpen, previewEnabled]);
 
   useEffect(() => {
     try { localStorage.setItem('devai_preview', previewEnabled ? 'on' : 'off'); }
@@ -84,7 +109,7 @@ function App() {
       signedUrlExpiresAt?: string;
       error?: string | null;
       mimeType?: string | null;
-      type?: 'html' | 'svg' | 'webapp' | 'pdf' | 'scrape';
+      type?: Artifact['type'];
     }) => {
       setCurrentArtifact((prev) => {
         const base = prev && prev.id === detectedArtifact.id ? prev : detectedArtifact;
@@ -315,7 +340,7 @@ function App() {
 
   return (
     <ErrorBoundary>
-    <div className="min-h-screen flex flex-col bg-devai-bg">
+    <div className="h-screen flex flex-col bg-devai-bg">
       {/* Header */}
       <header className="sticky top-0 z-40 bg-devai-surface/95 backdrop-blur border-b border-devai-border px-3 md:px-4 py-2">
         <div className="flex items-center justify-between gap-2 max-w-5xl mx-auto w-full">
@@ -410,49 +435,102 @@ function App() {
       )}
 
       {/* Main Content - Chat centered, optionally split with preview */}
-      {previewEnabled ? (
-        <PanelGroup direction="horizontal" className="flex-1 w-full overflow-hidden min-h-0">
-          <Panel defaultSize={55} minSize={30}>
-            <div className="flex flex-col min-w-0 min-h-0 overflow-hidden h-full max-w-4xl mx-auto w-full">
-              <ChatUI
-                projectRoot={health?.projectRoot}
-                allowedRoots={health?.allowedRoots}
-                ignorePatterns={settings.ignorePatterns}
-                onPinFile={settings.addPinnedFile}
-                onLoadingChange={setChatLoading}
-                onAgentChange={handleAgentChange}
-                showSessionControls={false}
-                sessionCommand={sessionCommand}
-                onSessionStateChange={setChatSessionState}
-                pinnedUserfileIds={settings.pinnedUserfileIds}
-                onPinUserfile={settings.togglePinnedUserfile}
-                onClearPinnedUserfiles={settings.clearPinnedUserfiles}
-                onArtifactDetected={setDetectedArtifact}
-                onSetPreview={setPreviewEnabled}
-                previewEnabled={previewEnabled}
-              />
+      <div
+        className="flex-1 flex w-full overflow-hidden min-h-0 relative"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
+        {previewEnabled ? (
+          <>
+            {/* Desktop: side-by-side panels */}
+            <div className="hidden md:flex flex-1 min-h-0 overflow-hidden">
+              <PanelGroup direction="horizontal" className="flex-1 w-full overflow-hidden min-h-0">
+                <Panel defaultSize={55} minSize={30}>
+                  <div className="flex flex-col min-w-0 min-h-0 overflow-hidden h-full max-w-4xl mx-auto w-full">
+                    <ChatUI
+                      projectRoot={health?.projectRoot}
+                      allowedRoots={health?.allowedRoots}
+                      ignorePatterns={settings.ignorePatterns}
+                      onPinFile={settings.addPinnedFile}
+                      onLoadingChange={setChatLoading}
+                      onAgentChange={handleAgentChange}
+                      showSessionControls={false}
+                      sessionCommand={sessionCommand}
+                      onSessionStateChange={setChatSessionState}
+                      pinnedUserfileIds={settings.pinnedUserfileIds}
+                      onPinUserfile={settings.togglePinnedUserfile}
+                      onClearPinnedUserfiles={settings.clearPinnedUserfiles}
+                      onArtifactDetected={setDetectedArtifact}
+                      onSetPreview={setPreviewEnabled}
+                      previewEnabled={previewEnabled}
+                    />
+                  </div>
+                </Panel>
+                <PanelResizeHandle className="w-1.5 bg-devai-border hover:bg-devai-accent/40 transition-colors cursor-col-resize" />
+                <Panel
+                  defaultSize={45}
+                  minSize={20}
+                  collapsible
+                  collapsedSize={3}
+                  onCollapse={() => setPreviewCollapsed(true)}
+                  onExpand={() => setPreviewCollapsed(false)}
+                >
+                  <PreviewPanel
+                    artifact={currentArtifact}
+                    onClose={() => setPreviewEnabled(false)}
+                    collapsed={previewCollapsed}
+                    onToggleCollapse={() => setPreviewCollapsed(p => !p)}
+                    onScrapeFallback={handleScrapeFallback}
+                  />
+                </Panel>
+              </PanelGroup>
             </div>
-          </Panel>
-          <PanelResizeHandle className="w-1.5 bg-devai-border hover:bg-devai-accent/40 transition-colors cursor-col-resize" />
-          <Panel
-            defaultSize={45}
-            minSize={20}
-            collapsible
-            collapsedSize={3}
-            onCollapse={() => setPreviewCollapsed(true)}
-            onExpand={() => setPreviewCollapsed(false)}
-          >
-            <PreviewPanel
-              artifact={currentArtifact}
-              onClose={() => setPreviewEnabled(false)}
-              collapsed={previewCollapsed}
-              onToggleCollapse={() => setPreviewCollapsed(p => !p)}
-              onScrapeFallback={handleScrapeFallback}
-            />
-          </Panel>
-        </PanelGroup>
-      ) : (
-        <div className="flex-1 flex w-full overflow-hidden min-h-0">
+
+            {/* Mobile: chat full-width + preview as slide-over */}
+            <div className="flex md:hidden flex-1 min-h-0 overflow-hidden">
+              <div className="flex flex-col min-w-0 min-h-0 overflow-hidden flex-1 max-w-4xl mx-auto w-full">
+                <ChatUI
+                  projectRoot={health?.projectRoot}
+                  allowedRoots={health?.allowedRoots}
+                  ignorePatterns={settings.ignorePatterns}
+                  onPinFile={settings.addPinnedFile}
+                  onLoadingChange={setChatLoading}
+                  onAgentChange={handleAgentChange}
+                  showSessionControls={false}
+                  sessionCommand={sessionCommand}
+                  onSessionStateChange={setChatSessionState}
+                  pinnedUserfileIds={settings.pinnedUserfileIds}
+                  onPinUserfile={settings.togglePinnedUserfile}
+                  onClearPinnedUserfiles={settings.clearPinnedUserfiles}
+                  onArtifactDetected={setDetectedArtifact}
+                  onSetPreview={setPreviewEnabled}
+                  previewEnabled={previewEnabled}
+                />
+              </div>
+            </div>
+
+            {/* Mobile slide-over preview */}
+            {mobilePreviewOpen && (
+              <div className="md:hidden fixed inset-0 z-50 flex">
+                {/* Backdrop */}
+                <div
+                  className="absolute inset-0 bg-black/50"
+                  onClick={() => setMobilePreviewOpen(false)}
+                />
+                {/* Panel slides in from right */}
+                <div className="absolute inset-y-0 right-0 w-full max-w-md bg-devai-bg shadow-xl animate-slide-in-right">
+                  <PreviewPanel
+                    artifact={currentArtifact}
+                    onClose={() => { setMobilePreviewOpen(false); setPreviewEnabled(false); }}
+                    collapsed={false}
+                    onToggleCollapse={() => setMobilePreviewOpen(false)}
+                    onScrapeFallback={handleScrapeFallback}
+                  />
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
           <div className="flex flex-col min-w-0 min-h-0 overflow-hidden flex-1 max-w-4xl mx-auto w-full">
             <ChatUI
               projectRoot={health?.projectRoot}
@@ -472,8 +550,8 @@ function App() {
               previewEnabled={previewEnabled}
             />
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Burger Menu */}
       <BurgerMenu
