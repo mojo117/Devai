@@ -67,6 +67,18 @@ export async function tryHandleSlashCommand(
       : '**Serial Mode** — Nachrichten werden nacheinander verarbeitet.';
   }
 
+  // /list — show all available slash commands
+  if (trimmed === '/list') {
+    return [
+      '**Slash Commands**\n',
+      '`/engine [glm|gemini|claude|kimi]` — LLM Engine wechseln oder Status anzeigen',
+      '`/preview [on|off]` — Preview-Panel im Web-UI ein-/ausschalten',
+      '`/mode` — Zwischen Serial und Parallel Mode umschalten',
+      '`/stop` — Alle laufenden Loops abbrechen',
+      '`/list` — Diese Liste anzeigen',
+    ].join('\n');
+  }
+
   // /stop — abort all running loops
   if (trimmed === '/stop') {
     const loopCount = getActiveLoopCount(sessionId);
