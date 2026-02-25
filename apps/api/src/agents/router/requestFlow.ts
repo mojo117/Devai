@@ -99,6 +99,14 @@ export async function processRequest(
     return `Unknown engine "${arg}". Available: glm, gemini, claude.\nUsage: /engine <glm|gemini|claude>`;
   }
 
+  // Handle /preview command — client-side UI toggle (no LLM call needed)
+  const previewMatch = getTextContent(userMessage).trim().match(/^\/preview(?:\s+(on|off))?$/i);
+  if (previewMatch) {
+    const arg = previewMatch[1]?.toLowerCase();
+    if (!arg) return 'Preview: `/preview on` or `/preview off`. This is a client-side UI feature.';
+    return `Preview mode **${arg === 'on' ? 'ON' : 'OFF'}**. (Note: This takes effect in the web UI only.)`;
+  }
+
   // Keep the last actual request for approval/resume flows.
   stateManager.setOriginalRequest(sessionId, getTextContent(userMessage));
   await warmSystemContextForSession(sessionId, projectRoot || getProjectRootFromState(sessionId));
