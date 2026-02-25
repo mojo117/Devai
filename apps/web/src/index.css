@@ -70,3 +70,12 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
+
+/* Preview panel resize handle */
+[data-panel-resize-handle-id] {
+  transition: background-color 150ms;
+}
+[data-panel-resize-handle-id]:hover,
+[data-panel-resize-handle-id][data-resize-handle-active] {
+  background-color: #3d6b52 !important;
+}
