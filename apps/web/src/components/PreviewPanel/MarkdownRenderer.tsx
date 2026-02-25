@@ -71,7 +71,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   return (
     <iframe
       srcDoc={doc}
-      sandbox="allow-scripts allow-same-origin"
+      sandbox="allow-scripts"
       title="Markdown preview"
       className="w-full h-full border-none"
     />

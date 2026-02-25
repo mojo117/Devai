@@ -92,6 +92,9 @@ await app.register(cors, {
 // Security headers (CSP handled by Caddy + frontend meta tag)
 await app.register(helmet as unknown as RegisterPlugin, {
   contentSecurityPolicy: false,
+  // Disable X-XSS-Protection — triggers false positives on srcdoc iframes
+  // (browser XSS auditor blocks inline HTML in preview panel)
+  xXssProtection: false,
 } as RegisterPluginOpts);
 
 // Global rate limiting (per IP)
@@ -167,6 +170,7 @@ const start = async () => {
     if (config.anthropicApiKey) providers.push('Anthropic');
     if (config.openaiApiKey) providers.push('OpenAI');
     if (config.geminiApiKey) providers.push('Gemini');
+    if (config.moonshotApiKey) providers.push('Moonshot');
     console.log(`Configured LLM providers: ${providers.length > 0 ? providers.join(', ') : 'None'}`);
     previewBuildWorker.start();
 

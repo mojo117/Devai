@@ -26,7 +26,7 @@ export function HtmlRenderer({ content }: HtmlRendererProps) {
   return (
     <iframe
       srcDoc={doc}
-      sandbox="allow-scripts allow-same-origin"
+      sandbox="allow-scripts"
       title="Artifact preview"
       className="w-full h-full border-none"
     />
