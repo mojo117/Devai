@@ -16,7 +16,6 @@ import { DropOverlay } from './DropOverlay';
 import { validateFile } from './uploadConstants';
 import { TodoCard } from '../TodoCard';
 import { getLatestArtifact, parseToolEventArtifacts } from '../PreviewPanel/artifactParser';
-import type { Artifact } from '../PreviewPanel/artifactParser';
 
 export function ChatUI({
   projectRoot,
@@ -33,7 +32,7 @@ export function ChatUI({
   onPinUserfile,
   onClearPinnedUserfiles,
   onSetPreview,
-  previewEnabled,
+  previewEnabled: _previewEnabled,
   onArtifactDetected,
 }: ChatUIProps) {
   // Core state shared across sub-components

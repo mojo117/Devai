@@ -18,6 +18,7 @@ import { externalRoutes } from './routes/external.js';
 import { SessionLogger } from './audit/sessionLogger.js';
 import { userfilesRoutes } from './routes/userfiles.js';
 import { transcribeRoutes } from './routes/transcribe.js';
+import { previewRoutes } from './routes/preview.js';
 import { authMiddleware, registerAuthRoutes } from './routes/auth.js';
 import { initDb } from './db/index.js';
 import { websocketRoutes } from './websocket/routes.js';
@@ -40,6 +41,7 @@ import {
   recentTopicDecayJob,
 } from './services/systemReliability.js';
 import { configureHeartbeat, runHeartbeat } from './services/heartbeatService.js';
+import { previewBuildWorker } from './preview/previewBuildWorker.js';
 
 const envValidation = validateRequiredEnv(config);
 if (!envValidation.ok) {
@@ -149,6 +151,7 @@ await app.register(externalRoutes, { prefix: '/api' });
 await app.register(websocketRoutes, { prefix: '/api' });
 await app.register(userfilesRoutes, { prefix: '/api' });
 await app.register(transcribeRoutes, { prefix: '/api' });
+await app.register(previewRoutes, { prefix: '/api' });
 
 // Start server
 const start = async () => {
@@ -165,6 +168,7 @@ const start = async () => {
     if (config.openaiApiKey) providers.push('OpenAI');
     if (config.geminiApiKey) providers.push('Gemini');
     console.log(`Configured LLM providers: ${providers.length > 0 ? providers.join(', ') : 'None'}`);
+    previewBuildWorker.start();
 
     // Log agent soul loading status (CAIO/DEVO/SCOUT)
     const soulStatuses = getAgentSoulStatusReport();
@@ -377,6 +381,7 @@ const start = async () => {
 // Graceful shutdown
 const shutdown = async () => {
   console.log('Shutting down...');
+  previewBuildWorker.stop();
   schedulerService.stop();
   if (mcpInitPromise) {
     try { await mcpInitPromise; } catch (err) { console.warn('[server] MCP init failed during shutdown:', err instanceof Error ? err.message : err); }

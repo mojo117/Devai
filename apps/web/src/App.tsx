@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { ChatUI, type ChatSessionState, type ChatSessionCommand, type ChatSessionCommandEnvelope } from './components/ChatUI';
 import { type AgentName, type AgentPhase } from './components/AgentStatus';
@@ -7,7 +7,10 @@ import type { Artifact } from './components/PreviewPanel';
 import { BurgerMenu } from './components/BurgerMenu';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import {
+  createPreviewArtifact,
+  fetchPreviewArtifact,
   fetchHealth,
+  triggerPreviewScrape,
 } from './api';
 import type { HealthResponse } from './types';
 import { useAuth } from './hooks/useAuth';
@@ -35,13 +38,178 @@ function App() {
     catch { return false; }
   });
 
+  const [detectedArtifact, setDetectedArtifact] = useState<Artifact | null>(null);
   const [currentArtifact, setCurrentArtifact] = useState<Artifact | null>(null);
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
+  const lastSubmittedArtifactKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     try { localStorage.setItem('devai_preview', previewEnabled ? 'on' : 'off'); }
     catch { /* ignore */ }
   }, [previewEnabled]);
+
+  useEffect(() => {
+    if (!detectedArtifact) {
+      setCurrentArtifact(null);
+      lastSubmittedArtifactKeyRef.current = null;
+      return;
+    }
+
+    setCurrentArtifact(detectedArtifact);
+
+    const sessionId = chatSessionState?.sessionId;
+    if (!previewEnabled || !sessionId) {
+      return;
+    }
+
+    const artifactKey = [
+      sessionId,
+      detectedArtifact.messageId || '',
+      detectedArtifact.id,
+      detectedArtifact.type,
+      detectedArtifact.filePath || '',
+    ].join('|');
+    if (lastSubmittedArtifactKeyRef.current === artifactKey) {
+      return;
+    }
+    lastSubmittedArtifactKeyRef.current = artifactKey;
+
+    let cancelled = false;
+    let pollHandle: number | null = null;
+
+    const attachRemote = (remote: {
+      id: string;
+      status: 'queued' | 'building' | 'ready' | 'failed';
+      signedUrl?: string;
+      signedUrlExpiresAt?: string;
+      error?: string | null;
+      mimeType?: string | null;
+      type?: 'html' | 'svg' | 'webapp' | 'pdf' | 'scrape';
+    }) => {
+      setCurrentArtifact((prev) => {
+        const base = prev && prev.id === detectedArtifact.id ? prev : detectedArtifact;
+        return { ...base, remote };
+      });
+    };
+
+    const pollArtifact = async (artifactId: string, remaining = 20) => {
+      if (cancelled || remaining <= 0) return;
+      const res = await fetchPreviewArtifact(artifactId).catch(() => null);
+      if (cancelled || !res?.artifact) return;
+
+      const nextRemote = {
+        id: res.artifact.id,
+        status: res.artifact.status,
+        signedUrl: res.artifact.signedUrl,
+        signedUrlExpiresAt: res.artifact.signedUrlExpiresAt,
+        error: res.artifact.error,
+        mimeType: res.artifact.mimeType,
+        type: res.artifact.type,
+      } as const;
+      attachRemote(nextRemote);
+
+      if (res.artifact.status === 'ready' || res.artifact.status === 'failed') return;
+      pollHandle = window.setTimeout(() => {
+        void pollArtifact(artifactId, remaining - 1);
+      }, 1000);
+    };
+
+    const create = async () => {
+      try {
+        const res = await createPreviewArtifact({
+          sessionId,
+          messageId: detectedArtifact.messageId,
+          sourceKind: detectedArtifact.sourceKind,
+          type: detectedArtifact.type,
+          title: detectedArtifact.title,
+          language: detectedArtifact.language,
+          content: detectedArtifact.content,
+          entrypoint: detectedArtifact.filePath,
+          sourceFiles: detectedArtifact.filePath ? [detectedArtifact.filePath] : undefined,
+        });
+        if (cancelled) return;
+
+        attachRemote({
+          id: res.artifact.id,
+          status: res.artifact.status,
+          signedUrl: res.artifact.signedUrl,
+          signedUrlExpiresAt: res.artifact.signedUrlExpiresAt,
+          error: res.artifact.error,
+          mimeType: res.artifact.mimeType,
+          type: res.artifact.type,
+        });
+
+        if (res.artifact.status !== 'ready' && res.artifact.status !== 'failed') {
+          void pollArtifact(res.artifact.id, 20);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : String(err);
+        attachRemote({
+          id: `failed-${Date.now()}`,
+          status: 'failed',
+          error: message,
+          type: detectedArtifact.type,
+        });
+      }
+    };
+
+    void create();
+
+    return () => {
+      cancelled = true;
+      if (pollHandle) window.clearTimeout(pollHandle);
+    };
+  }, [detectedArtifact, chatSessionState?.sessionId, previewEnabled]);
+
+  const handleScrapeFallback = useCallback(async (artifactId: string) => {
+    const result = await triggerPreviewScrape(artifactId).catch(() => null);
+    if (!result?.artifact) return;
+
+    setCurrentArtifact((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        remote: {
+          id: result.artifact.id,
+          status: result.artifact.status,
+          signedUrl: result.artifact.signedUrl,
+          signedUrlExpiresAt: result.artifact.signedUrlExpiresAt,
+          error: result.artifact.error,
+          mimeType: result.artifact.mimeType,
+          type: result.artifact.type,
+        },
+      };
+    });
+
+    if (result.artifact.status === 'ready' || result.artifact.status === 'failed') return;
+
+    let remaining = 20;
+    while (remaining > 0) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // eslint-disable-next-line no-await-in-loop
+      const latest = await fetchPreviewArtifact(result.artifact.id).catch(() => null);
+      if (!latest?.artifact) continue;
+      setCurrentArtifact((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          remote: {
+            id: latest.artifact.id,
+            status: latest.artifact.status,
+            signedUrl: latest.artifact.signedUrl,
+            signedUrlExpiresAt: latest.artifact.signedUrlExpiresAt,
+            error: latest.artifact.error,
+            mimeType: latest.artifact.mimeType,
+            type: latest.artifact.type,
+          },
+        };
+      });
+      if (latest.artifact.status === 'ready' || latest.artifact.status === 'failed') break;
+      remaining -= 1;
+    }
+  }, []);
 
   const issueSessionCommand = useCallback((command: ChatSessionCommand) => {
     setSessionCommand((prev) => ({
@@ -259,7 +427,7 @@ function App() {
                 pinnedUserfileIds={settings.pinnedUserfileIds}
                 onPinUserfile={settings.togglePinnedUserfile}
                 onClearPinnedUserfiles={settings.clearPinnedUserfiles}
-                onArtifactDetected={setCurrentArtifact}
+                onArtifactDetected={setDetectedArtifact}
                 onSetPreview={setPreviewEnabled}
                 previewEnabled={previewEnabled}
               />
@@ -279,6 +447,7 @@ function App() {
               onClose={() => setPreviewEnabled(false)}
               collapsed={previewCollapsed}
               onToggleCollapse={() => setPreviewCollapsed(p => !p)}
+              onScrapeFallback={handleScrapeFallback}
             />
           </Panel>
         </PanelGroup>
@@ -298,7 +467,7 @@ function App() {
               pinnedUserfileIds={settings.pinnedUserfileIds}
               onPinUserfile={settings.togglePinnedUserfile}
               onClearPinnedUserfiles={settings.clearPinnedUserfiles}
-              onArtifactDetected={setCurrentArtifact}
+              onArtifactDetected={setDetectedArtifact}
               onSetPreview={setPreviewEnabled}
               previewEnabled={previewEnabled}
             />

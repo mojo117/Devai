@@ -78,6 +78,13 @@ export interface Config {
   toolMaxDiffChars: number;
   toolAllowedExtensions: string[];
 
+  // Preview pipeline
+  previewWorkspaces: PreviewWorkspaceConfig[];
+  previewSignedUrlTtlSec: number;
+  previewStorageBucket: string;
+  previewBuildTimeoutMs: number;
+  previewMaxMountBytes: number;
+
   // Supabase
   supabaseUrl: string;
   supabaseServiceKey: string;
@@ -110,6 +117,12 @@ export interface Config {
   delegationTimeoutMs: number;
   costCapPerRunTokens: number;
 
+}
+
+export interface PreviewWorkspaceConfig {
+  id: string;
+  root: string;
+  mode: 'readwrite' | 'readonly';
 }
 
 export interface EnvValidationIssue {
@@ -163,6 +176,12 @@ export function loadConfig(): Config {
     toolMaxListEntries: parseInt(process.env.TOOL_MAX_LIST_ENTRIES || "500", 10),
     toolMaxDiffChars: parseInt(process.env.TOOL_MAX_DIFF_CHARS || "12000", 10),
     toolAllowedExtensions: parseExtensions(process.env.TOOL_ALLOWED_EXTENSIONS),
+
+    previewWorkspaces: parsePreviewWorkspaces(process.env.PREVIEW_WORKSPACES),
+    previewSignedUrlTtlSec: Math.max(60, parseInt(process.env.PREVIEW_SIGNED_URL_TTL_SEC || '900', 10)),
+    previewStorageBucket: process.env.PREVIEW_STORAGE_BUCKET || 'preview-artifacts',
+    previewBuildTimeoutMs: Math.max(1_000, parseInt(process.env.PREVIEW_BUILD_TIMEOUT_MS || '45000', 10)),
+    previewMaxMountBytes: Math.max(128 * 1024, parseInt(process.env.PREVIEW_MAX_MOUNT_BYTES || String(8 * 1024 * 1024), 10)),
 
     supabaseUrl: process.env.DEVAI_SUPABASE_URL || process.env.SUPABASE_URL || "",
     // Support both DevAI-prefixed and standard Supabase env var names.
@@ -335,4 +354,29 @@ function parseNumberList(
     unique.sort((a, b) => b - a);
   }
   return unique.length > 0 ? unique : fallback;
+}
+
+function parsePreviewWorkspaces(value?: string): PreviewWorkspaceConfig[] {
+  const fallback: PreviewWorkspaceConfig[] = [
+    { id: 'devai', root: '/opt/Klyde/projects/Devai', mode: 'readwrite' },
+    { id: 'devispace', root: '/opt/Klyde/projects/DeviSpace', mode: 'readwrite' },
+  ];
+
+  if (!value || !value.trim()) return fallback;
+
+  const parsed = value
+    .split(/[;,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [idRaw, rootRaw, modeRaw] = entry.split(':');
+      const id = (idRaw || '').trim().toLowerCase();
+      const root = (rootRaw || '').trim();
+      const mode = modeRaw?.trim().toLowerCase() === 'readonly' ? 'readonly' : 'readwrite';
+      if (!id || !root || !root.startsWith('/')) return null;
+      return { id, root, mode } as PreviewWorkspaceConfig;
+    })
+    .filter((entry): entry is PreviewWorkspaceConfig => Boolean(entry));
+
+  return parsed.length > 0 ? parsed : fallback;
 }

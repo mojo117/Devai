@@ -1,9 +1,21 @@
 export interface Artifact {
   id: string;
-  type: 'html' | 'svg';
+  type: 'html' | 'svg' | 'webapp' | 'pdf' | 'scrape';
   language: string;
-  content: string;
+  content?: string;
   title?: string;
+  filePath?: string;
+  sourceKind: 'inline' | 'tool_event';
+  messageId?: string;
+  remote?: {
+    id: string;
+    status: 'queued' | 'building' | 'ready' | 'failed';
+    signedUrl?: string;
+    signedUrlExpiresAt?: string;
+    error?: string | null;
+    mimeType?: string | null;
+    type?: 'html' | 'svg' | 'webapp' | 'pdf' | 'scrape';
+  };
 }
 
 /** Minimal shape of a tool event — avoids importing the full ToolEvent type */
@@ -16,6 +28,13 @@ export interface ToolEventLike {
 const SUPPORTED_TYPES: Record<string, Artifact['type']> = {
   html: 'html',
   svg: 'svg',
+  ts: 'webapp',
+  tsx: 'webapp',
+  js: 'webapp',
+  jsx: 'webapp',
+  javascript: 'webapp',
+  typescript: 'webapp',
+  pdf: 'pdf',
 };
 
 /** File extensions that map to artifact types */
@@ -23,6 +42,13 @@ const FILE_EXT_MAP: Record<string, Artifact['type']> = {
   '.html': 'html',
   '.htm': 'html',
   '.svg': 'svg',
+  '.ts': 'webapp',
+  '.tsx': 'webapp',
+  '.js': 'webapp',
+  '.jsx': 'webapp',
+  '.mjs': 'webapp',
+  '.cjs': 'webapp',
+  '.pdf': 'pdf',
 };
 
 /** Tool names that write file content */
@@ -64,6 +90,7 @@ export function parseArtifacts(text: string): Artifact[] {
       language,
       content,
       title: match[2]?.trim() || undefined,
+      sourceKind: 'inline',
     });
   }
 
@@ -86,8 +113,9 @@ export function parseToolEventArtifacts(events: ToolEventLike[]): Artifact[] {
 
     // Extract file path and content from arguments
     const filePath = String(args.path ?? args.filePath ?? args.file_path ?? '');
-    const content = String(args.content ?? args.text ?? args.data ?? '');
-    if (!filePath || !content) continue;
+    const contentRaw = args.content ?? args.text ?? args.data;
+    const content = typeof contentRaw === 'string' ? contentRaw : undefined;
+    if (!filePath) continue;
 
     // Check file extension
     const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase();
@@ -98,11 +126,13 @@ export function parseToolEventArtifacts(events: ToolEventLike[]): Artifact[] {
     const fileName = filePath.split('/').pop() || filePath;
 
     artifacts.push({
-      id: djb2Hash(content),
+      id: djb2Hash(`${filePath}\n${content || ''}`),
       type,
-      language: type,
+      language: type === 'webapp' ? ext.slice(1) || 'ts' : type,
       content,
       title: fileName,
+      filePath,
+      sourceKind: 'tool_event',
     });
   }
 
@@ -124,14 +154,20 @@ export function getLatestArtifact(
 
     // First check fenced code blocks in message text
     const textArtifacts = parseArtifacts(msg.content);
-    if (textArtifacts.length > 0) return textArtifacts[textArtifacts.length - 1];
+    if (textArtifacts.length > 0) {
+      const latest = textArtifacts[textArtifacts.length - 1];
+      return { ...latest, messageId: msg.id };
+    }
 
     // Then check tool events for file-write operations
     if (messageToolEvents && msg.id) {
       const events = messageToolEvents[msg.id];
       if (events) {
         const toolArtifacts = parseToolEventArtifacts(events);
-        if (toolArtifacts.length > 0) return toolArtifacts[toolArtifacts.length - 1];
+        if (toolArtifacts.length > 0) {
+          const latest = toolArtifacts[toolArtifacts.length - 1];
+          return { ...latest, messageId: msg.id };
+        }
       }
     }
   }
