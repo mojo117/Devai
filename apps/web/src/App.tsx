@@ -26,6 +26,17 @@ function App() {
   const [sessionCommand, setSessionCommand] = useState<ChatSessionCommandEnvelope | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // Preview toggle backed by localStorage
+  const [previewEnabled, setPreviewEnabled] = useState(() => {
+    try { return localStorage.getItem('devai_preview') === 'on'; }
+    catch { return false; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem('devai_preview', previewEnabled ? 'on' : 'off'); }
+    catch { /* ignore */ }
+  }, [previewEnabled]);
+
   const issueSessionCommand = useCallback((command: ChatSessionCommand) => {
     setSessionCommand((prev) => ({
       nonce: (prev?.nonce ?? 0) + 1,
@@ -240,6 +251,8 @@ function App() {
             pinnedUserfileIds={settings.pinnedUserfileIds}
             onPinUserfile={settings.togglePinnedUserfile}
             onClearPinnedUserfiles={settings.clearPinnedUserfiles}
+            previewEnabled={previewEnabled}
+            onSetPreview={setPreviewEnabled}
           />
         </div>
       </div>
