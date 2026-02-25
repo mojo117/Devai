@@ -486,8 +486,8 @@ function App() {
               </PanelGroup>
             </div>
 
-            {/* Mobile: chat full-width + preview as slide-over */}
-            <div className="flex md:hidden flex-1 min-h-0 overflow-hidden">
+            {/* Mobile: chat full-width + edge arrow to open preview */}
+            <div className="flex md:hidden flex-1 min-h-0 overflow-hidden relative">
               <div className="flex flex-col min-w-0 min-h-0 overflow-hidden flex-1 max-w-4xl mx-auto w-full">
                 <ChatUI
                   projectRoot={health?.projectRoot}
@@ -507,6 +507,18 @@ function App() {
                   previewEnabled={previewEnabled}
                 />
               </div>
+              {/* Right-edge arrow to open preview */}
+              {!mobilePreviewOpen && (
+                <button
+                  onClick={() => setMobilePreviewOpen(true)}
+                  className="absolute right-0 top-1/2 -translate-y-1/2 z-30 bg-devai-accent/80 hover:bg-devai-accent text-white rounded-l-lg py-4 px-1.5 shadow-lg transition-colors"
+                  title="Preview öffnen"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+              )}
             </div>
 
             {/* Mobile slide-over preview */}
@@ -517,8 +529,18 @@ function App() {
                   className="absolute inset-0 bg-black/50"
                   onClick={() => setMobilePreviewOpen(false)}
                 />
+                {/* Left-edge arrow to go back */}
+                <button
+                  onClick={() => setMobilePreviewOpen(false)}
+                  className="absolute left-0 top-1/2 -translate-y-1/2 z-[60] bg-devai-accent/80 hover:bg-devai-accent text-white rounded-r-lg py-4 px-1.5 shadow-lg transition-colors"
+                  title="Zurück zum Chat"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
                 {/* Panel slides in from right */}
-                <div className="absolute inset-y-0 right-0 w-full max-w-md bg-devai-bg shadow-xl animate-slide-in-right">
+                <div className="absolute inset-y-0 right-0 w-full bg-devai-bg shadow-xl animate-slide-in-right">
                   <PreviewPanel
                     artifact={currentArtifact}
                     onClose={() => { setMobilePreviewOpen(false); setPreviewEnabled(false); }}
