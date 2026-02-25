@@ -33,7 +33,6 @@ import { getAgentSoulStatusReport } from './prompts/agentSoul.js';
 import { ensureSessionExists, saveMessage } from './db/queries.js';
 import { getDefaultNotificationChannel, logSchedulerExecution } from './db/schedulerQueries.js';
 import {
-  backupLocalDbJob,
   cleanupExpiredUserfilesJob,
   collectSystemHealthSnapshot,
   formatHealthAlert,
@@ -348,15 +347,6 @@ const start = async () => {
       name: 'Maintenance: Recent Topic Decay',
       cronExpression: '35 3 * * *',
       run: recentTopicDecayJob,
-      runOnStart: true,
-      notifyOnFailure: false,
-    });
-
-    schedulerService.registerInternalJob({
-      id: 'maintenance-local-db-backup',
-      name: 'Maintenance: Local DB Backup',
-      cronExpression: '0 4 * * *',
-      run: () => backupLocalDbJob(14),
       runOnStart: true,
       notifyOnFailure: false,
     });

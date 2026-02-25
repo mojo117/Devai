@@ -1,7 +1,5 @@
-import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises';
-import { basename, dirname, join, resolve } from 'node:path';
-import { config } from '../config.js';
 import { getLatestHealthWatchdogEvent, getLatestSchedulerFailure } from '../db/schedulerQueries.js';
+import { config } from '../config.js';
 import { getSupabase, getSupabaseHealthStatus, pingSupabase } from '../db/index.js';
 import { getExpiredUserfiles, deleteExpiredUserfiles } from '../db/userfileQueries.js';
 import { llmRouter } from '../llm/router.js';
@@ -11,8 +9,6 @@ import { runRecentTopicDecay } from '../memory/recentFocus.js';
 import { renderMemoryMd } from '../memory/renderMemoryMd.js';
 import { mcpManager } from '../mcp/index.js';
 import { schedulerService } from '../scheduler/schedulerService.js';
-
-const DEFAULT_BACKUP_RETENTION = 14;
 
 export interface SystemHealthSnapshot {
   status: 'ok' | 'degraded';
@@ -161,33 +157,6 @@ export async function recentTopicDecayJob(): Promise<string> {
   return `Recent topic decay: ${result.decayed} decayed, ${result.pruned} pruned`;
 }
 
-export async function backupLocalDbJob(keepLast: number = DEFAULT_BACKUP_RETENTION): Promise<string> {
-  const sourcePath = config.dbPath;
-  
-  try {
-    const dbStats = await stat(sourcePath);
-    if (!dbStats.isFile()) {
-      throw new Error(`DB path is not a file: ${sourcePath}`);
-    }
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      return 'Local DB backup skipped: database file does not exist';
-    }
-    throw err;
-  }
-
-  const backupDir = resolve(dirname(sourcePath), 'backups');
-  await mkdir(backupDir, { recursive: true });
-
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const filename = `${basename(sourcePath, '.db')}-${timestamp}.db`;
-  const destination = join(backupDir, filename);
-  await copyFile(sourcePath, destination);
-
-  await pruneOldBackups(backupDir, basename(sourcePath, '.db'), keepLast);
-  return `Created DB backup: ${destination}`;
-}
-
 export function formatHealthAlert(snapshot: SystemHealthSnapshot): string {
   const lines = [
     `System health is ${snapshot.status.toUpperCase()} at ${snapshot.timestamp}`,
@@ -196,27 +165,4 @@ export function formatHealthAlert(snapshot: SystemHealthSnapshot): string {
     `LLM providers: ${snapshot.llm.configuredProviders.length > 0 ? snapshot.llm.configuredProviders.join(', ') : 'none configured'}`,
   ];
   return lines.join('\n');
-}
-
-async function pruneOldBackups(
-  backupDir: string,
-  filePrefix: string,
-  keepLast: number,
-): Promise<void> {
-  const files = await readdir(backupDir);
-  const candidates: Array<{ name: string; mtimeMs: number }> = [];
-
-  for (const name of files) {
-    if (!name.startsWith(`${filePrefix}-`) || !name.endsWith('.db')) continue;
-    const fullPath = join(backupDir, name);
-    const info = await stat(fullPath);
-    candidates.push({ name, mtimeMs: info.mtimeMs });
-  }
-
-  candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  const toRemove = candidates.slice(Math.max(keepLast, 0));
-
-  for (const file of toRemove) {
-    await rm(join(backupDir, file.name), { force: true });
-  }
 }
