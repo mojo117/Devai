@@ -258,6 +258,7 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
 
     const provider = (this.modelSelection.provider || 'anthropic') as LLMProvider;
     const model = this.modelSelection.model || chapo.model;
+    const sameProviderFallbacks = this.modelSelection.sameProviderFallbacks;
     const trace = this.traceId ? `[trace:${this.traceId}] ` : '';
 
     // --- Resilience state ---
@@ -312,6 +313,7 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
           systemPrompt: this.conversation.getSystemPrompt(),
           tools,
           toolsEnabled: true,
+          sameProviderFallbacks,
         })
       );
 

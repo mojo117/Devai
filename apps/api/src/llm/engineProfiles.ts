@@ -13,6 +13,8 @@ export interface AgentModelOverride {
   model: string;
   fastModel?: string;
   fallbackModel?: string;
+  /** Try this model on the same provider before falling back cross-provider. */
+  sameProviderFallback?: string;
 }
 
 export type EngineProfile = Partial<Record<AgentName, AgentModelOverride>>;
@@ -25,8 +27,8 @@ export type EngineProfile = Partial<Record<AgentName, AgentModelOverride>>;
  */
 export const ENGINE_PROFILES: Record<EngineName, EngineProfile> = {
   glm: {
-    chapo: { model: 'glm-5', fallbackModel: 'claude-opus-4-5-20251101' },
-    devo: { model: 'glm-5', fastModel: 'glm-4.7-flash', fallbackModel: 'claude-sonnet-4-20250514' },
+    chapo: { model: 'glm-5', fallbackModel: 'claude-opus-4-5-20251101', sameProviderFallback: 'glm-4.7' },
+    devo: { model: 'glm-5', fastModel: 'glm-4.7-flash', fallbackModel: 'claude-sonnet-4-20250514', sameProviderFallback: 'glm-4.7' },
     scout: { model: 'glm-4.7-flash', fallbackModel: 'claude-sonnet-4-20250514' },
     caio: { model: 'glm-4.7', fallbackModel: 'claude-sonnet-4-20250514' },
   },
@@ -57,11 +59,17 @@ export function getEngineProfile(name: EngineName): EngineProfile {
 /** Build a human-readable summary of the engine profile */
 export function formatEngineStatus(engine: EngineName): string {
   const p = ENGINE_PROFILES[engine];
+  const fb = (o?: AgentModelOverride) => {
+    const parts: string[] = [];
+    if (o?.sameProviderFallback) parts.push(o.sameProviderFallback);
+    if (o?.fallbackModel) parts.push(o.fallbackModel);
+    return parts.length ? parts.join(' → ') : 'none';
+  };
   return [
     `Engine: ${engine.toUpperCase()}`,
-    `  CHAPO: ${p.chapo?.model} (fallback: ${p.chapo?.fallbackModel})`,
-    `  DEVO:  ${p.devo?.model} / fast: ${p.devo?.fastModel ?? 'none'} (fallback: ${p.devo?.fallbackModel})`,
-    `  SCOUT: ${p.scout?.model} (fallback: ${p.scout?.fallbackModel})`,
-    `  CAIO:  ${p.caio?.model} (fallback: ${p.caio?.fallbackModel})`,
+    `  CHAPO: ${p.chapo?.model} (fallback: ${fb(p.chapo)})`,
+    `  DEVO:  ${p.devo?.model} / fast: ${p.devo?.fastModel ?? 'none'} (fallback: ${fb(p.devo)})`,
+    `  SCOUT: ${p.scout?.model} (fallback: ${fb(p.scout)})`,
+    `  CAIO:  ${p.caio?.model} (fallback: ${fb(p.caio)})`,
   ].join('\n');
 }

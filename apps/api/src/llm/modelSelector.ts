@@ -42,6 +42,7 @@ export function resolveModelSelection(agent: AgentDefinition, sessionId?: string
 
   const effectiveModel = override?.model ?? agent.model;
   const effectiveFallback = override?.fallbackModel ?? agent.fallbackModel;
+  const sameProviderFallback = override?.sameProviderFallback;
   const reasonPrefix = engine ? `${agent.name} (engine: ${engine})` : `${agent.name} default`;
 
   // Try primary model — detect provider from model name
@@ -51,6 +52,7 @@ export function resolveModelSelection(agent: AgentDefinition, sessionId?: string
       provider: primaryProvider,
       model: effectiveModel,
       reason: reasonPrefix,
+      sameProviderFallbacks: sameProviderFallback ? [sameProviderFallback] : undefined,
     };
   }
 
@@ -91,18 +93,23 @@ export function resolveDelegationModel(
   modelTier: 'fast' | 'standard' | undefined,
   baseProvider: LLMProviderName,
   sessionId?: string,
-): { provider: LLMProviderName; model: string } {
+): { provider: LLMProviderName; model: string; sameProviderFallbacks?: string[] } {
   const engine = getSessionEngine(sessionId);
   const override = engine ? getEngineProfile(engine)[agent.name] : null;
 
   const effectiveModel = override?.model ?? agent.model;
   const effectiveFastModel = override?.fastModel ?? agent.fastModel;
+  const sameProviderFallback = override?.sameProviderFallback;
 
   const model = modelTier === 'fast' && effectiveFastModel
     ? effectiveFastModel
     : effectiveModel;
   const provider = detectProvider(model) || baseProvider;
-  return { provider, model };
+  return {
+    provider,
+    model,
+    sameProviderFallbacks: sameProviderFallback ? [sameProviderFallback] : undefined,
+  };
 }
 
 function detectProvider(model: string): LLMProviderName | null {

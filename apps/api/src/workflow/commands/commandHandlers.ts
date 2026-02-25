@@ -45,6 +45,7 @@ import type { ContentBlock, TextContentBlock } from '../../llm/types.js';
 import { buildConversationHistoryContext } from '../../agents/conversationHistory.js';
 import { createCollectingBridge, persistAndEmitTerminalResponse } from './eventBridge.js';
 import { classifyInboundText } from '../../agents/intakeClassifier.js';
+import { tryHandleSlashCommand } from '../../agents/router/slashCommands.js';
 
 /** Result returned after dispatching a command. */
 export type DispatchResult =
@@ -133,6 +134,25 @@ export class CommandHandlers {
     });
     setGatheredInfo(activeSessionId, 'requestIntakeKind', intake.kind);
     setGatheredInfo(activeSessionId, 'requestIntakeReason', intake.reason);
+
+    // Fast-path: slash commands bypass the LLM queue entirely
+    const msgText = typeof command.message === 'string' ? command.message.trim() : '';
+    const slashResult = await tryHandleSlashCommand(activeSessionId, msgText);
+    if (slashResult !== null) {
+      const userMsg = createChatMessage('user', msgText);
+      const assistantMsg = createChatMessage('assistant', slashResult);
+
+      await persistAndEmitTerminalResponse({
+        ctx,
+        sessionId: activeSessionId,
+        userMessage: userMsg,
+        responseMessage: assistantMsg,
+        collectedToolEvents: [],
+        isError: false,
+      });
+
+      return { type: 'success', sessionId: activeSessionId, responseMessage: assistantMsg };
+    }
 
     // Multi-message: if a loop is already running, queue instead of starting a new one
     if (isLoopActive(activeSessionId)) {

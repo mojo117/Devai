@@ -191,9 +191,31 @@ export class LLMRouter {
         return { ...response, usedProvider: providerName };
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        circuitBreaker.recordError(providerName, errorMsg);
         errors.push({ provider: providerName, error: errorMsg });
-        console.warn(`[llm] Provider ${providerName} failed, trying next...`, errorMsg);
+        console.warn(`[llm] Provider ${providerName} failed with primary model, trying same-provider fallbacks...`, errorMsg);
+
+        // Try same-provider fallback models before moving to the next provider
+        const fallbacks = request.sameProviderFallbacks ?? [];
+        let recovered = false;
+        for (const altModel of fallbacks) {
+          // Only try if the model actually belongs to this provider
+          if (!isModelForProvider(altModel, providerName)) continue;
+          try {
+            console.info(`[llm] Trying same-provider fallback ${altModel} on ${providerName}`);
+            const response = await this.generateWithRetry(providerName, { ...request, model: altModel });
+            circuitBreaker.recordSuccess(providerName);
+            recovered = true;
+            return { ...response, usedProvider: providerName };
+          } catch (fallbackErr) {
+            const fbMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+            console.warn(`[llm] Same-provider fallback ${altModel} on ${providerName} also failed:`, fbMsg);
+          }
+        }
+
+        if (!recovered) {
+          circuitBreaker.recordError(providerName, errorMsg);
+          console.warn(`[llm] Provider ${providerName} exhausted, trying next...`);
+        }
       }
     }
 

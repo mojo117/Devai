@@ -23,6 +23,8 @@ export interface ModelSelection {
   provider: LLMProviderName;
   model: string;
   reason: string;
+  /** Models to try on the same provider before falling back cross-provider. */
+  sameProviderFallbacks?: string[];
 }
 
 export type AgentPhase =

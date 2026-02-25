@@ -80,7 +80,7 @@ async function delegateToSubAgent(
 
   const agentDefinition = getAgent(target);
   const baseProvider = deps.modelSelection.provider || 'anthropic';
-  const { provider, model: delegationModel } = resolveDelegationModel(
+  const { provider, model: delegationModel, sameProviderFallbacks } = resolveDelegationModel(
     agentDefinition,
     delegation.modelTier,
     baseProvider,
@@ -131,6 +131,7 @@ Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
     tools,
     errorHandler: deps.errorHandler,
     sendEvent: deps.sendEvent,
+    sameProviderFallbacks,
     handleToolCall: async ({ toolCall, turn }) => {
       subToolCount++;
       if (target === 'devo') {

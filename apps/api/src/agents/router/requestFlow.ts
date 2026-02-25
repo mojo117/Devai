@@ -1,13 +1,13 @@
 import { nanoid } from 'nanoid';
 import type { ContentBlock } from '../../llm/types.js';
 import { getTextContent } from '../../llm/types.js';
-import { getTrustMode, setDefaultEngine } from '../../db/queries.js';
+import { getTrustMode } from '../../db/queries.js';
 import { rememberNote } from '../../memory/workspaceMemory.js';
 import * as stateManager from '../stateManager.js';
 import { warmSystemContextForSession } from '../systemContext.js';
 import { resolveModelSelection } from '../../llm/modelSelector.js';
-import { isValidEngine, formatEngineStatus, type EngineName } from '../../llm/engineProfiles.js';
 import { getAgent } from './agentAccess.js';
+import { tryHandleSlashCommand } from './slashCommands.js';
 import { ChapoLoop } from '../chapo-loop.js';
 import type {
   AgentName,
@@ -81,31 +81,9 @@ export async function processRequest(
     }
   }
 
-  // Handle /engine command — switch LLM engine profile (no LLM call needed)
-  const engineMatch = getTextContent(userMessage).trim().match(/^\/engine(?:\s+(.*))?$/i);
-  if (engineMatch) {
-    const arg = engineMatch[1]?.trim().toLowerCase();
-    if (!arg) {
-      const currentEngine = (stateManager.getState(sessionId)
-        ?.taskContext.gatheredInfo.engineProfile as string) || 'glm';
-      return formatEngineStatus(currentEngine as EngineName);
-    }
-    if (isValidEngine(arg)) {
-      stateManager.setGatheredInfo(sessionId, 'engineProfile', arg);
-      await stateManager.flushState(sessionId);
-      await setDefaultEngine(arg);
-      return `Engine switched to **${arg.toUpperCase()}**.\n\n${formatEngineStatus(arg)}`;
-    }
-    return `Unknown engine "${arg}". Available: glm, gemini, claude.\nUsage: /engine <glm|gemini|claude>`;
-  }
-
-  // Handle /preview command — client-side UI toggle (no LLM call needed)
-  const previewMatch = getTextContent(userMessage).trim().match(/^\/preview(?:\s+(on|off))?$/i);
-  if (previewMatch) {
-    const arg = previewMatch[1]?.toLowerCase();
-    if (!arg) return 'Preview: `/preview on` or `/preview off`. This is a client-side UI feature.';
-    return `Preview mode **${arg === 'on' ? 'ON' : 'OFF'}**. (Note: This takes effect in the web UI only.)`;
-  }
+  // Slash commands — safety-net in case the fast-path in commandHandlers didn't catch them
+  const slashResult = await tryHandleSlashCommand(sessionId, getTextContent(userMessage));
+  if (slashResult !== null) return slashResult;
 
   // Keep the last actual request for approval/resume flows.
   stateManager.setOriginalRequest(sessionId, getTextContent(userMessage));

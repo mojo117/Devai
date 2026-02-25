@@ -46,6 +46,8 @@ export interface GenerateRequest {
   toolsEnabled?: boolean;
   tools?: ToolDefinition[];
   maxTokens?: number;
+  /** Models to try on the same provider before falling back cross-provider. */
+  sameProviderFallbacks?: string[];
 }
 
 export interface ToolCall {
