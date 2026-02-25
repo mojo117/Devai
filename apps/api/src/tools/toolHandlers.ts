@@ -17,6 +17,7 @@ import * as emailTools from './email.js';
 import * as telegramTools from './telegram.js';
 import * as contextApi from './context.js';
 import { skillCreate, skillUpdate, skillDelete, skillReload, skillList } from './skillHandlers.js';
+import { listUserfiles } from '../db/userfileQueries.js';
 
 export type ToolArgs = Record<string, unknown>;
 
@@ -273,6 +274,25 @@ export const TOOL_HANDLERS: Record<string, ToolHandler> = {
     args.filename as string | undefined,
   ),
 
+  search_files: async (args) => {
+    const query = (args.query as string)?.trim().toLowerCase() || '';
+    const allFiles = await listUserfiles();
+    const filtered = query
+      ? allFiles.filter((f) => f.original_name.toLowerCase().includes(query))
+      : allFiles.slice(0, 20);
+
+    if (filtered.length === 0) {
+      return query
+        ? `Keine Dateien gefunden für "${query}".`
+        : 'Keine hochgeladenen Dateien vorhanden.';
+    }
+
+    const lines = filtered.map((f) =>
+      `- **${f.original_name}** | ID: \`${f.id}\` | ${f.mime_type} | ${Math.round(f.size_bytes / 1024)}KB | ${new Date(f.uploaded_at).toLocaleDateString('de-DE')}`
+    );
+    return `${filtered.length} Datei(en) gefunden:\n${lines.join('\n')}`;
+  },
+
   skill_create: async (args) => skillCreate(args),
   skill_update: async (args) => skillUpdate(args),
   skill_delete: async (args) => skillDelete(args),
@@ -307,6 +327,7 @@ export const READ_ONLY_TOOLS = new Set([
   'history_search',
   'history_listSessions',
   'scheduler_list',
+  'search_files',
   'skill_list',
   'skill_reload',
 ]);

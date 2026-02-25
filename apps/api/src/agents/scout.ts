@@ -46,6 +46,8 @@ export const SCOUT_AGENT: AgentDefinition = {
     'scout_crawl_focused',
     'scout_extract_schema',
     'scout_research_bundle',
+    // Userfile search
+    'search_files',
     // Escalation
     'escalateToChapo',
   ],

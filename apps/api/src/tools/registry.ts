@@ -81,6 +81,8 @@ export type ToolName =
   | 'telegram_send_document'
   // Web Document Delivery (CAIO)
   | 'deliver_document'
+  // Userfile Search
+  | 'search_files'
   // Skill Management Tools
   | 'skill_create'
   | 'skill_update'
