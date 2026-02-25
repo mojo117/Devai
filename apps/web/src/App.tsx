@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
+import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { ChatUI, type ChatSessionState, type ChatSessionCommand, type ChatSessionCommandEnvelope } from './components/ChatUI';
 import { type AgentName, type AgentPhase } from './components/AgentStatus';
+import { PreviewPanel } from './components/PreviewPanel';
+import type { Artifact } from './components/PreviewPanel';
 import { BurgerMenu } from './components/BurgerMenu';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import {
@@ -31,6 +34,9 @@ function App() {
     try { return localStorage.getItem('devai_preview') === 'on'; }
     catch { return false; }
   });
+
+  const [currentArtifact, setCurrentArtifact] = useState<Artifact | null>(null);
+  const [previewCollapsed, setPreviewCollapsed] = useState(false);
 
   useEffect(() => {
     try { localStorage.setItem('devai_preview', previewEnabled ? 'on' : 'off'); }
@@ -235,27 +241,62 @@ function App() {
         </div>
       )}
 
-      {/* Main Content - Chat centered */}
-      <div className="flex-1 flex w-full overflow-hidden min-h-0">
-        <div className="flex flex-col min-w-0 min-h-0 overflow-hidden flex-1 max-w-4xl mx-auto w-full">
-          <ChatUI
-            projectRoot={health?.projectRoot}
-            allowedRoots={health?.allowedRoots}
-            ignorePatterns={settings.ignorePatterns}
-            onPinFile={settings.addPinnedFile}
-            onLoadingChange={setChatLoading}
-            onAgentChange={handleAgentChange}
-            showSessionControls={false}
-            sessionCommand={sessionCommand}
-            onSessionStateChange={setChatSessionState}
-            pinnedUserfileIds={settings.pinnedUserfileIds}
-            onPinUserfile={settings.togglePinnedUserfile}
-            onClearPinnedUserfiles={settings.clearPinnedUserfiles}
-            previewEnabled={previewEnabled}
-            onSetPreview={setPreviewEnabled}
-          />
+      {/* Main Content - Chat centered, optionally split with preview */}
+      {previewEnabled ? (
+        <PanelGroup direction="horizontal" className="flex-1 w-full overflow-hidden min-h-0">
+          <Panel defaultSize={55} minSize={30}>
+            <div className="flex flex-col min-w-0 min-h-0 overflow-hidden h-full max-w-4xl mx-auto w-full">
+              <ChatUI
+                projectRoot={health?.projectRoot}
+                allowedRoots={health?.allowedRoots}
+                ignorePatterns={settings.ignorePatterns}
+                onPinFile={settings.addPinnedFile}
+                onLoadingChange={setChatLoading}
+                onAgentChange={handleAgentChange}
+                showSessionControls={false}
+                sessionCommand={sessionCommand}
+                onSessionStateChange={setChatSessionState}
+                pinnedUserfileIds={settings.pinnedUserfileIds}
+                onPinUserfile={settings.togglePinnedUserfile}
+                onClearPinnedUserfiles={settings.clearPinnedUserfiles}
+                onArtifactDetected={setCurrentArtifact}
+                onSetPreview={setPreviewEnabled}
+                previewEnabled={previewEnabled}
+              />
+            </div>
+          </Panel>
+          <PanelResizeHandle className="w-1.5 bg-devai-border hover:bg-devai-accent/40 transition-colors cursor-col-resize" />
+          <Panel defaultSize={45} minSize={20} collapsible collapsedSize={3}>
+            <PreviewPanel
+              artifact={currentArtifact}
+              onClose={() => setPreviewEnabled(false)}
+              collapsed={previewCollapsed}
+              onToggleCollapse={() => setPreviewCollapsed(p => !p)}
+            />
+          </Panel>
+        </PanelGroup>
+      ) : (
+        <div className="flex-1 flex w-full overflow-hidden min-h-0">
+          <div className="flex flex-col min-w-0 min-h-0 overflow-hidden flex-1 max-w-4xl mx-auto w-full">
+            <ChatUI
+              projectRoot={health?.projectRoot}
+              allowedRoots={health?.allowedRoots}
+              ignorePatterns={settings.ignorePatterns}
+              onPinFile={settings.addPinnedFile}
+              onLoadingChange={setChatLoading}
+              onAgentChange={handleAgentChange}
+              showSessionControls={false}
+              sessionCommand={sessionCommand}
+              onSessionStateChange={setChatSessionState}
+              pinnedUserfileIds={settings.pinnedUserfileIds}
+              onPinUserfile={settings.togglePinnedUserfile}
+              onClearPinnedUserfiles={settings.clearPinnedUserfiles}
+              onSetPreview={setPreviewEnabled}
+              previewEnabled={previewEnabled}
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Burger Menu */}
       <BurgerMenu

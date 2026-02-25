@@ -15,6 +15,8 @@ import { PendingActionsBar } from './PendingActionsBar';
 import { DropOverlay } from './DropOverlay';
 import { validateFile } from './uploadConstants';
 import { TodoCard } from '../TodoCard';
+import { getLatestArtifact } from '../PreviewPanel/artifactParser';
+import type { Artifact } from '../PreviewPanel/artifactParser';
 
 export function ChatUI({
   projectRoot,
@@ -31,6 +33,8 @@ export function ChatUI({
   onPinUserfile,
   onClearPinnedUserfiles,
   onSetPreview,
+  previewEnabled,
+  onArtifactDetected,
 }: ChatUIProps) {
   // Core state shared across sub-components
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -176,6 +180,13 @@ export function ChatUI({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, toolEvents]);
+
+  // --- Artifact detection ---
+
+  useEffect(() => {
+    if (!onArtifactDetected) return;
+    onArtifactDetected(getLatestArtifact(messages));
+  }, [messages, onArtifactDetected]);
 
   // --- Delegation persistence ---
 
