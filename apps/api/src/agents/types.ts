@@ -271,6 +271,9 @@ export interface GatheredInfo {
   sessionMode?: string;
   visibility?: string;
 
+  // Parallel loop mode (serial | parallel) — separate from workspace sessionMode
+  loopMode?: string;
+
   // Delegation tracking
   lastDelegation?: {
     from: string;

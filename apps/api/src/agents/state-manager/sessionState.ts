@@ -142,13 +142,13 @@ export function isLoopActive(sessionId: string): boolean {
 
 export function getSessionMode(sessionId: string): SessionMode {
   const state = getState(sessionId);
-  const mode = state?.taskContext.gatheredInfo.sessionMode;
+  const mode = state?.taskContext.gatheredInfo.loopMode;
   return mode === 'parallel' ? 'parallel' : 'serial';
 }
 
 export function setSessionMode(sessionId: string, mode: SessionMode): void {
   const state = getOrCreateState(sessionId);
-  state.taskContext.gatheredInfo.sessionMode = mode;
+  state.taskContext.gatheredInfo.loopMode = mode;
   schedulePersist(sessionId);
 }
 
