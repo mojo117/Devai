@@ -85,7 +85,7 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
     const url = new URL(request.url || '', `http://${request.headers.host}`);
 
     // Auth: require valid JWT token (query param or httpOnly cookie)
-    const token = url.searchParams.get('token') || request.cookies?.devai_token || '';
+    const token = request.cookies?.devai_token || url.searchParams.get('token') || '';
     if (!verifyToken(token)) {
       try {
         socket.send(JSON.stringify({ type: 'error', error: 'Invalid or expired token' }));
@@ -152,10 +152,10 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // WebSocket control plane for multi-agent chat streaming + resume/replay.
-  // Auth: requires ?token=<JWT> because browsers can't set Authorization headers for WS upgrades.
+  // Auth: prefer httpOnly cookie, fallback to ?token=<JWT>.
   app.get('/ws/chat', { websocket: true }, (socket: WebSocket, request) => {
     const url = new URL(request.url || '', `http://${request.headers.host}`);
-    const token = url.searchParams.get('token') || request.cookies?.devai_token || '';
+    const token = request.cookies?.devai_token || url.searchParams.get('token') || '';
     if (!verifyToken(token)) {
       try {
         socket.send(JSON.stringify({ type: 'error', error: 'Invalid or expired token' }));

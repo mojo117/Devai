@@ -68,10 +68,55 @@ export function verifyToken(token: string): JwtPayload | null {
   }
 }
 
+function getTokenTtlSeconds(expiresIn: string): number {
+  const normalized = expiresIn.trim().toLowerCase()
+  const match = normalized.match(/^(\d+)\s*(ms|s|m|h|d)?$/)
+  if (!match) return 24 * 60 * 60
+
+  const value = Number.parseInt(match[1], 10)
+  const unit = match[2] || 's'
+  if (!Number.isFinite(value) || value <= 0) return 24 * 60 * 60
+
+  if (unit === 'ms') return Math.max(1, Math.floor(value / 1000))
+  if (unit === 's') return value
+  if (unit === 'm') return value * 60
+  if (unit === 'h') return value * 60 * 60
+  if (unit === 'd') return value * 24 * 60 * 60
+  return 24 * 60 * 60
+}
+
+export interface IssuedAuthToken {
+  token: string
+  expiresIn: string
+  expiresInSeconds: number
+  expiresAt: string
+}
+
+export function issueAuthToken(username: string): IssuedAuthToken {
+  const expiresIn = getJwtExpiresIn()
+  const token = jwt.sign(
+    { username },
+    getJwtSecret(),
+    { expiresIn: expiresIn as jwt.SignOptions['expiresIn'] },
+  )
+  const payload = verifyToken(token)
+  if (!payload) {
+    throw new Error('Failed to verify freshly issued token')
+  }
+  return {
+    token,
+    expiresIn,
+    expiresInSeconds: getTokenTtlSeconds(expiresIn),
+    expiresAt: new Date(payload.exp * 1000).toISOString(),
+  }
+}
+
 export interface LoginResult {
   success: true
   token: string
   expiresIn: string
+  expiresInSeconds: number
+  expiresAt: string
   user: AuthUser
 }
 
@@ -118,13 +163,9 @@ export async function authenticateUser(
     return { success: false, error: 'Invalid credentials' }
   }
 
-  let token: string
+  let issued: IssuedAuthToken
   try {
-    token = jwt.sign(
-      { username: normalizedUsername },
-      getJwtSecret(),
-      { expiresIn: getJwtExpiresIn() as jwt.SignOptions['expiresIn'] },
-    )
+    issued = issueAuthToken(normalizedUsername)
   } catch (err) {
     console.error('[authService] Failed to sign JWT:', err)
     return { success: false, error: 'Authentication unavailable' }
@@ -132,18 +173,20 @@ export async function authenticateUser(
 
   return {
     success: true,
-    token,
-    expiresIn: getJwtExpiresIn(),
+    token: issued.token,
+    expiresIn: issued.expiresIn,
+    expiresInSeconds: issued.expiresInSeconds,
+    expiresAt: issued.expiresAt,
     user: { username: normalizedUsername },
   }
 }
 
-export function getCookieOptions() {
+export function getCookieOptions(maxAgeSeconds: number = getTokenTtlSeconds(getJwtExpiresIn())) {
   return {
     httpOnly: true,
     secure: config.nodeEnv !== 'development',
     sameSite: 'strict' as const,
     path: '/api',
-    maxAge: 86400, // 24h
+    maxAge: maxAgeSeconds,
   }
 }

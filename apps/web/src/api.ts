@@ -106,6 +106,15 @@ async function readApiError(res: Response): Promise<string> {
 // Auth token is now managed via httpOnly cookie set by the server.
 // These functions are kept for backward compatibility but no longer store/read the JWT.
 let _authTokenMemory: string | null = null;
+let _unauthorizedHandler: (() => void) | null = null;
+let _unauthorizedNotified = false;
+let _tokenRefreshPromise: Promise<boolean> | null = null;
+
+interface AuthStatusResponse {
+  valid: boolean;
+  token?: string;
+  expiresAt?: string;
+}
 
 export function getAuthToken(): string | null {
   return _authTokenMemory;
@@ -119,14 +128,90 @@ export function clearAuthToken(): void {
   _authTokenMemory = null;
 }
 
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  _unauthorizedHandler = handler;
+}
+
+function notifyUnauthorized(): void {
+  clearAuthToken();
+  if (_unauthorizedNotified) return;
+  _unauthorizedNotified = true;
+  try {
+    _unauthorizedHandler?.();
+  } finally {
+    setTimeout(() => {
+      _unauthorizedNotified = false;
+    }, 0);
+  }
+}
+
 function withAuthHeaders(headers: Record<string, string> = {}): Record<string, string> {
   const token = getAuthToken();
   if (!token) return headers;
   return { ...headers, Authorization: `Bearer ${token}` };
 }
 
-function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+function isAuthEndpoint(url: string): boolean {
+  return /\/api\/auth\/(login|verify|logout|refresh)$/.test(url);
+}
+
+function setAuthorizationHeader(init?: RequestInit): RequestInit | undefined {
+  const token = getAuthToken();
+  if (!token) return init;
+  const headers = new Headers(init?.headers || undefined);
+  headers.set('Authorization', `Bearer ${token}`);
+  return { ...init, headers };
+}
+
+async function rawFetch(url: string, init?: RequestInit): Promise<Response> {
   return fetch(url, { ...init, credentials: 'include' });
+}
+
+async function requestTokenRefresh(): Promise<boolean> {
+  if (_tokenRefreshPromise) return _tokenRefreshPromise;
+
+  _tokenRefreshPromise = (async () => {
+    const res = await rawFetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: withAuthHeaders(),
+    });
+    if (!res.ok) {
+      clearAuthToken();
+      return false;
+    }
+    const data = (await res.json()) as AuthStatusResponse;
+    if (!data.valid || !data.token) {
+      clearAuthToken();
+      return false;
+    }
+    setAuthToken(data.token);
+    return true;
+  })()
+    .catch(() => {
+      clearAuthToken();
+      return false;
+    })
+    .finally(() => {
+      _tokenRefreshPromise = null;
+    });
+
+  return _tokenRefreshPromise;
+}
+
+async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+  let res = await rawFetch(url, init);
+  if (res.status !== 401 || isAuthEndpoint(url)) {
+    return res;
+  }
+
+  const refreshed = await requestTokenRefresh();
+  if (refreshed) {
+    res = await rawFetch(url, setAuthorizationHeader(init));
+  }
+  if (res.status === 401) {
+    notifyUnauthorized();
+  }
+  return res;
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -191,14 +276,40 @@ export async function login(username: string, password: string): Promise<{ token
 }
 
 export async function verifyAuth(): Promise<{ valid: boolean; token?: string }> {
-  const res = await apiFetch(`${API_BASE}/auth/verify`, {
+  const res = await rawFetch(`${API_BASE}/auth/verify`, {
     headers: withAuthHeaders(),
   });
 
-  if (!res.ok) return { valid: false };
+  if (!res.ok) {
+    clearAuthToken();
+    return { valid: false };
+  }
 
-  const data = await res.json();
-  return { valid: true, token: data.token };
+  const data = (await res.json()) as AuthStatusResponse;
+  if (data.valid && data.token) {
+    setAuthToken(data.token);
+  }
+  return { valid: data.valid, token: data.token };
+}
+
+export async function refreshAuth(): Promise<{ valid: boolean; token?: string; expiresAt?: string }> {
+  const res = await rawFetch(`${API_BASE}/auth/refresh`, {
+    method: 'POST',
+    headers: withAuthHeaders(),
+  });
+
+  if (!res.ok) {
+    clearAuthToken();
+    return { valid: false };
+  }
+
+  const data = (await res.json()) as AuthStatusResponse;
+  if (data.valid && data.token) {
+    setAuthToken(data.token);
+  } else {
+    clearAuthToken();
+  }
+  return { valid: data.valid, token: data.token, expiresAt: data.expiresAt };
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {
@@ -510,11 +621,8 @@ function addSessionListener(sessionId: string, fn: (event: ChatStreamEvent) => v
 function getChatWsUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = window.location.host;
-  // Token is sent via httpOnly cookie automatically.
-  // Keep token param as fallback for in-memory token.
-  const token = getAuthToken();
-  const params = token ? `?token=${encodeURIComponent(token)}` : '';
-  return `${protocol}//${host}/api/ws/chat${params}`;
+  // Authenticate WS via httpOnly cookie (no stale query token).
+  return `${protocol}//${host}/api/ws/chat`;
 }
 
 function cleanupChatWs(): void {
@@ -540,8 +648,6 @@ function hasAnyControlPlaneSubscribers(): boolean {
 
 function scheduleControlPlaneReconnect(): void {
   if (!hasAnyControlPlaneSubscribers()) return;
-  // No auth token means WS can't connect; avoid spinning.
-  if (!getAuthToken()) return;
   if (chatWsReconnectTimer) return;
 
   const delay = Math.min(1000 * Math.pow(2, chatWsReconnectAttempts), 30000);
@@ -961,5 +1067,60 @@ export async function transcribeAudio(audioBlob: Blob): Promise<{ text: string }
     method: 'POST',
     headers: withAuthHeaders(),
     body: formData,
+  });
+}
+
+// ============ Preview Artifacts API ============
+
+export type PreviewArtifactType = 'html' | 'svg' | 'webapp' | 'pdf' | 'scrape';
+export type PreviewArtifactStatus = 'queued' | 'building' | 'ready' | 'failed';
+
+export interface PreviewArtifactRecord {
+  id: string;
+  type: PreviewArtifactType;
+  status: PreviewArtifactStatus;
+  title: string | null;
+  language: string | null;
+  createdAt: string;
+  updatedAt: string;
+  error: string | null;
+  mimeType: string | null;
+  signedUrl?: string;
+  signedUrlExpiresAt?: string;
+}
+
+export interface CreatePreviewArtifactRequest {
+  sessionId: string;
+  messageId?: string;
+  sourceKind?: 'inline' | 'tool_event' | 'manual';
+  type: PreviewArtifactType;
+  title?: string;
+  language?: string;
+  content?: string;
+  entrypoint?: string;
+  sourceFiles?: Array<string | { workspaceId?: string; path: string }>;
+  workspaceMounts?: Array<string | { workspaceId?: string; path: string }>;
+}
+
+export async function createPreviewArtifact(
+  payload: CreatePreviewArtifactRequest,
+): Promise<{ artifact: PreviewArtifactRecord }> {
+  return fetchJson<{ artifact: PreviewArtifactRecord }>(`${API_BASE}/preview/artifacts`, {
+    method: 'POST',
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchPreviewArtifact(id: string): Promise<{ artifact: PreviewArtifactRecord }> {
+  return fetchJson<{ artifact: PreviewArtifactRecord }>(`${API_BASE}/preview/artifacts/${encodeURIComponent(id)}`, {
+    headers: withAuthHeaders(),
+  });
+}
+
+export async function triggerPreviewScrape(id: string): Promise<{ artifact: PreviewArtifactRecord }> {
+  return fetchJson<{ artifact: PreviewArtifactRecord }>(`${API_BASE}/preview/artifacts/${encodeURIComponent(id)}/scrape`, {
+    method: 'POST',
+    headers: withAuthHeaders(),
   });
 }

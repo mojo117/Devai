@@ -232,6 +232,11 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
               timestamp: new Date().toISOString(),
             }).catch((err) => console.error('[external] Failed to persist queued message:', err));
 
+            await sendTelegramMessage(
+              extracted.chatId,
+              'Ich bearbeite gerade noch deine vorige Nachricht. Diese Nachricht ist in der Warteschlange und kommt als Nächstes dran.',
+            );
+
             return;
           }
 

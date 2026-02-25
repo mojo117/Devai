@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExternalOutputProjection } from './externalOutputProjection.js';
 import { createEvent } from '../events/envelope.js';
 import type { EventContext } from '../events/envelope.js';
-import { WF_COMPLETED } from '../events/catalog.js';
+import { WF_COMPLETED, WF_FAILED } from '../events/catalog.js';
 
 vi.mock('../../db/schedulerQueries.js', () => ({
   getExternalSessionBySessionId: vi.fn(),
@@ -180,5 +180,16 @@ describe('ExternalOutputProjection', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(sendTelegramDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends workflow failure messages to Telegram', async () => {
+    const event = createEvent(makeCtx(), WF_FAILED, { error: 'All LLM providers failed' });
+
+    await projection.handle(event);
+
+    expect(sendTelegramMessage).toHaveBeenCalledWith(
+      'chat-123',
+      'Fehler: All LLM providers failed',
+    );
   });
 });

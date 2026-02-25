@@ -9,6 +9,7 @@ import type { WorkflowEventEnvelope } from '../events/envelope.js';
 import { isIP } from 'node:net';
 import {
   WF_COMPLETED,
+  WF_FAILED,
   WF_TURN_STARTED,
   AGENT_THINKING,
   TOOL_CALL_STARTED,
@@ -164,6 +165,7 @@ export class ExternalOutputProjection implements Projection {
       event.eventType !== AGENT_THINKING &&
       event.eventType !== TOOL_CALL_STARTED &&
       event.eventType !== WF_COMPLETED &&
+      event.eventType !== WF_FAILED &&
       event.eventType !== GATE_QUESTION_QUEUED &&
       event.eventType !== GATE_APPROVAL_QUEUED &&
       event.eventType !== RESPONSE_PARTIAL
@@ -204,6 +206,16 @@ export class ExternalOutputProjection implements Projection {
         if (!answer.trim()) return;
         await sendTelegramMessage(chatId, answer);
         await sendImageDocumentsFromAnswer(String(chatId), answer);
+        return;
+      }
+
+      if (event.eventType === WF_FAILED) {
+        const directError = typeof payload.error === 'string' ? payload.error : '';
+        const nestedError = payload.error && typeof payload.error === 'object'
+          ? (payload.error as Record<string, unknown>).message
+          : undefined;
+        const message = directError || (typeof nestedError === 'string' ? nestedError : 'Unbekannter Fehler.');
+        await sendTelegramMessage(chatId, `Fehler: ${message}`);
         return;
       }
 
