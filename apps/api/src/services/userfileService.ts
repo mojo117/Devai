@@ -187,6 +187,25 @@ export async function downloadUserfile(storagePath: string): Promise<DownloadRes
   }
 }
 
+export async function createUserfileSignedUrl(
+  storagePath: string,
+  expiresInSec = 900,
+): Promise<{ url: string; expiresAt: string }> {
+  const { data, error } = await getSupabase()
+    .storage
+    .from(STORAGE_BUCKET)
+    .createSignedUrl(storagePath, expiresInSec);
+
+  if (error || !data?.signedUrl) {
+    throw new Error(`Failed to create userfile signed URL: ${error?.message || 'unknown error'}`);
+  }
+
+  return {
+    url: data.signedUrl,
+    expiresAt: new Date(Date.now() + expiresInSec * 1000).toISOString(),
+  };
+}
+
 export async function deleteUserfileStorage(storagePath: string): Promise<boolean> {
   const { error } = await getSupabase()
     .storage

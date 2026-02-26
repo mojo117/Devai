@@ -13,7 +13,7 @@ import { getEngineProfile, type EngineName } from './engineProfiles.js';
 import { getState } from '../agents/stateManager.js';
 
 /** Provider preference order when the primary isn't available */
-const PROVIDER_FALLBACK_ORDER: LLMProviderName[] = ['zai', 'anthropic', 'openai', 'gemini'];
+const PROVIDER_FALLBACK_ORDER: LLMProviderName[] = ['zai', 'anthropic', 'openai', 'gemini', 'moonshot'];
 
 /**
  * Read the active engine profile from session state, if any.
@@ -117,5 +117,6 @@ function detectProvider(model: string): LLMProviderName | null {
   if (model.startsWith('claude-')) return 'anthropic';
   if (model.startsWith('gpt-')) return 'openai';
   if (model.startsWith('gemini-')) return 'gemini';
+  if (model.startsWith('kimi-')) return 'moonshot';
   return null;
 }

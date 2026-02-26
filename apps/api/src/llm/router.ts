@@ -3,11 +3,12 @@ import { AnthropicProvider } from './providers/anthropic.js';
 import { OpenAIProvider } from './providers/openai.js';
 import { GeminiProvider } from './providers/gemini.js';
 import { ZAIProvider } from './providers/zai.js';
+import { MoonshotProvider } from './providers/moonshot.js';
 import { logUsage } from './usage-logger.js';
 import { circuitBreaker } from './circuitBreaker.js';
 
 // Default fallback chain
-const DEFAULT_FALLBACK_CHAIN: LLMProvider[] = ['zai', 'anthropic', 'openai', 'gemini'];
+const DEFAULT_FALLBACK_CHAIN: LLMProvider[] = ['zai', 'anthropic', 'openai', 'gemini', 'moonshot'];
 
 // Default models per provider (used when falling back to a different provider)
 const DEFAULT_MODELS: Record<LLMProvider, string> = {
@@ -15,6 +16,7 @@ const DEFAULT_MODELS: Record<LLMProvider, string> = {
   anthropic: 'claude-sonnet-4-20250514',
   openai: 'gpt-4o',
   gemini: 'gemini-3.1-pro-preview',
+  moonshot: 'kimi-k2.5',
 };
 
 // Check if a model belongs to a specific provider
@@ -24,6 +26,7 @@ function isModelForProvider(model: string, provider: LLMProvider): boolean {
     anthropic: ['claude'],
     openai: ['gpt', 'o1', 'o3'],
     gemini: ['gemini'],
+    moonshot: ['kimi'],
   };
   const prefixes = providerPrefixes[provider] || [];
   return prefixes.some(prefix => model.toLowerCase().startsWith(prefix));
@@ -46,11 +49,13 @@ export class LLMRouter {
     const gemini = new GeminiProvider();
 
     const zai = new ZAIProvider();
+    const moonshot = new MoonshotProvider();
 
     this.providers.set('zai', zai);
     this.providers.set('anthropic', anthropic);
     this.providers.set('openai', openai);
     this.providers.set('gemini', gemini);
+    this.providers.set('moonshot', moonshot);
   }
 
   getProvider(name: LLMProvider): LLMProviderAdapter | undefined {

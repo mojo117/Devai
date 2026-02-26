@@ -1,4 +1,4 @@
-export type LLMProvider = 'anthropic' | 'openai' | 'gemini' | 'zai';
+export type LLMProvider = 'anthropic' | 'openai' | 'gemini' | 'zai' | 'moonshot';
 
 export interface ToolResult {
   toolUseId: string;

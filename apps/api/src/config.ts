@@ -52,6 +52,7 @@ export interface Config {
   openaiApiKey?: string;
   geminiApiKey?: string;
   zaiApiKey?: string;
+  moonshotApiKey?: string;
 
   // GitHub
   githubToken?: string;
@@ -149,6 +150,7 @@ export function loadConfig(): Config {
     openaiApiKey: process.env.OPENAI_API_KEY,
     geminiApiKey: process.env.GEMINI_API_KEY,
     zaiApiKey: process.env.ZAI_API_KEY,
+    moonshotApiKey: process.env.MOONSHOT_API_KEY,
 
     githubToken: process.env.GITHUB_TOKEN,
     githubOwner: process.env.GITHUB_OWNER,
@@ -227,7 +229,8 @@ export function validateRequiredEnv(currentConfig: Config = config): EnvValidati
     currentConfig.zaiApiKey ||
     currentConfig.anthropicApiKey ||
     currentConfig.openaiApiKey ||
-    currentConfig.geminiApiKey,
+    currentConfig.geminiApiKey ||
+    currentConfig.moonshotApiKey,
   );
 
   if (!currentConfig.supabaseUrl) {

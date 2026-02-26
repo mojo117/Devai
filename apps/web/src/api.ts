@@ -1072,7 +1072,7 @@ export async function transcribeAudio(audioBlob: Blob): Promise<{ text: string }
 
 // ============ Preview Artifacts API ============
 
-export type PreviewArtifactType = 'html' | 'svg' | 'webapp' | 'pdf' | 'scrape';
+export type PreviewArtifactType = 'html' | 'svg' | 'webapp' | 'pdf' | 'scrape' | 'markdown';
 export type PreviewArtifactStatus = 'queued' | 'building' | 'ready' | 'failed';
 
 export interface PreviewArtifactRecord {
