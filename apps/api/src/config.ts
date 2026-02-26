@@ -27,7 +27,7 @@ const HARDCODED_DENIED_PATHS: readonly string[] = [
   "/opt/Devai",       // Devai's own deployment — prevent self-modification
 ] as const;
 
-// Directories/files within self-inspection root that SCOUT must NOT read (secrets, runtime data)
+// Directories/files within self-inspection root that must NOT be read (secrets, runtime data)
 const SELF_INSPECTION_EXCLUDE: readonly string[] = [
   '.env',
   '.env.local',
@@ -64,7 +64,7 @@ export interface Config {
   allowedRoots: readonly string[];
   deniedPaths: readonly string[];
 
-  // Self-inspection: allows SCOUT to read Devai's own source (read-only, secrets excluded)
+  // Self-inspection: allows reading Devai's own source (read-only, secrets excluded)
   selfInspectionRoot: string;
   selfInspectionExclude: string[];
 
@@ -90,7 +90,7 @@ export interface Config {
   supabaseUrl: string;
   supabaseServiceKey: string;
 
-  // CAIO — TaskForge, Email, Telegram
+  // TaskForge, Email, Telegram
   taskforgeApiKeys: Record<string, string>;
   taskforgeDefaultProject: string;
   resendApiKey: string;
@@ -115,7 +115,7 @@ export interface Config {
 
   // Resilience: loop timeouts & cost caps
   loopHardTimeoutMs: number;
-  delegationTimeoutMs: number;
+
   costCapPerRunTokens: number;
 
 }
@@ -213,7 +213,7 @@ export function loadConfig(): Config {
 
     // Resilience: loop timeouts & cost caps
     loopHardTimeoutMs: parseInt(process.env.LOOP_HARD_TIMEOUT_MS || "720000", 10),
-    delegationTimeoutMs: parseInt(process.env.DELEGATION_TIMEOUT_MS || "720000", 10),
+
     costCapPerRunTokens: parseInt(process.env.COST_CAP_PER_RUN_TOKENS || "500000", 10),
 
   };

@@ -1,5 +1,5 @@
 /**
- * Scheduler Tools — DEVO tools for managing cron jobs, reminders, and notifications.
+ * Scheduler Tools — Tools for managing cron jobs, reminders, and notifications.
  */
 import {
   createScheduledJob,
@@ -230,7 +230,7 @@ export async function notifyUser(
   _channel?: string,
 ): Promise<ToolExecutionResult> {
   // The actual sending is handled by the notifier callback in schedulerService.
-  // This tool is a simple wrapper that DEVO can call.
+  // This tool is a simple wrapper that CHAPO can call.
   try {
     // For now, we log and return success. The actual notification sending
     // will be wired up when Telegram/external messaging is implemented (Phases 5-7).

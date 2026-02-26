@@ -28,7 +28,7 @@ export async function skillCreate(args: ToolArgs): Promise<unknown> {
     description,
     version: '1.0.0',
     ...(parameters ? { parameters } : {}),
-    createdBy: 'devo',
+    createdBy: 'chapo',
     ...(tags ? { tags } : {}),
   };
 

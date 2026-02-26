@@ -83,35 +83,6 @@ export function resolveModelSelection(agent: AgentDefinition, sessionId?: string
   throw new Error('No LLM provider configured');
 }
 
-/**
- * Resolve the model for a delegated agent, respecting the model tier hint.
- * 'fast' uses agent.fastModel (if defined), 'standard' uses agent.model.
- * If sessionId is provided and an engine profile is active, use profile overrides.
- */
-export function resolveDelegationModel(
-  agent: AgentDefinition,
-  modelTier: 'fast' | 'standard' | undefined,
-  baseProvider: LLMProviderName,
-  sessionId?: string,
-): { provider: LLMProviderName; model: string; sameProviderFallbacks?: string[] } {
-  const engine = getSessionEngine(sessionId);
-  const override = engine ? getEngineProfile(engine)[agent.name] : null;
-
-  const effectiveModel = override?.model ?? agent.model;
-  const effectiveFastModel = override?.fastModel ?? agent.fastModel;
-  const sameProviderFallback = override?.sameProviderFallback;
-
-  const model = modelTier === 'fast' && effectiveFastModel
-    ? effectiveFastModel
-    : effectiveModel;
-  const provider = detectProvider(model) || baseProvider;
-  return {
-    provider,
-    model,
-    sameProviderFallbacks: sameProviderFallback ? [sameProviderFallback] : undefined,
-  };
-}
-
 function detectProvider(model: string): LLMProviderName | null {
   if (model.startsWith('glm-')) return 'zai';
   if (model.startsWith('claude-')) return 'anthropic';

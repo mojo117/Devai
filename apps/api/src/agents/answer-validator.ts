@@ -8,7 +8,7 @@ import type { SessionLogger } from '../audit/sessionLogger.js';
 import type { ChapoLoopResult } from './types.js';
 
 export interface DecisionPathInsights {
-  path: 'answer' | 'delegate_devo' | 'delegate_caio' | 'delegate_scout' | 'tool';
+  path: 'answer' | 'tool';
   reason: string;
   confidence: number;
   unresolvedAssumptions: string[];

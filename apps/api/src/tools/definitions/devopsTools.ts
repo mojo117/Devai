@@ -106,7 +106,7 @@ export const devopsTools: ToolDefinition[] = [
   },
   {
     name: 'devo_exec_session_start',
-    description: 'Start a persistent DEVO execution session for long-running command output and incremental polling. This action requires user confirmation.',
+    description: 'Start a persistent execution session for long-running command output and incremental polling. This action requires user confirmation.',
     parameters: {
       type: 'object',
       properties: {
@@ -133,7 +133,7 @@ export const devopsTools: ToolDefinition[] = [
   },
   {
     name: 'devo_exec_session_write',
-    description: 'Write to a running DEVO execution session stdin (e.g. control sequences or interactive replies).',
+    description: 'Write to a running execution session stdin (e.g. control sequences or interactive replies).',
     parameters: {
       type: 'object',
       properties: {
@@ -152,7 +152,7 @@ export const devopsTools: ToolDefinition[] = [
   },
   {
     name: 'devo_exec_session_poll',
-    description: 'Poll output/status from a running or completed DEVO execution session.',
+    description: 'Poll output/status from a running or completed execution session.',
     parameters: {
       type: 'object',
       properties: {

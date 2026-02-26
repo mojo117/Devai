@@ -1,5 +1,5 @@
 /**
- * TaskForge tools — CAIO agent tools for ticket management.
+ * TaskForge tools — Tools for ticket management.
  * Wraps the api-project-access Appwrite function.
  */
 

@@ -30,7 +30,7 @@ import { schedulerService } from './scheduler/schedulerService.js';
 import { processRequest } from './agents/router.js';
 import { loadRecentConversationHistory } from './agents/router/requestUtils.js';
 import { sendTelegramMessage } from './external/telegram.js';
-import { getAgentSoulStatusReport } from './prompts/agentSoul.js';
+
 import { ensureSessionExists, saveMessage } from './db/queries.js';
 import { getDefaultNotificationChannel, logSchedulerExecution } from './db/schedulerQueries.js';
 import {
@@ -173,16 +173,6 @@ const start = async () => {
     if (config.moonshotApiKey) providers.push('Moonshot');
     console.log(`Configured LLM providers: ${providers.length > 0 ? providers.join(', ') : 'None'}`);
     previewBuildWorker.start();
-
-    // Log agent soul loading status (CAIO/DEVO/SCOUT)
-    const soulStatuses = getAgentSoulStatusReport();
-    for (const soul of soulStatuses) {
-      if (soul.loaded) {
-        console.log(`[Soul] ${soul.agent.toUpperCase()} loaded from ${soul.soulFile} (${soul.charCount} chars)`);
-      } else {
-        console.warn(`[Soul] ${soul.agent.toUpperCase()} missing or empty (${soul.soulFile})`);
-      }
-    }
 
     // Load skills and register as tools
     const skillResult = await refreshSkills();
