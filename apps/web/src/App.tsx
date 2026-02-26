@@ -87,6 +87,10 @@ function App() {
       return;
     }
 
+    if (detectedArtifact.remote?.status === 'ready' && detectedArtifact.remote.signedUrl) {
+      return;
+    }
+
     const artifactKey = [
       sessionId,
       detectedArtifact.messageId || '',
