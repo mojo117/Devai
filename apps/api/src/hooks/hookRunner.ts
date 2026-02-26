@@ -12,6 +12,13 @@ interface HookContext {
   projectRoot: string | null;
 }
 
+/**
+ * Remove characters that could cause shell injection when env vars are used unquoted.
+ */
+function sanitizeForEnv(value: string): string {
+  return value.replace(/[`$\\!"';<>&|(){}[\]\n\r]/g, '');
+}
+
 export interface HookOutcome {
   blocked: boolean;
   blockReason?: string;
@@ -36,20 +43,25 @@ export async function runHooks(
   let executedCount = 0;
 
   for (const hook of matched) {
+    // Build safe env — only pass non-sensitive system vars + hook-specific vars
     const env: Record<string, string> = {
-      ...process.env as Record<string, string>,
+      PATH: process.env.PATH || '',
+      HOME: process.env.HOME || '',
+      SHELL: process.env.SHELL || '/bin/sh',
+      NODE_ENV: process.env.NODE_ENV || '',
+      LANG: process.env.LANG || '',
       HOOK_EVENT: event,
       HOOK_TOOL_NAME: context.toolName || '',
       HOOK_TOOL_ARGS: JSON.stringify(context.toolArgs || {}),
       HOOK_TOOL_RESULT: (context.toolResult || '').slice(0, 4000),
     };
 
-    // Extract common tool args as convenience vars
+    // Extract common tool args as convenience vars (sanitized)
     if (context.toolArgs) {
       const args = context.toolArgs;
-      if (typeof args.path === 'string') env.HOOK_FILE_PATH = args.path;
-      if (typeof args.file_path === 'string') env.HOOK_FILE_PATH = args.file_path;
-      if (typeof args.command === 'string') env.HOOK_COMMAND = args.command;
+      if (typeof args.path === 'string') env.HOOK_FILE_PATH = sanitizeForEnv(args.path);
+      if (typeof args.file_path === 'string') env.HOOK_FILE_PATH = sanitizeForEnv(args.file_path);
+      if (typeof args.command === 'string') env.HOOK_COMMAND = sanitizeForEnv(args.command);
     }
 
     const cwd = hook.cwd || context.projectRoot || '/tmp';

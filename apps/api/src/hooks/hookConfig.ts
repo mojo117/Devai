@@ -51,11 +51,14 @@ export async function getHooksForSession(
       const raw = await readFile(path, 'utf-8');
       const config: HookConfig = JSON.parse(raw);
       if (config.version !== 1) continue;
+      if (!Array.isArray(config.hooks)) continue;
 
-      const rules = config.hooks.map((h) => ({
-        ...h,
-        timeout: Math.min(h.timeout || DEFAULT_HOOK_TIMEOUT, MAX_HOOK_TIMEOUT),
-      }));
+      const rules = config.hooks
+        .filter((h): h is HookRule => h != null && typeof h.event === 'string' && typeof h.command === 'string')
+        .map((h) => ({
+          ...h,
+          timeout: Math.min(h.timeout || DEFAULT_HOOK_TIMEOUT, MAX_HOOK_TIMEOUT),
+        }));
 
       hookCache.set(cacheKey, { rules, loadedAt: Date.now() });
       return rules;

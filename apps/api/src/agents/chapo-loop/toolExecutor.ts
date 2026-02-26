@@ -323,6 +323,15 @@ export class ChapoToolExecutor {
         result: { error: toolErr.message },
         success: false,
       });
+
+      // Fire after:tool:error hook for crashed tools
+      runHooks('after:tool:error', {
+        toolName: toolCall.name,
+        toolArgs: toolCall.arguments,
+        toolResult: toolErr.message,
+        projectRoot: this.deps.projectRoot,
+      }).catch((hookErr) => console.warn('[hooks] after:tool:error hook error:', hookErr));
+
       return {
         toolResult: {
           toolUseId: toolCall.id,
