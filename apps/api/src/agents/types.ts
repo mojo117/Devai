@@ -1,17 +1,16 @@
 /**
- * Multi-Agent System Types
+ * Agent System Types
  *
- * Three agents: CHAPO (Coordinator), DEVO (Developer & DevOps), SCOUT (Explorer)
+ * Single agent: CHAPO — handles all tasks directly.
  */
 
 import type { ActionPreview } from '../actions/types.js';
 
-export type AgentName = 'chapo' | 'devo' | 'scout' | 'caio';
+export type AgentName = 'chapo';
 
-export type AgentRole = 'Task Coordinator' | 'Developer & DevOps Engineer' | 'Exploration Specialist' | 'Communications & Administration Officer';
+export type AgentRole = 'AI Assistant';
 
 export type TaskType = 'code_change' | 'devops' | 'exploration' | 'mixed' | 'unclear';
-export type DelegationDomain = 'development' | 'communication' | 'research';
 
 export type RiskLevel = 'low' | 'medium' | 'high';
 
@@ -35,8 +34,6 @@ export type AgentPhase =
   | 'error'
   | 'waiting_user';
 
-export type EscalationIssueType = 'error' | 'clarification' | 'blocker';
-
 export type AgentStatus = 'idle' | 'thinking' | 'executing' | 'waiting' | 'done' | 'error';
 
 // Agent Definition
@@ -52,7 +49,6 @@ export interface AgentDefinition {
 }
 
 export interface AgentCapabilities {
-  readOnly?: boolean;
   canWriteFiles?: boolean;
   canEditFiles?: boolean;
   canDeleteFiles?: boolean;
@@ -63,16 +59,12 @@ export interface AgentCapabilities {
   canGitPush?: boolean;
   canTriggerWorkflows?: boolean;
   canManagePM2?: boolean;
-  canDelegateToDevo?: boolean;
-  canDelegateToScout?: boolean;
-  canAskUser?: boolean;
-  canRequestApproval?: boolean;
-  canEscalate?: boolean;
   canManageScheduler?: boolean;
   canSendNotifications?: boolean;
   canSendEmail?: boolean;
   canManageTaskForge?: boolean;
-  canDelegateToCaio?: boolean;
+  canAskUser?: boolean;
+  canRequestApproval?: boolean;
 }
 
 // Task Qualification
@@ -98,63 +90,6 @@ export interface GatheredContext {
     untracked: string[];
   };
   projectInfo?: Record<string, unknown>;
-  // Delegation context (when CHAPO delegates to another agent)
-  delegationTask?: string;
-  delegationDomain?: DelegationDomain;
-  delegationObjective?: string;
-  delegationContext?: unknown;
-  delegationFiles?: string[];
-}
-
-// Delegation
-export interface DelegationTask {
-  taskId: string;
-  description: string;
-  originalRequest: string;
-  context: GatheredContext;
-  constraints: string[];
-  fromAgent: AgentName;
-  toAgent: AgentName;
-  timestamp: string;
-}
-
-export interface DelegationResult {
-  taskId: string;
-  success: boolean;
-  result?: unknown;
-  error?: string;
-  toolsExecuted: ExecutedTool[];
-  fromAgent: AgentName;
-  timestamp: string;
-}
-
-export interface ExecutedTool {
-  name: string;
-  args: Record<string, unknown>;
-  result: unknown;
-  success: boolean;
-  duration: number;
-  timestamp: string;
-}
-
-// Escalation
-export interface EscalationIssue {
-  issueId: string;
-  fromAgent: AgentName;
-  issueType: EscalationIssueType;
-  description: string;
-  context: Record<string, unknown>;
-  suggestedSolutions?: string[];
-  timestamp: string;
-}
-
-export interface EscalationResponse {
-  issueId: string;
-  resolved: boolean;
-  action: 'retry' | 'alternative' | 'ask_user' | 'abort';
-  instructions?: string;
-  alternativeApproach?: string;
-  userQuestion?: UserQuestion;
 }
 
 // User Interaction
@@ -228,7 +163,6 @@ export interface ConversationState {
   taskContext: TaskContext;
   pendingApprovals: ApprovalRequest[];
   pendingQuestions: UserQuestion[];
-  parallelExecutions: ParallelExecution[];
 
   todos: TodoItem[];
 
@@ -274,16 +208,6 @@ export interface GatheredInfo {
   // Parallel loop mode (serial | parallel) — separate from workspace sessionMode
   loopMode?: string;
 
-  // Delegation tracking
-  lastDelegation?: {
-    from: string;
-    to: string;
-    task: string;
-    domain: string;
-    objective: string;
-    constraints: string[];
-  };
-
   // Allow additional keys for forward compatibility
   [key: string]: unknown;
 }
@@ -312,9 +236,7 @@ export interface AgentHistoryEntry {
 export type AgentAction =
   | 'qualify_task'
   | 'gather_context'
-  | 'delegate'
   | 'execute_tool'
-  | 'escalate'
   | 'ask_user'
   | 'request_approval'
   | 'respond'
@@ -329,49 +251,22 @@ export interface AgentToolCall {
   duration?: number;
 }
 
-export interface ParallelExecution {
-  executionId: string;
-  agents: AgentName[];
-  tasks: DelegationTask[];
-  status: 'running' | 'completed' | 'partial_failure' | 'failed';
-  results: DelegationResult[];
-  startTime: string;
-  endTime?: string;
-}
-
 // Streaming Events
 export type AgentStreamEvent =
-  // Existing agent events
+  // Agent lifecycle events
   | { type: 'agent_start'; agent: AgentName; phase: AgentPhase }
   | { type: 'agent_thinking'; agent: AgentName; status: string }
-  | { type: 'agent_switch'; from: AgentName; to: AgentName; reason: string }
-  | {
-      type: 'delegation';
-      from: AgentName;
-      to: AgentName;
-      task: string;
-      domain?: DelegationDomain;
-      objective?: string;
-      constraints?: string[];
-      expectedOutcome?: string;
-    }
-  | { type: 'escalation'; from: AgentName; issue: EscalationIssue }
+  | { type: 'agent_complete'; agent: AgentName; result: unknown; durationMs?: number; toolCount?: number }
+  | { type: 'error'; agent: AgentName; error: string }
+  // Tool events
   | { type: 'tool_call'; agent: AgentName; toolName: string; args: Record<string, unknown> }
   | { type: 'tool_result'; agent: AgentName; toolName: string; result: unknown; success: boolean }
+  // User interaction events
   | { type: 'user_question'; question: UserQuestion }
   | { type: 'approval_request'; request: ApprovalRequest; sessionId?: string }
   | { type: 'action_pending'; actionId: string; toolName: string; toolArgs: Record<string, unknown>; description: string; preview?: ActionPreview }
+  // History & state events
   | { type: 'agent_history'; entries: AgentHistoryEntry[] }
-  | { type: 'parallel_start'; agents: AgentName[]; tasks: string[] }
-  | { type: 'parallel_progress'; agent: AgentName; progress: string }
-  | { type: 'parallel_complete'; results: DelegationResult[] }
-  | { type: 'agent_complete'; agent: AgentName; result: unknown; durationMs?: number; toolCount?: number; delegationStatus?: 'completed' | 'failed' | 'escalated' }
-  | { type: 'error'; agent: AgentName; error: string }
-  // SCOUT events
-  | { type: 'scout_start'; query: string; scope: ScoutScope }
-  | { type: 'scout_tool'; tool: string }
-  | { type: 'scout_complete'; summary: ScoutResult }
-  | { type: 'scout_error'; error: string }
   // Intermediate response events
   | { type: 'partial_response'; message: string; inReplyTo?: string }
   | { type: 'todo_updated'; todos: TodoItem[] }
@@ -388,74 +283,9 @@ export interface AgentResponse {
   agent: AgentName;
   content: string;
   toolCalls?: AgentToolCall[];
-  delegation?: DelegationTask;
-  escalation?: EscalationIssue;
   userQuestion?: UserQuestion;
   approvalRequest?: ApprovalRequest;
   finished: boolean;
-}
-
-// ============================================
-// SCOUT AGENT TYPES
-// ============================================
-
-export type ScoutScope = 'codebase' | 'web' | 'both';
-
-export type ScoutConfidence = 'high' | 'medium' | 'low';
-
-export interface WebFinding {
-  title: string;
-  url: string;
-  relevance: string;
-  claim?: string;
-  evidence?: Array<{
-    url: string;
-    snippet?: string;
-    publishedAt?: string;
-  }>;
-  freshness?: string;
-  confidence?: ScoutConfidence;
-  gaps?: string[];
-}
-
-export interface ScoutResult {
-  summary: string;
-  relevantFiles: string[];
-  codePatterns: Record<string, string>;
-  webFindings: WebFinding[];
-  recommendations: string[];
-  confidence: ScoutConfidence;
-}
-
-// ============================================
-// UNIFIED DELEGATION PROTOCOL (Ralph Verification)
-// ============================================
-
-export type LoopDelegationStatus = 'success' | 'partial' | 'failed' | 'escalated';
-
-export interface ToolEvidence {
-  tool: string;
-  success: boolean;
-  summary: string;
-  pendingApproval?: boolean;
-  externalId?: string;
-  nextStep?: string;
-}
-
-export interface ScoutFindings {
-  relevantFiles: string[];
-  codePatterns: Record<string, string>;
-  webFindings: WebFinding[];
-  recommendations: string[];
-  confidence: ScoutConfidence;
-}
-
-export interface LoopDelegationResult {
-  status: LoopDelegationStatus;
-  summary: string;
-  toolEvidence: ToolEvidence[];
-  escalation?: string;
-  findings?: ScoutFindings;
 }
 
 // ============================================
@@ -468,10 +298,3 @@ export interface ChapoLoopResult {
   totalIterations: number;
   question?: string; // if status === 'waiting_for_user'
 }
-
-// SCOUT-specific stream events (extend AgentStreamEvent)
-export type ScoutStreamEvent =
-  | { type: 'scout_start'; query: string; scope: ScoutScope }
-  | { type: 'scout_tool'; tool: string }
-  | { type: 'scout_complete'; summary: ScoutResult }
-  | { type: 'scout_error'; error: string };
