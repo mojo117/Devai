@@ -369,6 +369,21 @@ export function ChatUI({
         // Keep isLoading true — loop is still running
         break;
       }
+      case 'response': {
+        // Terminal response from a parallel loop arriving via session listener.
+        // The original request was resolved with queued:true, so this is the actual answer.
+        const ev = event as Record<string, unknown>;
+        const resp = ev.response as Record<string, unknown> | undefined;
+        if (resp?.message) {
+          const msg = resp.message as ChatMessage;
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === msg.id)) return prev;
+            return [...prev, msg];
+          });
+          freezeToolEvents(msg.id);
+        }
+        break;
+      }
       case 'todo_updated': {
         const ev = event as unknown as { todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }> };
         setCurrentTodos(ev.todos || []);
@@ -388,8 +403,24 @@ export function ChatUI({
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    // In parallel mode (already loading), freeze existing tool events to the
+    // previous message before clearing — prevents events from Request A
+    // appearing under Request B's message.
+    if (isLoadingInternal) {
+      // Find the last assistant or user message to attach orphaned events to
+      setToolEvents((currentEvents) => {
+        if (currentEvents.length > 0) {
+          setMessageToolEvents((prev) => ({
+            ...prev,
+            [userMessage.id]: [...currentEvents],
+          }));
+        }
+        return [];
+      });
+    } else {
+      setToolEvents([]);
+    }
     setIsLoading(true);
-    setToolEvents([]);
     setCurrentTodos([]);
     fileHintState.fileHints.length > 0; // clear hints via effect
     setAgentPhase('idle');

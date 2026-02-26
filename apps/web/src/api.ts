@@ -741,6 +741,17 @@ async function ensureChatWsConnected(): Promise<WebSocket> {
           window.clearTimeout(pending.timeoutId);
           pendingWsRequests.delete(requestId);
           pending.resolve(msg.response as MultiAgentResponse);
+        } else {
+          // Reset inactivity timeout on every intermediate event so long-running
+          // requests stay alive as long as the server keeps sending progress events.
+          window.clearTimeout(pending.timeoutId);
+          pending.timeoutId = window.setTimeout(() => {
+            const p = pendingWsRequests.get(requestId!);
+            if (p) {
+              pendingWsRequests.delete(requestId!);
+              p.reject(new Error('Chat WebSocket request timed out'));
+            }
+          }, 180000);
         }
         return;
       }
@@ -836,7 +847,7 @@ async function sendMultiAgentMessageWs(
   }
   try {
     if (sessionId) await wsHello(sessionId);
-    return await sendWsCommand({
+    const response = await sendWsCommand({
       type: 'request',
       message,
       projectRoot,
@@ -844,6 +855,14 @@ async function sendMultiAgentMessageWs(
       ...buildSessionModePayload(options),
       ...(pinnedUserfileIds && pinnedUserfileIds.length > 0 ? { pinnedUserfileIds } : {}),
     }, onEvent);
+
+    // If the request was queued (parallel/serial mode), keep the session listener
+    // alive so we receive the actual response when the parallel loop completes.
+    if (response.queued) {
+      remove = null;
+    }
+
+    return response;
   } finally {
     remove?.();
   }

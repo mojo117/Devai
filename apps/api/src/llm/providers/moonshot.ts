@@ -68,6 +68,8 @@ export class MoonshotProvider implements LLMProviderAdapter {
 
     const choice = response.choices[0];
     const message = choice.message;
+    // Kimi returns reasoning_content on assistant messages when thinking is enabled
+    const reasoningContent = (message as Record<string, unknown>).reasoning_content as string | undefined;
 
     const toolCalls: GenerateResponse['toolCalls'] = [];
     if (message.tool_calls) {
@@ -78,6 +80,8 @@ export class MoonshotProvider implements LLMProviderAdapter {
             id: tc.id,
             name,
             arguments: JSON.parse(tc.function.arguments || '{}'),
+            // Preserve reasoning_content so it can be sent back on subsequent requests
+            ...(reasoningContent ? { providerMetadata: { reasoning_content: reasoningContent } } : {}),
           });
         }
       }
@@ -164,11 +168,18 @@ export class MoonshotProvider implements LLMProviderAdapter {
           arguments: JSON.stringify(tc.arguments),
         },
       }));
-      messages.push({
+      // Kimi requires reasoning_content on assistant tool-call messages when thinking is enabled.
+      // Retrieve it from providerMetadata where we stored it during generate().
+      const reasoningContent = message.toolCalls[0]?.providerMetadata?.reasoning_content as string | undefined;
+      const assistantMsg: Record<string, unknown> = {
         role: 'assistant',
         content: getTextContent(message.content) || null,
         tool_calls: toolCalls,
-      });
+      };
+      if (reasoningContent) {
+        assistantMsg.reasoning_content = reasoningContent;
+      }
+      messages.push(assistantMsg as OpenAI.ChatCompletionMessageParam);
       return;
     }
 
