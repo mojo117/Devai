@@ -451,6 +451,7 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
         queueApproval: this.queueApproval.bind(this),
         emitDecisionPath: this.emitDecisionPath.bind(this),
         buildToolResultContent,
+        projectRoot: this.projectRoot,
       });
 
       for (const toolCall of response.toolCalls) {

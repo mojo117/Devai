@@ -13,6 +13,7 @@ import {
 } from './chapoControlTools.js';
 import { getUserfileById, listUserfiles } from '../../db/userfileQueries.js';
 import { createUserfileSignedUrl } from '../../services/userfileService.js';
+import { runHooks } from '../../hooks/hookRunner.js';
 
 interface ToolCallLike {
   id: string;
@@ -50,6 +51,7 @@ interface ToolExecutorDeps {
   buildToolResultContent: (
     result: { success: boolean; result?: unknown; error?: string },
   ) => { content: string; isError: boolean };
+  projectRoot: string | null;
 }
 
 export class ChapoToolExecutor {
@@ -265,6 +267,22 @@ export class ChapoToolExecutor {
       return { earlyReturn };
     }
 
+    // --- HOOK: before:tool ---
+    const beforeHook = await runHooks('before:tool', {
+      toolName: toolCall.name,
+      toolArgs: toolCall.arguments,
+      projectRoot: this.deps.projectRoot,
+    });
+    if (beforeHook.blocked) {
+      return {
+        toolResult: {
+          toolUseId: toolCall.id,
+          result: `[BLOCKED] ${beforeHook.blockReason}`,
+          isError: true,
+        },
+      };
+    }
+
     // ACTION: TOOL — execute any regular tool
     this.deps.emitDecisionPath({
       path: 'tool',
@@ -329,6 +347,14 @@ export class ChapoToolExecutor {
       const path = toolCall.arguments.path as string;
       stateManager.addGatheredFile(this.deps.sessionId, path);
     }
+
+    // --- HOOK: after:tool (fire-and-forget) ---
+    runHooks(content.isError ? 'after:tool:error' : 'after:tool', {
+      toolName: toolCall.name,
+      toolArgs: toolCall.arguments,
+      toolResult: content.content,
+      projectRoot: this.deps.projectRoot,
+    }).catch((err) => console.warn('[hooks] after:tool hook error:', err));
 
     return {
       toolResult: {
