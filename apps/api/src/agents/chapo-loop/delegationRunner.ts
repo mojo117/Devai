@@ -1,6 +1,8 @@
 import { getCombinedSystemContextBlock } from '../systemContext.js';
 import { getAgent, getToolsForAgent, spawnScout } from '../router.js';
 import { getToolsForLLM } from '../../tools/registry.js';
+import { resolveDelegationModel } from '../../llm/modelSelector.js';
+import { logAgentExecution } from '../../db/agentExecutionQueries.js';
 import type { AgentErrorHandler } from '../error-handler.js';
 import type { SubAgentRunner } from '../sub-agent-runner.js';
 import type {
@@ -23,6 +25,7 @@ import {
 } from '../router/requestUtils.js';
 import { formatDelegationContext, isDelegationSuccessful, type ParallelDelegation } from './delegationUtils.js';
 import { handleToolCall, devoStrategy, caioStrategy, type RunnerToolCall } from './toolCallHandler.js';
+import { config as appConfig } from '../../config.js';
 
 export type DelegationSourceAgent = 'chapo' | 'devo' | 'caio';
 
@@ -52,7 +55,6 @@ export interface DelegationRunnerDeps {
   sendEvent: (event: AgentStreamEvent) => void;
   errorHandler: AgentErrorHandler;
   subAgentRunner: SubAgentRunner;
-  markExternalActionToolSuccess: (toolName: string, success: boolean) => void;
   deriveDelegationStatus: (
     evidence: ToolEvidence[],
     escalated: boolean,
@@ -78,7 +80,13 @@ async function delegateToSubAgent(
   }
 
   const agentDefinition = getAgent(target);
-  const provider = (deps.modelSelection.provider || 'anthropic') as LLMProvider;
+  const baseProvider = deps.modelSelection.provider || 'anthropic';
+  const { provider, model: delegationModel, sameProviderFallbacks } = resolveDelegationModel(
+    agentDefinition,
+    delegation.modelTier,
+    baseProvider,
+    deps.sessionId,
+  );
   const toolNames = getToolsForAgent(target);
   const tools = getToolsForLLM().filter((t) => toolNames.includes(t.name));
   const systemContextBlock = getCombinedSystemContextBlock(deps.sessionId);
@@ -110,19 +118,23 @@ AUFGABE: ${delegation.objective}
 
 Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
 
+  const delegationStartMs = Date.now();
+  let subToolCount = 0;
   const devoEvidence: ToolEvidence[] = [];
   const caioEvidenceLog: CaioEvidence[] = [];
   const runResult = await deps.subAgentRunner.run({
     sessionId: deps.sessionId,
     agent: target,
-    provider,
-    model: agentDefinition.model,
+    provider: provider as LLMProvider,
+    model: delegationModel,
     objective: delegation.objective,
     systemPrompt,
     tools,
     errorHandler: deps.errorHandler,
     sendEvent: deps.sendEvent,
+    sameProviderFallbacks,
     handleToolCall: async ({ toolCall, turn }) => {
+      subToolCount++;
       if (target === 'devo') {
         return handleToolCall(devoStrategy, deps, delegation, devoEvidence, turn, toolCall as RunnerToolCall, delegateToAgent);
       }
@@ -158,13 +170,34 @@ Fuehre die Aufgabe aus. Bei Problemen nutze escalateToChapo().`;
       ? `${targetUpper} eskaliert an ${fromAgent.toUpperCase()}`
       : `${targetUpper} Delegation abgeschlossen`,
   });
+  const durationMs = Date.now() - delegationStartMs;
   deps.sendEvent({
     type: 'agent_complete',
     agent: target,
     result: runResult.exit === 'escalated'
       ? `${targetUpper} eskaliert: ${runResult.escalationDescription || 'unknown issue'}`
       : finalContent,
+    durationMs,
+    toolCount: subToolCount,
+    delegationStatus: runResult.exit === 'escalated' ? 'escalated'
+      : (runResult.exit === 'llm_error' ? 'failed' : 'completed'),
   });
+
+  const phase = runResult.exit === 'escalated' ? 'escalated' 
+    : (runResult.exit === 'llm_error' ? 'failure' : 'success');
+  logAgentExecution({
+    sessionId: deps.sessionId,
+    agent: target,
+    delegatedFrom: fromAgent,
+    phase,
+    durationMs,
+    iterations: runResult.turns || 1,
+    toolCount: subToolCount,
+    model: delegationModel,
+    provider,
+    delegationObjective: delegation.objective,
+    errorMessage: runResult.llmError || runResult.escalationDescription,
+  }).catch((err) => console.error('[delegationRunner] Failed to log execution:', err));
 
   const toolEvidence = target === 'caio'
     ? mapCaioEvidence(caioEvidenceLog)
@@ -211,6 +244,7 @@ async function delegateToScout(
     expectedOutcome: delegation.expectedOutcome,
   });
 
+  const delegationStartMs = Date.now();
   try {
     const history = await loadRecentConversationHistory(deps.sessionId);
     const historyContext = formatConversationHistoryForScout(history);
@@ -248,14 +282,29 @@ async function delegateToScout(
       to: fromAgent,
       reason: 'SCOUT Delegation abgeschlossen',
     });
+    const durationMs = Date.now() - delegationStartMs;
     deps.sendEvent({
       type: 'agent_complete',
       agent: 'scout',
       result: loopResult.summary,
+      durationMs,
+      toolCount: 1,
+      delegationStatus: 'completed',
     });
+    logAgentExecution({
+      sessionId: deps.sessionId,
+      agent: 'scout',
+      delegatedFrom: fromAgent,
+      phase: 'success',
+      durationMs,
+      iterations: 1,
+      toolCount: 1,
+      delegationObjective: delegation.objective,
+    }).catch((err) => console.error('[delegationRunner] Failed to log scout execution:', err));
     return loopResult;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const durationMs = Date.now() - delegationStartMs;
     deps.sendEvent({
       type: 'agent_switch',
       from: 'scout',
@@ -266,13 +315,27 @@ async function delegateToScout(
       type: 'agent_complete',
       agent: 'scout',
       result: `SCOUT Fehler: ${message}`,
+      durationMs,
+      toolCount: 0,
+      delegationStatus: 'failed',
     });
+    logAgentExecution({
+      sessionId: deps.sessionId,
+      agent: 'scout',
+      delegatedFrom: fromAgent,
+      phase: 'failure',
+      durationMs,
+      iterations: 1,
+      toolCount: 0,
+      delegationObjective: delegation.objective,
+      errorMessage: message,
+    }).catch((err) => console.error('[delegationRunner] Failed to log scout failure:', err));
     throw error;
   }
 }
 
 export function resolveDelegationTarget(toolName: string): ParallelDelegation['target'] | null {
-  if (toolName === 'delegateToKoda' || toolName === 'delegateToDevo') return 'devo';
+  if (toolName === 'delegateToDevo') return 'devo';
   if (toolName === 'delegateToCaio') return 'caio';
   if (toolName === 'delegateToScout') return 'scout';
   return null;
@@ -315,10 +378,22 @@ export async function delegateToAgent(
   delegation: ParallelDelegation,
   fromAgent: DelegationSourceAgent,
 ): Promise<LoopDelegationResult> {
-  if (delegation.target === 'scout') {
-    return delegateToScout(deps, delegation, fromAgent);
-  }
-  return delegateToSubAgent(deps, delegation, fromAgent);
+  const timeoutMs = appConfig.delegationTimeoutMs;
+  const timeoutPromise = new Promise<LoopDelegationResult>((resolve) => {
+    setTimeout(() => {
+      resolve({
+        status: 'failed',
+        summary: `Delegation timeout after ${timeoutMs / 1000}s — sub-agent may still be running but CHAPO can't wait longer.`,
+        toolEvidence: [],
+      });
+    }, timeoutMs);
+  });
+
+  const workPromise = delegation.target === 'scout'
+    ? delegateToScout(deps, delegation, fromAgent)
+    : delegateToSubAgent(deps, delegation, fromAgent);
+
+  return Promise.race([workPromise, timeoutPromise]);
 }
 
 export async function delegateParallel(
@@ -327,18 +402,33 @@ export async function delegateParallel(
   buildVerificationEnvelope: (delegation: ParallelDelegation, result: LoopDelegationResult) => string,
 ): Promise<ParallelDelegationSummary> {
   const jobs = delegations.map(async (delegation): Promise<ParallelJobResult> => {
-    try {
-      const loopResult = await delegateToAgent(deps, delegation, 'chapo');
-      return {
-        ...delegation,
-        success: isDelegationSuccessful(loopResult.status),
-        result: loopResult.summary,
-        loopResult,
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { ...delegation, success: false, error: message };
-    }
+    const timeoutMs = appConfig.delegationTimeoutMs;
+    const timeoutPromise = new Promise<ParallelJobResult>((resolve) => {
+      setTimeout(() => {
+        resolve({
+          ...delegation,
+          success: false,
+          error: `Delegation timeout after ${timeoutMs / 1000}s — sub-agent may still be running but CHAPO can't wait longer.`,
+        });
+      }, timeoutMs);
+    });
+
+    const workPromise = (async (): Promise<ParallelJobResult> => {
+      try {
+        const loopResult = await delegateToAgent(deps, delegation, 'chapo');
+        return {
+          ...delegation,
+          success: isDelegationSuccessful(loopResult.status),
+          result: loopResult.summary,
+          loopResult,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { ...delegation, success: false, error: message };
+      }
+    })();
+
+    return Promise.race([workPromise, timeoutPromise]);
   });
 
   const settled = await Promise.allSettled(jobs);

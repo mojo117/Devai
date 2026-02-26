@@ -160,5 +160,62 @@ export async function uploadUserfileFromBuffer(
       uploadedAt: row.uploaded_at,
       expiresAt: row.expires_at,
     },
+  }
+}
+
+export interface DownloadResult {
+  buffer: Buffer
+  filename: string
+  mimeType: string
+}
+
+export async function downloadUserfile(storagePath: string): Promise<DownloadResult | null> {
+  const { data, error } = await getSupabase()
+    .storage
+    .from(STORAGE_BUCKET)
+    .download(storagePath)
+
+  if (error || !data) {
+    console.error('[userfileService] Storage download failed:', error)
+    return null
+  }
+
+  return {
+    buffer: Buffer.from(await data.arrayBuffer()),
+    filename: storagePath.split('/').pop() || 'download',
+    mimeType: 'application/octet-stream',
+  }
+}
+
+export async function createUserfileSignedUrl(
+  storagePath: string,
+  expiresInSec = 900,
+): Promise<{ url: string; expiresAt: string }> {
+  const { data, error } = await getSupabase()
+    .storage
+    .from(STORAGE_BUCKET)
+    .createSignedUrl(storagePath, expiresInSec);
+
+  if (error || !data?.signedUrl) {
+    throw new Error(`Failed to create userfile signed URL: ${error?.message || 'unknown error'}`);
+  }
+
+  return {
+    url: data.signedUrl,
+    expiresAt: new Date(Date.now() + expiresInSec * 1000).toISOString(),
   };
+}
+
+export async function deleteUserfileStorage(storagePath: string): Promise<boolean> {
+  const { error } = await getSupabase()
+    .storage
+    .from(STORAGE_BUCKET)
+    .remove([storagePath])
+
+  if (error) {
+    console.error('[userfileService] Storage delete failed:', error)
+    return false
+  }
+
+  return true
 }

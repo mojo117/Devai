@@ -39,8 +39,7 @@ export class ConversationManager {
   }
 
   /**
-   * Replace the most recent assistant message (used when self-validation
-   * refines an answer).
+   * Replace the most recent assistant message.
    */
   replaceLastAssistant(content: string): void {
     for (let i = this.messages.length - 1; i >= 0; i--) {

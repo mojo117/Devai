@@ -33,7 +33,8 @@ async function fetchResendEmailDetails(apiKey: string, emailId: string): Promise
 
     if (!response.ok) return null;
     return (await response.json()) as ResendEmailDetails;
-  } catch {
+  } catch (err) {
+    console.warn('[email] Failed to fetch Resend email details:', err instanceof Error ? err.message : err);
     return null;
   }
 }

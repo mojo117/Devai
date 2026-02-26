@@ -1,14 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { listUserfiles, uploadUserfile, deleteUserfile, getUserfileDownloadUrl } from '../api';
 import type { UserfileInfo } from '../api';
-
-const ALLOWED_EXTENSIONS = [
-  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-  '.txt', '.md', '.csv', '.msg', '.eml', '.oft', '.zip',
-  '.png', '.jpg', '.jpeg', '.gif', '.webp',
-];
-
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
+import { validateFile } from './ChatUI/uploadConstants';
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -80,17 +73,6 @@ export function UserfilesPanelContent({
   useEffect(() => {
     fetchFiles();
   }, [fetchFiles]);
-
-  const validateFile = (file: File): string | null => {
-    const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
-    if (!ALLOWED_EXTENSIONS.includes(ext)) {
-      return `File type not allowed: ${ext}`;
-    }
-    if (file.size > MAX_FILE_SIZE) {
-      return 'File too large (max 10MB)';
-    }
-    return null;
-  };
 
   const handleUpload = async (fileList: FileList | File[]) => {
     const filesToUpload = Array.from(fileList);

@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { config } from '../../config.js';
-import type { LLMProviderAdapter, GenerateRequest, GenerateResponse, ToolDefinition, LLMMessage, ContentBlock } from '../types.js';
+import type { LLMProviderAdapter, GenerateRequest, GenerateResponse, ToolDefinition, LLMMessage } from '../types.js';
 import { getTextContent } from '../types.js';
 
 export class ZAIProvider implements LLMProviderAdapter {
@@ -19,7 +19,7 @@ export class ZAIProvider implements LLMProviderAdapter {
       this.client = new OpenAI({
         apiKey: config.zaiApiKey,
         baseURL: 'https://api.z.ai/api/coding/paas/v4',
-        timeout: 60_000, // 60s request timeout
+        timeout: 120_000, // 120s request timeout (GLM-5 reasoning is slow with tools)
       });
     }
     return this.client;

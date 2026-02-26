@@ -1,4 +1,4 @@
-export type LLMProvider = 'anthropic' | 'openai' | 'gemini' | 'zai';
+export type LLMProvider = 'anthropic' | 'openai' | 'gemini' | 'zai' | 'moonshot';
 
 export interface ToolResult {
   toolUseId: string;
@@ -33,6 +33,7 @@ export interface ToolDefinition {
     properties: Record<string, {
       type: string;
       description: string;
+      items?: { type: string };
     }>;
     required?: string[];
   };
@@ -45,12 +46,16 @@ export interface GenerateRequest {
   toolsEnabled?: boolean;
   tools?: ToolDefinition[];
   maxTokens?: number;
+  /** Models to try on the same provider before falling back cross-provider. */
+  sameProviderFallbacks?: string[];
 }
 
 export interface ToolCall {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
+  /** Provider-specific metadata (e.g. Gemini thought_signature) preserved for round-trip */
+  providerMetadata?: Record<string, unknown>;
 }
 
 export interface GenerateResponse {

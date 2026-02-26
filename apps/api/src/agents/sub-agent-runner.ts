@@ -27,6 +27,8 @@ export interface SubAgentRunConfig {
   sendEvent: (event: AgentStreamEvent) => void;
   handleToolCall: (ctx: SubAgentToolCallContext) => Promise<SubAgentToolCallOutcome>;
   maxTurns?: number;
+  /** Models to try on the same provider before falling back cross-provider. */
+  sameProviderFallbacks?: string[];
 }
 
 export interface SubAgentRunResult {
@@ -61,6 +63,7 @@ export class SubAgentRunner {
             systemPrompt: config.systemPrompt,
             tools: config.tools,
             toolsEnabled: true,
+            sameProviderFallbacks: config.sameProviderFallbacks,
           }),
       );
 

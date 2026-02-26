@@ -23,6 +23,7 @@ export type ToolName =
   // GitHub Tools
   | 'github_triggerWorkflow'
   | 'github_getWorkflowRunStatus'
+  | 'github_createPR'
   // Logs Tools
   | 'logs_getStagingLogs'
   // DevOps Tools (DEVO)
@@ -57,6 +58,9 @@ export type ToolName =
   | 'memory_remember'
   | 'memory_search'
   | 'memory_readToday'
+  // History Tools (conversation history search)
+  | 'history_search'
+  | 'history_listSessions'
   // Scheduler Tools (DEVO)
   | 'scheduler_create'
   | 'scheduler_list'
@@ -77,6 +81,8 @@ export type ToolName =
   | 'telegram_send_document'
   // Web Document Delivery (CAIO)
   | 'deliver_document'
+  // Userfile Search
+  | 'search_files'
   // Skill Management Tools
   | 'skill_create'
   | 'skill_update'

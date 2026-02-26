@@ -8,7 +8,6 @@
 import { McpClient } from './client.js';
 import { loadMcpConfig } from './config.js';
 import type { McpServerConfig } from './config.js';
-import type { McpToolInfo } from './client.js';
 import type { ToolDefinition } from '../tools/registry.js';
 import { toolRegistry } from '../tools/registry.js';
 import type { ToolExecutionResult } from '../tools/executor.js';
@@ -246,7 +245,7 @@ class McpManager {
   getStatus(): Array<{ name: string; status: string; toolCount: number; error?: string }> {
     const result: Array<{ name: string; status: string; toolCount: number; error?: string }> = [];
 
-    for (const [name, serverConfig] of this.serverConfigs.entries()) {
+    for (const [name] of this.serverConfigs.entries()) {
       const client = this.clients.get(name);
       const toolCount = Array.from(this.toolMappings.values())
         .filter((m) => m.serverName === name).length;

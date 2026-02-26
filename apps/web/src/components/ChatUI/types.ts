@@ -1,5 +1,6 @@
 import type { ContextStats, SessionSummary } from '../../types';
 import type { AgentName, AgentPhase } from '../AgentStatus';
+import type { Artifact } from '../PreviewPanel/artifactParser';
 
 export interface ToolEvent {
   id: string;
@@ -52,4 +53,36 @@ export interface ChatUIProps {
   onSessionStateChange?: (state: ChatSessionState) => void;
   pinnedUserfileIds?: string[];
   onPinUserfile?: (id: string) => void;
+  onClearPinnedUserfiles?: () => void;
+  /** Toggle the preview pane on or off via /preview command. */
+  onSetPreview?: (enabled: boolean) => void;
+  /** Whether the preview pane is currently enabled. */
+  previewEnabled?: boolean;
+  /** Called when an artifact is detected in chat messages. */
+  onArtifactDetected?: (artifact: Artifact | null) => void;
+}
+
+export type DelegationStatus = 'working' | 'completed' | 'failed' | 'escalated';
+
+export interface DelegationToolStep {
+  id: string;
+  name: string;
+  argsPreview: string;
+  resultPreview?: string;
+  success?: boolean;
+  durationMs?: number;
+}
+
+export interface DelegationData {
+  id: string;
+  from: AgentName;
+  to: AgentName;
+  task: string;
+  domain?: string;
+  status: DelegationStatus;
+  startTime: number;
+  durationMs?: number;
+  toolSteps: DelegationToolStep[];
+  prompt?: string;
+  response?: string;
 }

@@ -6,7 +6,7 @@
 import { getSupabase } from '../db/index.js';
 import { getUserfilesByIds } from '../db/userfileQueries.js';
 import type { UserfileRow } from '../db/userfileQueries.js';
-import type { ContentBlock, TextContentBlock } from '../llm/types.js';
+import type { ContentBlock } from '../llm/types.js';
 
 const MAX_TEXT_BYTES = 50 * 1024; // 50 KB text budget
 const STORAGE_BUCKET = 'userfiles';
@@ -39,17 +39,21 @@ async function downloadFromStorage(storagePath: string): Promise<Buffer> {
 }
 
 function buildFileBlock(file: UserfileRow): string {
-  const header = `[Attached File: ${file.original_name} | Type: ${file.mime_type} | Size: ${formatFileSize(file.size_bytes)}]`;
+  const header = `[Attached File: ${file.original_name} | ID: ${file.id} | Type: ${file.mime_type} | Size: ${formatFileSize(file.size_bytes)}]`;
 
   if (file.parse_status === 'parsed' && file.parsed_content) {
     return `${header}\n--- Content ---\n${file.parsed_content}\n--- End File ---`;
   }
 
   if (file.parse_status === 'failed') {
-    return `${header}\n(Content extraction failed)`;
+    return `${header}\n(Content extraction failed — the file was uploaded but its text could not be read. Inform the user.)`;
   }
 
-  return `${header}\n(Content not available -- binary file type)`;
+  if (file.parse_status === 'metadata_only') {
+    return `${header}\n(This file type does not support text extraction. Only metadata is available. Inform the user if they ask about its content.)`;
+  }
+
+  return `${header}\n(Content not yet available — file may still be processing.)`;
 }
 
 export async function buildUserfileContext(fileIds: string[]): Promise<ContentBlock[]> {
@@ -74,17 +78,17 @@ export async function buildUserfileContext(fileIds: string[]): Promise<ContentBl
           type: 'image_url',
           image_url: { url: dataUri },
         });
-        // Add a text label so the AI knows the filename
+        // Add a text label so the AI knows the filename and ID
         blocks.push({
           type: 'text',
-          text: `[Image: ${file.original_name} | ${formatFileSize(file.size_bytes)}]`,
+          text: `[Image: ${file.original_name} | ID: ${file.id} | ${formatFileSize(file.size_bytes)}]`,
         });
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : 'Download failed';
         console.error(`[userfileContext] Failed to load image ${file.original_name}:`, errMsg);
         blocks.push({
           type: 'text',
-          text: `[Attached Image: ${file.original_name} | Error: ${errMsg}]`,
+          text: `[Attached Image: ${file.original_name} | ID: ${file.id} | Error: ${errMsg}]`,
         });
       }
     } else {
@@ -129,7 +133,7 @@ export async function buildUserfileContext(fileIds: string[]): Promise<ContentBl
         blocks.push({ type: 'text', text: entry.block });
         remainingBudget -= entry.block.length;
       } else {
-        const header = `[Attached File: ${entry.file.original_name} | Type: ${entry.file.mime_type} | Size: ${formatFileSize(entry.file.size_bytes)}]`;
+        const header = `[Attached File: ${entry.file.original_name} | ID: ${entry.file.id} | Type: ${entry.file.mime_type} | Size: ${formatFileSize(entry.file.size_bytes)}]`;
         const prefix = `${header}\n--- Content ---\n`;
         const suffix = `\n[content truncated for context budget]\n--- End File ---`;
         const available = budgetPerFile - prefix.length - suffix.length;

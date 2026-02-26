@@ -3,17 +3,20 @@ import { AnthropicProvider } from './providers/anthropic.js';
 import { OpenAIProvider } from './providers/openai.js';
 import { GeminiProvider } from './providers/gemini.js';
 import { ZAIProvider } from './providers/zai.js';
+import { MoonshotProvider } from './providers/moonshot.js';
 import { logUsage } from './usage-logger.js';
+import { circuitBreaker } from './circuitBreaker.js';
 
 // Default fallback chain
-const DEFAULT_FALLBACK_CHAIN: LLMProvider[] = ['zai', 'anthropic', 'openai', 'gemini'];
+const DEFAULT_FALLBACK_CHAIN: LLMProvider[] = ['zai', 'anthropic', 'openai', 'gemini', 'moonshot'];
 
 // Default models per provider (used when falling back to a different provider)
 const DEFAULT_MODELS: Record<LLMProvider, string> = {
   zai: 'glm-5',
   anthropic: 'claude-sonnet-4-20250514',
   openai: 'gpt-4o',
-  gemini: 'gemini-2.0-flash',
+  gemini: 'gemini-3.1-pro-preview',
+  moonshot: 'kimi-k2.5',
 };
 
 // Check if a model belongs to a specific provider
@@ -23,6 +26,7 @@ function isModelForProvider(model: string, provider: LLMProvider): boolean {
     anthropic: ['claude'],
     openai: ['gpt', 'o1', 'o3'],
     gemini: ['gemini'],
+    moonshot: ['kimi'],
   };
   const prefixes = providerPrefixes[provider] || [];
   return prefixes.some(prefix => model.toLowerCase().startsWith(prefix));
@@ -45,11 +49,13 @@ export class LLMRouter {
     const gemini = new GeminiProvider();
 
     const zai = new ZAIProvider();
+    const moonshot = new MoonshotProvider();
 
     this.providers.set('zai', zai);
     this.providers.set('anthropic', anthropic);
     this.providers.set('openai', openai);
     this.providers.set('gemini', gemini);
+    this.providers.set('moonshot', moonshot);
   }
 
   getProvider(name: LLMProvider): LLMProviderAdapter | undefined {
@@ -94,31 +100,51 @@ export class LLMRouter {
     maxRetries: number = 2
   ): Promise<GenerateResponse> {
     let lastError: Error | undefined;
+    // 429 rate limits get extra retries with longer backoff
+    const isRateLimit = (msg: string): boolean => msg.includes('429') || msg.toLowerCase().includes('rate limit');
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         return await this.generate(providerName, request);
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
+        const errorMsg = lastError.message;
 
-        // Don't retry on client errors (4xx) - these won't succeed on retry
-        const errorMsg = lastError.message.toLowerCase();
-        if (errorMsg.includes('400') ||
-            errorMsg.includes('401') ||
-            errorMsg.includes('403') ||
-            errorMsg.includes('invalid') ||
-            errorMsg.includes('unauthorized')) {
+        // 429 → extend retries up to 5 with longer backoff (2s, 4s, 8s, 16s, 32s) + jitter
+        if (isRateLimit(errorMsg)) {
+          const rateMaxRetries = Math.max(maxRetries, 5);
+          if (attempt < rateMaxRetries) {
+            const jitter = 1 + Math.random() * 0.3;
+            const backoffMs = Math.round(Math.pow(2, attempt + 1) * 1000 * jitter);
+            console.warn(`[llm] Rate-limited, retry ${attempt + 1}/${rateMaxRetries} for ${providerName} after ${backoffMs}ms`);
+            await sleep(backoffMs);
+            // Extend the loop bound so we keep retrying
+            maxRetries = rateMaxRetries;
+            continue;
+          }
+          // Exhausted rate-limit retries — fall through to throw
+          break;
+        }
+
+        // Don't retry on non-transient client errors
+        const lowerMsg = errorMsg.toLowerCase();
+        if (lowerMsg.includes('400') ||
+            lowerMsg.includes('401') ||
+            lowerMsg.includes('403') ||
+            lowerMsg.includes('invalid') ||
+            lowerMsg.includes('unauthorized')) {
           throw lastError;
         }
 
-        // Last attempt - don't wait, just throw
+        // Last attempt for non-rate-limit errors
         if (attempt === maxRetries) {
           throw lastError;
         }
 
-        // Exponential backoff: 1s, 2s, 4s...
-        const backoffMs = Math.pow(2, attempt) * 1000;
-        console.warn(`[llm] Retry ${attempt + 1}/${maxRetries} for ${providerName} after ${backoffMs}ms:`, lastError.message);
+        // Exponential backoff with jitter: 1s, 2s, 4s... (+ 0-30% random)
+        const jitter = 1 + Math.random() * 0.3;
+        const backoffMs = Math.round(Math.pow(2, attempt) * 1000 * jitter);
+        console.warn(`[llm] Retry ${attempt + 1}/${maxRetries} for ${providerName} after ${backoffMs}ms:`, errorMsg);
         await sleep(backoffMs);
       }
     }
@@ -150,6 +176,12 @@ export class LLMRouter {
         continue;
       }
 
+      if (!circuitBreaker.isAvailable(providerName)) {
+        console.info(`[llm] Skipping ${providerName} — circuit breaker open`);
+        errors.push({ provider: providerName, error: 'circuit breaker open' });
+        continue;
+      }
+
       // Adjust model if it doesn't match the current provider
       let adjustedRequest = request;
       if (originalModel && !isModelForProvider(originalModel, providerName)) {
@@ -160,11 +192,35 @@ export class LLMRouter {
 
       try {
         const response = await this.generateWithRetry(providerName, adjustedRequest);
+        circuitBreaker.recordSuccess(providerName);
         return { ...response, usedProvider: providerName };
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         errors.push({ provider: providerName, error: errorMsg });
-        console.warn(`[llm] Provider ${providerName} failed, trying next...`, errorMsg);
+        console.warn(`[llm] Provider ${providerName} failed with primary model, trying same-provider fallbacks...`, errorMsg);
+
+        // Try same-provider fallback models before moving to the next provider
+        const fallbacks = request.sameProviderFallbacks ?? [];
+        let recovered = false;
+        for (const altModel of fallbacks) {
+          // Only try if the model actually belongs to this provider
+          if (!isModelForProvider(altModel, providerName)) continue;
+          try {
+            console.info(`[llm] Trying same-provider fallback ${altModel} on ${providerName}`);
+            const response = await this.generateWithRetry(providerName, { ...request, model: altModel });
+            circuitBreaker.recordSuccess(providerName);
+            recovered = true;
+            return { ...response, usedProvider: providerName };
+          } catch (fallbackErr) {
+            const fbMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+            console.warn(`[llm] Same-provider fallback ${altModel} on ${providerName} also failed:`, fbMsg);
+          }
+        }
+
+        if (!recovered) {
+          circuitBreaker.recordError(providerName, errorMsg);
+          console.warn(`[llm] Provider ${providerName} exhausted, trying next...`);
+        }
       }
     }
 
@@ -181,3 +237,5 @@ export class LLMRouter {
 
 // Singleton instance
 export const llmRouter = new LLMRouter();
+
+export { circuitBreaker } from './circuitBreaker.js';

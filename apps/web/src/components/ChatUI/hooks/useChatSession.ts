@@ -11,6 +11,7 @@ interface UseChatSessionOptions {
   setMessages: Dispatch<SetStateAction<ChatMessage[]>>;
   setToolEvents: Dispatch<SetStateAction<unknown[]>>;
   onEventsLoaded?: (events: Record<string, ToolEvent[]>) => void;
+  onClearPinnedUserfiles?: () => void;
 }
 
 export function useChatSession({
@@ -20,6 +21,7 @@ export function useChatSession({
   setMessages,
   setToolEvents,
   onEventsLoaded,
+  onClearPinnedUserfiles,
 }: UseChatSessionOptions) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -87,12 +89,13 @@ export function useChatSession({
       const response = await createSession();
       await saveSetting('lastSessionId', response.session.id);
       await refreshSessions(response.session.id);
+      onClearPinnedUserfiles?.();
     } catch {
       // Ignore create errors
     } finally {
       setSessionsLoading(false);
     }
-  }, [refreshSessions]);
+  }, [refreshSessions, onClearPinnedUserfiles]);
 
   const handleSelectSession = useCallback(async (selectedId: string) => {
     setSessionsLoading(true);
@@ -124,12 +127,13 @@ export function useChatSession({
       await saveSetting('lastSessionId', response.session.id);
       await refreshSessions(response.session.id);
       setToolEvents([]);
+      onClearPinnedUserfiles?.();
     } catch {
       // Ignore restart errors
     } finally {
       setSessionsLoading(false);
     }
-  }, [messages.length, sessionId, sessions, handleNewChat, refreshSessions, setToolEvents]);
+  }, [messages.length, sessionId, sessions, handleNewChat, refreshSessions, setToolEvents, onClearPinnedUserfiles]);
 
   // Accept session commands from the global header
   const lastSessionCommandNonceRef = useRef<number>(0);
@@ -148,12 +152,18 @@ export function useChatSession({
     }
   }, [sessionCommand, handleSelectSession, handleNewChat, handleRestartChat]);
 
+  const refreshSessionList = useCallback(async () => {
+    const sessionList = await fetchSessions();
+    setSessions(sessionList.sessions);
+  }, []);
+
   return {
     sessionId,
     setSessionId,
     sessions,
     sessionsLoading,
     refreshSessions,
+    refreshSessionList,
     handleNewChat,
     handleSelectSession,
     handleRestartChat,

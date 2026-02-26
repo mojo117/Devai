@@ -18,6 +18,7 @@ import { externalRoutes } from './routes/external.js';
 import { SessionLogger } from './audit/sessionLogger.js';
 import { userfilesRoutes } from './routes/userfiles.js';
 import { transcribeRoutes } from './routes/transcribe.js';
+import { previewRoutes } from './routes/preview.js';
 import { authMiddleware, registerAuthRoutes } from './routes/auth.js';
 import { initDb } from './db/index.js';
 import { websocketRoutes } from './websocket/routes.js';
@@ -33,13 +34,14 @@ import { getAgentSoulStatusReport } from './prompts/agentSoul.js';
 import { ensureSessionExists, saveMessage } from './db/queries.js';
 import { getDefaultNotificationChannel, logSchedulerExecution } from './db/schedulerQueries.js';
 import {
-  backupLocalDbJob,
   cleanupExpiredUserfilesJob,
   collectSystemHealthSnapshot,
   formatHealthAlert,
   memoryDecayJob,
   recentTopicDecayJob,
 } from './services/systemReliability.js';
+import { configureHeartbeat, runHeartbeat } from './services/heartbeatService.js';
+import { previewBuildWorker } from './preview/previewBuildWorker.js';
 
 const envValidation = validateRequiredEnv(config);
 if (!envValidation.ok) {
@@ -67,6 +69,9 @@ const app = Fastify({
     level: config.nodeEnv === 'development' ? 'info' : 'warn',
   },
 });
+let mcpInitPromise: Promise<void> | undefined;
+type RegisterPlugin = Parameters<typeof app.register>[0];
+type RegisterPluginOpts = Parameters<typeof app.register>[1];
 
 const corsOrigins = [
   'http://localhost:5173',
@@ -85,9 +90,12 @@ await app.register(cors, {
 });
 
 // Security headers (CSP handled by Caddy + frontend meta tag)
-await app.register(helmet as any, {
+await app.register(helmet as unknown as RegisterPlugin, {
   contentSecurityPolicy: false,
-});
+  // Disable X-XSS-Protection — triggers false positives on srcdoc iframes
+  // (browser XSS auditor blocks inline HTML in preview panel)
+  xXssProtection: false,
+} as RegisterPluginOpts);
 
 // Global rate limiting (per IP)
 await app.register(rateLimit, {
@@ -100,10 +108,12 @@ await app.register(rateLimit, {
 await app.register(fastifyWebsocket);
 
 // Register multipart support for file uploads (10MB limit)
-await app.register(multipart as any, { limits: { fileSize: 10 * 1024 * 1024 } });
+await app.register(multipart as unknown as RegisterPlugin, {
+  limits: { fileSize: 10 * 1024 * 1024 },
+} as RegisterPluginOpts);
 
 // Register cookie parsing (needed for httpOnly auth cookies)
-await app.register(cookie as any);
+await app.register(cookie as unknown as RegisterPlugin);
 
 // Global error handler — sanitize unexpected errors
 app.setErrorHandler((error: { statusCode?: number; message: string }, _request, reply) => {
@@ -144,6 +154,7 @@ await app.register(externalRoutes, { prefix: '/api' });
 await app.register(websocketRoutes, { prefix: '/api' });
 await app.register(userfilesRoutes, { prefix: '/api' });
 await app.register(transcribeRoutes, { prefix: '/api' });
+await app.register(previewRoutes, { prefix: '/api' });
 
 // Start server
 const start = async () => {
@@ -159,7 +170,9 @@ const start = async () => {
     if (config.anthropicApiKey) providers.push('Anthropic');
     if (config.openaiApiKey) providers.push('OpenAI');
     if (config.geminiApiKey) providers.push('Gemini');
+    if (config.moonshotApiKey) providers.push('Moonshot');
     console.log(`Configured LLM providers: ${providers.length > 0 ? providers.join(', ') : 'None'}`);
+    previewBuildWorker.start();
 
     // Log agent soul loading status (CAIO/DEVO/SCOUT)
     const soulStatuses = getAgentSoulStatusReport();
@@ -177,7 +190,7 @@ const start = async () => {
 
     // Initialize MCP servers asynchronously so the API starts quickly even if MCP servers are slow.
     // This avoids long startup delays (e.g. Serena scanning large project trees).
-    const mcpInitPromise = (async () => {
+    mcpInitPromise = (async () => {
       try {
         await mcpManager.initialize();
         const mcpTools = mcpManager.getToolDefinitions();
@@ -190,12 +203,15 @@ const start = async () => {
       }
     })();
 
-    // Ensure shutdown waits for init to settle before trying to tear down MCP.
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    (app as any).mcpInitPromise = mcpInitPromise;
-
     const sendSchedulerNotification = async (message: string, targetChannel?: string | null) => {
       let chatId = targetChannel ? String(targetChannel) : '';
+
+      // If channel looks like a platform name (not a numeric chat ID), resolve it
+      if (chatId && !/^\d+$/.test(chatId)) {
+        const defaultChannel = await getDefaultNotificationChannel();
+        chatId = defaultChannel?.external_chat_id || '';
+      }
+
       if (!chatId) {
         const defaultChannel = await getDefaultNotificationChannel();
         chatId = defaultChannel?.external_chat_id || '';
@@ -291,6 +307,30 @@ const start = async () => {
       return `Health status: ${snapshot.status}`;
     };
 
+    // Configure heartbeat executor to run through the agent system
+    configureHeartbeat(async (sessionId, instruction) => {
+      await ensureSessionExists(sessionId, 'Heartbeat');
+      const history = await loadRecentConversationHistory(sessionId);
+
+      await saveMessage(sessionId, {
+        id: nanoid(),
+        role: 'user',
+        content: instruction,
+        timestamp: new Date().toISOString(),
+      });
+
+      const result = await processRequest(sessionId, instruction, history, null, () => {});
+
+      await saveMessage(sessionId, {
+        id: nanoid(),
+        role: 'assistant',
+        content: result,
+        timestamp: new Date().toISOString(),
+      });
+
+      return result;
+    });
+
     // Internal maintenance jobs run through scheduler framework (cron + retry + telemetry).
     schedulerService.registerInternalJob({
       id: 'maintenance-userfile-cleanup',
@@ -320,21 +360,21 @@ const start = async () => {
     });
 
     schedulerService.registerInternalJob({
-      id: 'maintenance-local-db-backup',
-      name: 'Maintenance: Local DB Backup',
-      cronExpression: '0 4 * * *',
-      run: () => backupLocalDbJob(14),
-      runOnStart: true,
-      notifyOnFailure: false,
-    });
-
-    schedulerService.registerInternalJob({
       id: 'system-health-watchdog',
       name: 'System Health Watchdog',
       cronExpression: '*/5 * * * *',
       run: runHealthWatchdog,
       runOnStart: true,
       notifyOnFailure: false,
+    });
+
+    schedulerService.registerInternalJob({
+      id: 'heartbeat-check',
+      name: 'Heartbeat: Autonomy Check',
+      cronExpression: '0 */2 * * *',
+      run: runHeartbeat,
+      runOnStart: false,
+      notifyOnFailure: true,
     });
   } catch (err) {
     app.log.error(err);
@@ -345,10 +385,10 @@ const start = async () => {
 // Graceful shutdown
 const shutdown = async () => {
   console.log('Shutting down...');
+  previewBuildWorker.stop();
   schedulerService.stop();
-  const mcpInitPromise = (app as any).mcpInitPromise as Promise<void> | undefined;
   if (mcpInitPromise) {
-    try { await mcpInitPromise; } catch { /* ignore */ }
+    try { await mcpInitPromise; } catch (err) { console.warn('[server] MCP init failed during shutdown:', err instanceof Error ? err.message : err); }
   }
   await mcpManager.shutdown();
   await app.close();

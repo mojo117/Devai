@@ -6,8 +6,8 @@ function parseJsonObject(input: string): Record<string, unknown> | null {
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>;
     }
-  } catch {
-    // ignore
+  } catch (err) {
+    console.warn('[planParsing] JSON parse failed:', err instanceof Error ? err.message : err);
   }
   return null;
 }

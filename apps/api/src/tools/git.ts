@@ -1,14 +1,14 @@
 import simpleGit, { SimpleGit, StatusResult } from 'simple-git';
 import { config } from '../config.js';
 import { access } from 'fs/promises';
-import { join, resolve, dirname, relative } from 'path';
+import { join, resolve, dirname } from 'path';
 import { toCanonicalPath, toRuntimePath } from '../utils/pathMapping.js';
 
 async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path);
     return true;
-  } catch {
+  } catch (_err) {
     return false;
   }
 }
@@ -172,6 +172,17 @@ export async function gitPush(
   if (targetBranch === 'main' || targetBranch === 'master') {
     throw new Error(
       `Sicherheitsregel: Push zu ${targetBranch} ist nicht erlaubt. Nutze dev Branch.`
+    );
+  }
+
+  // Safety check: Devai repo must use PRs, not direct push
+  const remotes = await git.getRemotes(true);
+  const isDevaiRepo = remotes.some((r) =>
+    r.refs?.push?.includes('mojo117/Devai') || r.refs?.fetch?.includes('mojo117/Devai')
+  );
+  if (isDevaiRepo) {
+    throw new Error(
+      'Direct push to Devai repo is not allowed. Use github_createPR to create a pull request instead.'
     );
   }
 

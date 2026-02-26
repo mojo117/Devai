@@ -1,6 +1,5 @@
 import { readdir, readFile, stat } from 'fs/promises';
 import { join, relative, extname } from 'path';
-import { config } from '../config.js';
 
 // Context documents folder path (relative to project that DevAI is working on)
 const CONTEXT_FOLDER = 'context/documents';
@@ -173,8 +172,8 @@ export async function searchDocuments(
         });
         totalMatches += matches.length;
       }
-    } catch {
-      // Skip files that can't be read
+    } catch (err) {
+      console.warn('[context] Failed to read document for search:', err instanceof Error ? err.message : err);
     }
   }
 

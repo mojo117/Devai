@@ -115,7 +115,8 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         content: typeof parsed.content === 'string' ? parsed.content : '',
         enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : true,
       };
-    } catch {
+    } catch (err) {
+      console.warn('[settings] Failed to parse global context JSON:', err instanceof Error ? err.message : err);
       return { content: '', enabled: true };
     }
   });

@@ -29,6 +29,7 @@ const PRICES: Record<string, [number, number]> = {
   'gpt-4o':      [2.50, 10],
   'gpt-4o-mini': [0.15, 0.60],
   // Gemini
+  'gemini-3.1-pro-preview': [2, 12],
   'gemini-2.0-flash': [0.10, 0.40],
   'gemini-1.5-pro':   [1.25, 5],
 };
@@ -71,7 +72,8 @@ export function logUsage(
     };
 
     appendFileSync(getLogPath(), JSON.stringify(entry) + '\n');
-  } catch {
+  } catch (err) {
     // Logging must never break the main flow
+    console.warn('[usage-logger] Failed to write usage log:', err instanceof Error ? err.message : err);
   }
 }

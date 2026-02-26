@@ -196,11 +196,13 @@ DevAI uses a three-agent system orchestrated by the CHAPO Decision Loop:
 > **Note (2026-02-20):** Anthropic API credits are currently exhausted. ZAI (z.ai) is the active primary LLM provider. Only free-tier ZAI models (GLM-4.7-Flash, GLM-4.5-Flash) are confirmed working. Paid ZAI models (GLM-5, GLM-4.7) require GLM Max subscription balance — check z.ai dashboard if they fail.
 
 **Decision flow:** No separate decision engine — the LLM's `tool_calls` ARE the decisions:
-- No tool calls → **ANSWER** (self-validate, respond)
+- No tool calls → **ANSWER** (respond directly)
 - `askUser` → **ASK** (pause, wait for user)
-- `delegateToDevo` / `delegateToScout` → **DELEGATE** (sub-loop)
+- `delegateToDevo` / `delegateToScout` / `delegateToCaio` → **DELEGATE** (sub-loop)
 - Any other tool → **TOOL** (execute, feed result back)
 - Errors → feed back as context, never crash
+
+**Design principle — trust the model:** Don't add coded validators, regex checks, or heuristic guardrails for things the LLM can handle through its prompt. If an agent should behave a certain way, tell it in the prompt — don't build code to police its output. Code-level checks are only for things outside the model's control (token limits, API errors, network failures).
 
 **Key files:**
 - Loop: `apps/api/src/agents/chapo-loop.ts`

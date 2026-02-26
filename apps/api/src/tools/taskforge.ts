@@ -68,7 +68,8 @@ async function callTaskForgeApi(body: Record<string, unknown>, project?: string)
   try {
     const parsed = typeof responseBody === 'string' ? JSON.parse(responseBody) : responseBody;
     return { success: true, result: parsed };
-  } catch {
+  } catch (err) {
+    console.warn('[taskforge] JSON parse failed:', err instanceof Error ? err.message : err);
     return { success: false, error: `Failed to parse TaskForge response: ${String(responseBody)}` };
   }
 }

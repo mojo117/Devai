@@ -69,19 +69,24 @@ async function parseNDJSONStream<T>(
   return finalResponse;
 }
 
+interface ApiErrorResponse {
+  error?: string
+  details?: string | unknown[]
+}
+
 async function readApiError(res: Response): Promise<string> {
-  const contentType = res.headers.get('content-type') || '';
-  const fallback = `HTTP ${res.status} ${res.statusText || ''}`.trim();
+  const contentType = res.headers.get('content-type') || ''
+  const fallback = `HTTP ${res.status} ${res.statusText || ''}`.trim()
 
   if (contentType.includes('application/json')) {
     try {
-      const data = (await res.json()) as any;
-      const parts: string[] = [];
-      if (data?.error) parts.push(String(data.error));
-      if (data?.details) parts.push(String(data.details));
-      if (Array.isArray(data?.details)) parts.push(JSON.stringify(data.details));
-      const msg = parts.filter(Boolean).join(': ').trim();
-      return msg || fallback;
+      const data = (await res.json()) as ApiErrorResponse
+      const parts: string[] = []
+      if (data?.error) parts.push(String(data.error))
+      if (data?.details) parts.push(String(data.details))
+      if (Array.isArray(data?.details)) parts.push(JSON.stringify(data.details))
+      const msg = parts.filter(Boolean).join(': ').trim()
+      return msg || fallback
     } catch {
       // fall through
     }
@@ -101,6 +106,15 @@ async function readApiError(res: Response): Promise<string> {
 // Auth token is now managed via httpOnly cookie set by the server.
 // These functions are kept for backward compatibility but no longer store/read the JWT.
 let _authTokenMemory: string | null = null;
+let _unauthorizedHandler: (() => void) | null = null;
+let _unauthorizedNotified = false;
+let _tokenRefreshPromise: Promise<boolean> | null = null;
+
+interface AuthStatusResponse {
+  valid: boolean;
+  token?: string;
+  expiresAt?: string;
+}
 
 export function getAuthToken(): string | null {
   return _authTokenMemory;
@@ -114,14 +128,90 @@ export function clearAuthToken(): void {
   _authTokenMemory = null;
 }
 
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  _unauthorizedHandler = handler;
+}
+
+function notifyUnauthorized(): void {
+  clearAuthToken();
+  if (_unauthorizedNotified) return;
+  _unauthorizedNotified = true;
+  try {
+    _unauthorizedHandler?.();
+  } finally {
+    setTimeout(() => {
+      _unauthorizedNotified = false;
+    }, 0);
+  }
+}
+
 function withAuthHeaders(headers: Record<string, string> = {}): Record<string, string> {
   const token = getAuthToken();
   if (!token) return headers;
   return { ...headers, Authorization: `Bearer ${token}` };
 }
 
-function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+function isAuthEndpoint(url: string): boolean {
+  return /\/api\/auth\/(login|verify|logout|refresh)$/.test(url);
+}
+
+function setAuthorizationHeader(init?: RequestInit): RequestInit | undefined {
+  const token = getAuthToken();
+  if (!token) return init;
+  const headers = new Headers(init?.headers || undefined);
+  headers.set('Authorization', `Bearer ${token}`);
+  return { ...init, headers };
+}
+
+async function rawFetch(url: string, init?: RequestInit): Promise<Response> {
   return fetch(url, { ...init, credentials: 'include' });
+}
+
+async function requestTokenRefresh(): Promise<boolean> {
+  if (_tokenRefreshPromise) return _tokenRefreshPromise;
+
+  _tokenRefreshPromise = (async () => {
+    const res = await rawFetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: withAuthHeaders(),
+    });
+    if (!res.ok) {
+      clearAuthToken();
+      return false;
+    }
+    const data = (await res.json()) as AuthStatusResponse;
+    if (!data.valid || !data.token) {
+      clearAuthToken();
+      return false;
+    }
+    setAuthToken(data.token);
+    return true;
+  })()
+    .catch(() => {
+      clearAuthToken();
+      return false;
+    })
+    .finally(() => {
+      _tokenRefreshPromise = null;
+    });
+
+  return _tokenRefreshPromise;
+}
+
+async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+  let res = await rawFetch(url, init);
+  if (res.status !== 401 || isAuthEndpoint(url)) {
+    return res;
+  }
+
+  const refreshed = await requestTokenRefresh();
+  if (refreshed) {
+    res = await rawFetch(url, setAuthorizationHeader(init));
+  }
+  if (res.status === 401) {
+    notifyUnauthorized();
+  }
+  return res;
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -186,14 +276,40 @@ export async function login(username: string, password: string): Promise<{ token
 }
 
 export async function verifyAuth(): Promise<{ valid: boolean; token?: string }> {
-  const res = await apiFetch(`${API_BASE}/auth/verify`, {
+  const res = await rawFetch(`${API_BASE}/auth/verify`, {
     headers: withAuthHeaders(),
   });
 
-  if (!res.ok) return { valid: false };
+  if (!res.ok) {
+    clearAuthToken();
+    return { valid: false };
+  }
 
-  const data = await res.json();
-  return { valid: true, token: data.token };
+  const data = (await res.json()) as AuthStatusResponse;
+  if (data.valid && data.token) {
+    setAuthToken(data.token);
+  }
+  return { valid: data.valid, token: data.token };
+}
+
+export async function refreshAuth(): Promise<{ valid: boolean; token?: string; expiresAt?: string }> {
+  const res = await rawFetch(`${API_BASE}/auth/refresh`, {
+    method: 'POST',
+    headers: withAuthHeaders(),
+  });
+
+  if (!res.ok) {
+    clearAuthToken();
+    return { valid: false };
+  }
+
+  const data = (await res.json()) as AuthStatusResponse;
+  if (data.valid && data.token) {
+    setAuthToken(data.token);
+  } else {
+    clearAuthToken();
+  }
+  return { valid: data.valid, token: data.token, expiresAt: data.expiresAt };
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {
@@ -201,8 +317,17 @@ export async function fetchHealth(): Promise<HealthResponse> {
 }
 
 export interface ChatStreamEvent {
-  type: string;
-  [key: string]: unknown;
+  type: string
+  [key: string]: unknown
+}
+
+interface WebSocketMessage {
+  type?: string
+  sessionId?: string
+  seq?: number
+  requestId?: string
+  response?: MultiAgentResponse
+  [key: string]: unknown
 }
 
 export async function sendMessage(
@@ -389,10 +514,11 @@ export interface AgentHistoryEntry {
 }
 
 export interface MultiAgentResponse {
-  message: ChatMessage;
+  message?: ChatMessage;
   pendingActions: Action[];
   sessionId?: string;
   agentHistory?: AgentHistoryEntry[];
+  queued?: boolean;
 }
 
 export type WorkspaceChatMode = 'main' | 'shared';
@@ -495,11 +621,8 @@ function addSessionListener(sessionId: string, fn: (event: ChatStreamEvent) => v
 function getChatWsUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = window.location.host;
-  // Token is sent via httpOnly cookie automatically.
-  // Keep token param as fallback for in-memory token.
-  const token = getAuthToken();
-  const params = token ? `?token=${encodeURIComponent(token)}` : '';
-  return `${protocol}//${host}/api/ws/chat${params}`;
+  // Authenticate WS via httpOnly cookie (no stale query token).
+  return `${protocol}//${host}/api/ws/chat`;
 }
 
 function cleanupChatWs(): void {
@@ -525,8 +648,6 @@ function hasAnyControlPlaneSubscribers(): boolean {
 
 function scheduleControlPlaneReconnect(): void {
   if (!hasAnyControlPlaneSubscribers()) return;
-  // No auth token means WS can't connect; avoid spinning.
-  if (!getAuthToken()) return;
   if (chatWsReconnectTimer) return;
 
   const delay = Math.min(1000 * Math.pow(2, chatWsReconnectAttempts), 30000);
@@ -581,11 +702,11 @@ async function ensureChatWsConnected(): Promise<WebSocket> {
     };
 
     ws.onmessage = (event) => {
-      let msg: any;
+      let msg: WebSocketMessage
       try {
-        msg = JSON.parse(event.data);
+        msg = JSON.parse(event.data) as WebSocketMessage
       } catch {
-        return;
+        return
       }
 
       // Action events are global and do not include sessionId/seq.
@@ -755,20 +876,15 @@ export async function sendAgentApproval(
   approved: boolean,
   onEvent?: (event: ChatStreamEvent) => void
 ): Promise<MultiAgentResponse> {
-  // Prefer WebSocket control plane; fall back to HTTP NDJSON.
   try {
     if (typeof window !== 'undefined' && typeof WebSocket !== 'undefined' && getAuthToken()) {
       return await sendAgentApprovalWs(sessionId, approvalId, approved, onEvent);
     }
-  } catch {
-    // fall back
+  } catch (wsErr) {
+    console.error('[api] WebSocket approval failed:', wsErr);
+    throw new Error('Verbindung zum Server verloren. Bitte Seite neu laden.');
   }
-
-  return fetchJsonOrNdjson<MultiAgentResponse>(`${API_BASE}/chat/agents/approval`, {
-    method: 'POST',
-    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ sessionId, approvalId, approved }),
-  }, onEvent);
+  throw new Error('WebSocket nicht verfügbar. Bitte Seite neu laden.');
 }
 
 export async function sendAgentQuestionResponse(
@@ -777,20 +893,15 @@ export async function sendAgentQuestionResponse(
   answer: string,
   onEvent?: (event: ChatStreamEvent) => void
 ): Promise<MultiAgentResponse> {
-  // Prefer WebSocket control plane; fall back to HTTP NDJSON.
   try {
     if (typeof window !== 'undefined' && typeof WebSocket !== 'undefined' && getAuthToken()) {
       return await sendAgentQuestionResponseWs(sessionId, questionId, answer, onEvent);
     }
-  } catch {
-    // fall back
+  } catch (wsErr) {
+    console.error('[api] WebSocket question response failed:', wsErr);
+    throw new Error('Verbindung zum Server verloren. Bitte Seite neu laden.');
   }
-
-  return fetchJsonOrNdjson<MultiAgentResponse>(`${API_BASE}/chat/agents/question`, {
-    method: 'POST',
-    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ sessionId, questionId, answer }),
-  }, onEvent);
+  throw new Error('WebSocket nicht verfügbar. Bitte Seite neu laden.');
 }
 
 export async function sendMultiAgentMessage(
@@ -801,27 +912,15 @@ export async function sendMultiAgentMessage(
   options?: MultiAgentSessionOptions,
   pinnedUserfileIds?: string[],
 ): Promise<MultiAgentResponse> {
-  // Prefer WebSocket control plane; fall back to HTTP NDJSON.
   try {
     if (typeof window !== 'undefined' && typeof WebSocket !== 'undefined' && getAuthToken()) {
       return await sendMultiAgentMessageWs(message, projectRoot, sessionId, onEvent, options, pinnedUserfileIds);
     }
-  } catch {
-    // fall back
+  } catch (wsErr) {
+    console.error('[api] WebSocket message failed:', wsErr);
+    throw new Error('Verbindung zum Server verloren. Bitte Seite neu laden.');
   }
-
-  const sessionModePayload = buildSessionModePayload(options);
-  return fetchJsonOrNdjson<MultiAgentResponse>(`${API_BASE}/chat/agents`, {
-    method: 'POST',
-    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({
-      message,
-      projectRoot,
-      sessionId,
-      ...sessionModePayload,
-      ...(pinnedUserfileIds && pinnedUserfileIds.length > 0 ? { pinnedUserfileIds } : {}),
-    }),
-  }, onEvent);
+  throw new Error('WebSocket nicht verfügbar. Bitte Seite neu laden.');
 }
 
 export async function fetchAgentState(sessionId: string): Promise<{
@@ -968,5 +1067,60 @@ export async function transcribeAudio(audioBlob: Blob): Promise<{ text: string }
     method: 'POST',
     headers: withAuthHeaders(),
     body: formData,
+  });
+}
+
+// ============ Preview Artifacts API ============
+
+export type PreviewArtifactType = 'html' | 'svg' | 'webapp' | 'pdf' | 'scrape' | 'markdown';
+export type PreviewArtifactStatus = 'queued' | 'building' | 'ready' | 'failed';
+
+export interface PreviewArtifactRecord {
+  id: string;
+  type: PreviewArtifactType;
+  status: PreviewArtifactStatus;
+  title: string | null;
+  language: string | null;
+  createdAt: string;
+  updatedAt: string;
+  error: string | null;
+  mimeType: string | null;
+  signedUrl?: string;
+  signedUrlExpiresAt?: string;
+}
+
+export interface CreatePreviewArtifactRequest {
+  sessionId: string;
+  messageId?: string;
+  sourceKind?: 'inline' | 'tool_event' | 'manual';
+  type: PreviewArtifactType;
+  title?: string;
+  language?: string;
+  content?: string;
+  entrypoint?: string;
+  sourceFiles?: Array<string | { workspaceId?: string; path: string }>;
+  workspaceMounts?: Array<string | { workspaceId?: string; path: string }>;
+}
+
+export async function createPreviewArtifact(
+  payload: CreatePreviewArtifactRequest,
+): Promise<{ artifact: PreviewArtifactRecord }> {
+  return fetchJson<{ artifact: PreviewArtifactRecord }>(`${API_BASE}/preview/artifacts`, {
+    method: 'POST',
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchPreviewArtifact(id: string): Promise<{ artifact: PreviewArtifactRecord }> {
+  return fetchJson<{ artifact: PreviewArtifactRecord }>(`${API_BASE}/preview/artifacts/${encodeURIComponent(id)}`, {
+    headers: withAuthHeaders(),
+  });
+}
+
+export async function triggerPreviewScrape(id: string): Promise<{ artifact: PreviewArtifactRecord }> {
+  return fetchJson<{ artifact: PreviewArtifactRecord }>(`${API_BASE}/preview/artifacts/${encodeURIComponent(id)}/scrape`, {
+    method: 'POST',
+    headers: withAuthHeaders(),
   });
 }

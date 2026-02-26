@@ -1,6 +1,9 @@
-import { access, appendFile, mkdir, readFile, readdir, writeFile } from 'fs/promises';
+import { access, appendFile, mkdir, readFile, readdir } from 'fs/promises';
 import { resolve, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { generateEmbedding } from './embeddings.js';
+import { insertMemory } from './memoryStore.js';
+import { renderMemoryMd } from './renderMemoryMd.js';
 
 export interface MemoryAppendResult {
   workspaceRoot: string;
@@ -33,7 +36,7 @@ async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path);
     return true;
-  } catch {
+  } catch (_err) {
     return false;
   }
 }
@@ -58,15 +61,6 @@ function buildMemoryEntry(content: string, metadata?: { source?: string; session
     `### ${timestamp}`,
     `- note: ${content}`,
     `- source: ${source}${sessionLine}`,
-    '',
-  ].join('\n');
-}
-
-function buildLongTermEntry(content: string): string {
-  const timestamp = formatTimestamp();
-  return [
-    `### ${timestamp}`,
-    `- ${content}`,
     '',
   ].join('\n');
 }
@@ -125,33 +119,6 @@ export async function appendDailyMemoryEntry(
   };
 }
 
-export async function appendLongTermMemoryEntry(
-  content: string,
-  options: { workspaceRoot?: string | null } = {}
-): Promise<{ workspaceRoot: string; filePath: string; entry: string }> {
-  const trimmed = content.trim();
-  if (!trimmed) throw new Error('Memory content must not be empty');
-  if (trimmed.length > MAX_MEMORY_ENTRY_CHARS) {
-    throw new Error(`Memory content too long. Max ${MAX_MEMORY_ENTRY_CHARS} chars`);
-  }
-
-  const root = await ensureWorkspaceMemoryStructure(options.workspaceRoot);
-  const filePath = join(root, 'MEMORY.md');
-  const exists = await pathExists(filePath);
-
-  if (!exists) {
-    await writeFile(
-      filePath,
-      '# MEMORY.md - Long-Term Memory\n\nUse this file for durable context.\n\n',
-      'utf-8'
-    );
-  }
-
-  const entry = buildLongTermEntry(trimmed);
-  await appendFile(filePath, entry, 'utf-8');
-  return { workspaceRoot: root, filePath, entry };
-}
-
 export async function rememberNote(
   content: string,
   options: {
@@ -159,20 +126,34 @@ export async function rememberNote(
     workspaceRoot?: string | null;
     source?: string;
     sessionId?: string;
-    promoteToLongTerm?: boolean;
   } = {}
 ): Promise<{
   daily: MemoryAppendResult;
-  longTerm?: { workspaceRoot: string; filePath: string; entry: string };
 }> {
   const daily = await appendDailyMemoryEntry(content, options);
-  let longTerm: { workspaceRoot: string; filePath: string; entry: string } | undefined;
 
-  if (options.promoteToLongTerm) {
-    longTerm = await appendLongTermMemoryEntry(content, { workspaceRoot: options.workspaceRoot });
+  // Store in Supabase for structured memory.md rendering
+  try {
+    const embedding = await generateEmbedding(content);
+    await insertMemory({
+      content,
+      embedding,
+      memory_type: 'semantic',
+      namespace: 'devai/user',
+      priority: 'high',
+      source: 'user_stated',
+      session_id: options.sessionId,
+    });
+  } catch (err) {
+    console.error('[rememberNote] DB storage failed (workspace file saved):', err);
   }
 
-  return { daily, longTerm };
+  // Fire-and-forget: regenerate memory.md from DB
+  renderMemoryMd(options.workspaceRoot ?? undefined).catch((err) =>
+    console.error('[workspaceMemory] renderMemoryMd fire-and-forget failed:', err),
+  );
+
+  return { daily };
 }
 
 export async function readDailyMemory(
@@ -201,7 +182,7 @@ function buildSnippet(content: string, index: number, queryLength: number): stri
   return content.slice(left, right).replace(/\s+/g, ' ').trim();
 }
 
-async function collectMemoryFiles(workspaceRoot: string, includeLongTerm: boolean): Promise<string[]> {
+async function collectMemoryFiles(workspaceRoot: string): Promise<string[]> {
   const memoryDir = join(workspaceRoot, 'memory');
   const files: string[] = [];
 
@@ -214,11 +195,6 @@ async function collectMemoryFiles(workspaceRoot: string, includeLongTerm: boolea
     files.push(...dailyFiles);
   }
 
-  if (includeLongTerm) {
-    const longTerm = join(workspaceRoot, 'MEMORY.md');
-    if (await pathExists(longTerm)) files.push(longTerm);
-  }
-
   return files;
 }
 
@@ -227,7 +203,6 @@ export async function searchWorkspaceMemory(
   options: {
     workspaceRoot?: string | null;
     limit?: number;
-    includeLongTerm?: boolean;
   } = {}
 ): Promise<MemorySearchResult> {
   const needle = query.trim().toLowerCase();
@@ -235,8 +210,7 @@ export async function searchWorkspaceMemory(
 
   const root = await ensureWorkspaceMemoryStructure(options.workspaceRoot);
   const limit = Math.max(1, Math.min(50, options.limit || 10));
-  const includeLongTerm = options.includeLongTerm !== false;
-  const files = await collectMemoryFiles(root, includeLongTerm);
+  const files = await collectMemoryFiles(root);
   const hits: MemorySearchHit[] = [];
 
   for (const filePath of files) {

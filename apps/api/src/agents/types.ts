@@ -17,20 +17,14 @@ export type RiskLevel = 'low' | 'medium' | 'high';
 
 export type TaskComplexity = 'simple' | 'moderate' | 'complex';
 
-// Smart model selection - for performance optimization
-export type TaskComplexityLevel = 'trivial' | 'simple' | 'moderate' | 'complex';
-
-export type LLMProviderName = 'anthropic' | 'openai' | 'gemini' | 'zai';
+export type LLMProviderName = 'anthropic' | 'openai' | 'gemini' | 'zai' | 'moonshot';
 
 export interface ModelSelection {
   provider: LLMProviderName;
   model: string;
   reason: string;
-}
-
-export interface ModelTier {
-  provider: LLMProviderName;
-  model: string;
+  /** Models to try on the same provider before falling back cross-provider. */
+  sameProviderFallbacks?: string[];
 }
 
 export type AgentPhase =
@@ -50,6 +44,7 @@ export interface AgentDefinition {
   name: AgentName;
   role: AgentRole;
   model: string;
+  fastModel?: string;
   fallbackModel?: string;
   tools: string[];
   systemPrompt: string;
@@ -276,6 +271,9 @@ export interface GatheredInfo {
   sessionMode?: string;
   visibility?: string;
 
+  // Parallel loop mode (serial | parallel) — separate from workspace sessionMode
+  loopMode?: string;
+
   // Delegation tracking
   lastDelegation?: {
     from: string;
@@ -367,7 +365,7 @@ export type AgentStreamEvent =
   | { type: 'parallel_start'; agents: AgentName[]; tasks: string[] }
   | { type: 'parallel_progress'; agent: AgentName; progress: string }
   | { type: 'parallel_complete'; results: DelegationResult[] }
-  | { type: 'agent_complete'; agent: AgentName; result: unknown }
+  | { type: 'agent_complete'; agent: AgentName; result: unknown; durationMs?: number; toolCount?: number; delegationStatus?: 'completed' | 'failed' | 'escalated' }
   | { type: 'error'; agent: AgentName; error: string }
   // SCOUT events
   | { type: 'scout_start'; query: string; scope: ScoutScope }
@@ -379,7 +377,11 @@ export type AgentStreamEvent =
   | { type: 'todo_updated'; todos: TodoItem[] }
   // Inbox events
   | { type: 'message_queued'; messageId: string; preview: string }
-  | { type: 'inbox_processing'; count: number };
+  | { type: 'inbox_processing'; count: number }
+  // Parallel loop events
+  | { type: 'loop_started'; turnId: string; taskLabel: string }
+  | { type: 'loop_completed'; turnId: string; taskLabel: string }
+  | { type: 'mode_changed'; mode: 'serial' | 'parallel' };
 
 // Agent Response
 export interface AgentResponse {
@@ -460,16 +462,9 @@ export interface LoopDelegationResult {
 // CHAPO LOOP TYPES
 // ============================================
 
-export interface ValidationResult {
-  isComplete: boolean;
-  confidence: number;
-  issues: string[];
-  suggestion?: string;
-}
-
 export interface ChapoLoopResult {
   answer: string;
-  status: 'completed' | 'waiting_for_user' | 'error';
+  status: 'completed' | 'waiting_for_user' | 'error' | 'aborted';
   totalIterations: number;
   question?: string; // if status === 'waiting_for_user'
 }

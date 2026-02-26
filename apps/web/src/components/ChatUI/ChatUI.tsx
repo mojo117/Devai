@@ -4,7 +4,7 @@ import type { ChatStreamEvent } from '../../api';
 import type { ChatMessage } from '../../types';
 import type { AgentName, AgentPhase } from '../AgentStatus';
 import type { PendingAction } from '../InlineAction';
-import type { ChatUIProps, ToolEvent } from './types';
+import type { ChatUIProps, ToolEvent, DelegationData, DelegationToolStep } from './types';
 import { upsertToolEvent } from './utils';
 import { useChatSession } from './hooks/useChatSession';
 import { usePendingActions } from './hooks/usePendingActions';
@@ -12,6 +12,10 @@ import { useFileHints } from './hooks/useFileHints';
 import { MessageList } from './MessageList';
 import { InputArea } from './InputArea';
 import { PendingActionsBar } from './PendingActionsBar';
+import { DropOverlay } from './DropOverlay';
+import { validateFile } from './uploadConstants';
+import { TodoCard } from '../TodoCard';
+import { getLatestArtifact, parseToolEventArtifacts } from '../PreviewPanel/artifactParser';
 
 export function ChatUI({
   projectRoot,
@@ -26,6 +30,10 @@ export function ChatUI({
   onSessionStateChange,
   pinnedUserfileIds,
   onPinUserfile,
+  onClearPinnedUserfiles,
+  onSetPreview,
+  previewEnabled: _previewEnabled,
+  onArtifactDetected,
 }: ChatUIProps) {
   // Core state shared across sub-components
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -39,6 +47,10 @@ export function ChatUI({
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const [messageToolEvents, setMessageToolEvents] = useState<Record<string, ToolEvent[]>>({});
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set());
+  const [currentTodos, setCurrentTodos] = useState<Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }>>([]);
+  const [delegations, setDelegations] = useState<DelegationData[]>([]);
+  const [messageDelegations, setMessageDelegations] = useState<Record<string, DelegationData[]>>({});
+  const activeDelegationRef = useRef<string | null>(null);
   const [retryState, setRetryState] = useState<null | {
     input: string;
     userMessage: ChatMessage;
@@ -57,6 +69,8 @@ export function ChatUI({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isFileUploading, setIsFileUploading] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragCounterRef = useRef(0);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const debug = import.meta.env.DEV && Boolean((window as any).__DEVAI_DEBUG);
@@ -78,6 +92,7 @@ export function ChatUI({
     setMessages,
     setToolEvents: setToolEvents as React.Dispatch<React.SetStateAction<unknown[]>>,
     onEventsLoaded: handleEventsLoaded,
+    onClearPinnedUserfiles,
   });
 
   const actions = usePendingActions({
@@ -106,6 +121,15 @@ export function ChatUI({
       }
       return [];
     });
+    setDelegations(currentDels => {
+      if (currentDels.length > 0) {
+        setMessageDelegations(prev => ({
+          ...prev,
+          [messageId]: [...currentDels],
+        }));
+      }
+      return [];
+    });
   }, []);
 
   // --- Tool event persistence ---
@@ -115,6 +139,10 @@ export function ChatUI({
   useEffect(() => {
     if (!session.sessionId) return;
     setToolEvents([]);
+    setCurrentTodos([]);
+    setDelegations([]);
+    setMessageDelegations({});
+    activeDelegationRef.current = null;
 
     // Load localStorage fallback (server events will overwrite via onEventsLoaded)
     try {
@@ -133,6 +161,17 @@ export function ChatUI({
     } catch {
       setMessageToolEvents({});
     }
+
+    try {
+      const delKey = `devai_delegations_${session.sessionId}`;
+      const storedDel = localStorage.getItem(delKey);
+      if (storedDel) {
+        const parsed = JSON.parse(storedDel) as Record<string, DelegationData[]>;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          setMessageDelegations(parsed);
+        }
+      }
+    } catch { /* ignore */ }
   }, [session.sessionId]);
 
   // --- Auto-scroll ---
@@ -140,6 +179,45 @@ export function ChatUI({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, toolEvents]);
+
+  // --- Artifact detection ---
+
+  useEffect(() => {
+    if (!onArtifactDetected) return;
+
+    // Check frozen tool events first (completed messages)
+    const artifact = getLatestArtifact(messages, messageToolEvents);
+    if (artifact) {
+      onArtifactDetected(artifact);
+      return;
+    }
+
+    // Also check live tool events (still streaming)
+    if (toolEvents.length > 0) {
+      const liveArtifacts = parseToolEventArtifacts(toolEvents);
+      if (liveArtifacts.length > 0) {
+        onArtifactDetected(liveArtifacts[liveArtifacts.length - 1]);
+        return;
+      }
+    }
+
+    onArtifactDetected(null);
+  }, [messages, messageToolEvents, toolEvents, onArtifactDetected]);
+
+  // --- Delegation persistence ---
+
+  useEffect(() => {
+    if (!session.sessionId) return;
+    try {
+      const key = `devai_delegations_${session.sessionId}`;
+      const filtered = Object.fromEntries(
+        Object.entries(messageDelegations).filter(([, v]) => v.length > 0)
+      );
+      if (Object.keys(filtered).length > 0) {
+        localStorage.setItem(key, JSON.stringify(filtered));
+      }
+    } catch { /* quota exceeded — silently skip */ }
+  }, [messageDelegations, session.sessionId]);
 
   // --- Event expand toggle ---
 
@@ -175,9 +253,30 @@ export function ChatUI({
           },
         ]);
         break;
-      case 'agent_complete':
+      case 'agent_complete': {
+        const completedAgent = (event as Record<string, unknown>).agent as AgentName | undefined;
+        if (completedAgent && completedAgent !== 'chapo' && activeDelegationRef.current) {
+          const ev = event as Record<string, unknown>;
+          const durationMs = typeof ev.durationMs === 'number' ? ev.durationMs : undefined;
+          const resultStr = typeof ev.result === 'string' ? ev.result : JSON.stringify(ev.result);
+          const backendStatus = ev.delegationStatus as string | undefined;
+          const delegationStatus = backendStatus === 'escalated' ? 'escalated' as const
+            : backendStatus === 'failed' ? 'failed' as const
+            : 'completed' as const;
+          setDelegations(prev => prev.map(d => {
+            if (d.id !== activeDelegationRef.current) return d;
+            return {
+              ...d,
+              status: delegationStatus,
+              durationMs: durationMs ?? (Date.now() - d.startTime),
+              response: resultStr,
+            };
+          }));
+          activeDelegationRef.current = null;
+        }
         setAgentPhase('idle');
         break;
+      }
       case 'parallel_start':
         setAgentPhase('executing');
         break;
@@ -206,6 +305,18 @@ export function ChatUI({
         const name = (ev.toolName as string | undefined) || (ev.name as string | undefined);
         const args = ev.args ?? ev.arguments;
         upsertToolEvent(setToolEvents, id, { type: 'tool_call', name, arguments: args, agent: eventAgent });
+        if (activeDelegationRef.current) {
+          const step: DelegationToolStep = {
+            id,
+            name: name || 'tool',
+            argsPreview: typeof args === 'string' ? String(args).slice(0, 80) : JSON.stringify(args).slice(0, 80),
+          };
+          setDelegations(prev => prev.map(d =>
+            d.id === activeDelegationRef.current
+              ? { ...d, toolSteps: [...d.toolSteps, step] }
+              : d
+          ));
+        }
         break;
       }
       case 'tool_result_chunk': {
@@ -222,6 +333,34 @@ export function ChatUI({
         const name = (ev.toolName as string | undefined) || (ev.name as string | undefined);
         const result = ev.result ?? { result: ev.result, success: ev.success };
         upsertToolEvent(setToolEvents, id, { type: 'tool_result', name, result, completed: Boolean(ev.completed), agent: eventAgent });
+        if (activeDelegationRef.current) {
+          const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
+          setDelegations(prev => prev.map(d => {
+            if (d.id !== activeDelegationRef.current) return d;
+            const steps = d.toolSteps.map(s =>
+              s.id === id ? { ...s, resultPreview: resultStr.slice(0, 120), success: Boolean(ev.success ?? !ev.isError) } : s
+            );
+            return { ...d, toolSteps: steps };
+          }));
+        }
+        break;
+      }
+      case 'delegation': {
+        const ev = event as Record<string, unknown>;
+        const delId = String(ev.id || crypto.randomUUID());
+        const newDelegation: DelegationData = {
+          id: delId,
+          from: (ev.from as AgentName) || 'chapo',
+          to: (ev.to as AgentName) || 'devo',
+          task: String(ev.task || ev.objective || ''),
+          domain: ev.domain as string | undefined,
+          status: 'working',
+          startTime: Date.now(),
+          toolSteps: [],
+          prompt: String(ev.objective || ev.task || ''),
+        };
+        setDelegations(prev => [...prev, newDelegation]);
+        activeDelegationRef.current = delId;
         break;
       }
       case 'action_pending': {
@@ -275,6 +414,51 @@ export function ChatUI({
         ]);
         break;
       }
+      case 'loop_started': {
+        const ev = event as unknown as { turnId: string; taskLabel: string };
+        setToolEvents((prev) => [
+          ...prev,
+          {
+            id: ev.turnId || crypto.randomUUID(),
+            type: 'status',
+            name: 'parallel_loop',
+            result: `Parallel Loop gestartet: ${ev.taskLabel}`,
+            completed: false,
+            agent: 'chapo' as AgentName,
+          },
+        ]);
+        break;
+      }
+      case 'loop_completed': {
+        const ev = event as unknown as { turnId: string; taskLabel: string };
+        setToolEvents((prev) => [
+          ...prev,
+          {
+            id: ev.turnId || crypto.randomUUID(),
+            type: 'status',
+            name: 'parallel_loop',
+            result: `Loop fertig: ${ev.taskLabel}`,
+            completed: true,
+            agent: 'chapo' as AgentName,
+          },
+        ]);
+        break;
+      }
+      case 'mode_changed': {
+        const ev = event as unknown as { mode: string };
+        setToolEvents((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            type: 'status',
+            name: 'mode',
+            result: ev.mode === 'parallel' ? 'Parallel Mode aktiviert' : 'Serial Mode aktiviert',
+            completed: true,
+            agent: 'chapo' as AgentName,
+          },
+        ]);
+        break;
+      }
       case 'partial_response': {
         const partialMessage: ChatMessage = {
           id: crypto.randomUUID(),
@@ -288,9 +472,8 @@ export function ChatUI({
         break;
       }
       case 'todo_updated': {
-        // Todo events are informational — the frontend can render them but
-        // we keep the approach minimal for now (no separate UI component).
-        // The tool events already show the todoWrite call + result.
+        const ev = event as unknown as { todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }> };
+        setCurrentTodos(ev.todos || []);
         break;
       }
     }
@@ -309,6 +492,7 @@ export function ChatUI({
     setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
     setToolEvents([]);
+    setCurrentTodos([]);
     fileHintState.fileHints.length > 0; // clear hints via effect
     setAgentPhase('idle');
     setActiveAgent(null);
@@ -327,14 +511,23 @@ export function ChatUI({
         session.setSessionId(response.sessionId);
         await saveSetting('lastSessionId', response.sessionId);
       }
-      await session.refreshSessions(response.sessionId);
+      // Only refresh the sidebar session list — don't reload messages.
+      // Messages are already managed by streaming events + the append below.
+      await session.refreshSessionList();
 
       const responseMessage = response.message;
       if (!responseMessage) {
         return null;
       }
 
-      setMessages((prev) => [...prev, responseMessage]);
+      setMessages((prev) => {
+        // Dedup guard: skip if a message with same ID already exists
+        if (prev.some((m) => m.id === responseMessage.id)) {
+          console.warn('[ChatUI] Dedup: skipping duplicate response', responseMessage.id);
+          return prev;
+        }
+        return [...prev, responseMessage];
+      });
       return { message: responseMessage, sessionId: response.sessionId };
     };
 
@@ -351,7 +544,9 @@ export function ChatUI({
       const errorMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: `Error: ${err}${shouldRetry ? '\\n\\nYou can retry the last message below.' : ''}`,
+        content: shouldRetry
+          ? 'Verbindung zum Server kurz unterbrochen. Du kannst die letzte Nachricht unten erneut senden.'
+          : `Fehler: ${err}`,
         timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, errorMessage]);
@@ -383,6 +578,16 @@ export function ChatUI({
       saveSessionMessage(session.sessionId, message);
     }
   }, [session.sessionId]);
+
+  const handleSetPreview = useCallback((enabled: boolean) => {
+    onSetPreview?.(enabled);
+    setMessages(prev => [...prev, {
+      id: `preview-${Date.now()}`,
+      role: 'system' as const,
+      content: enabled ? 'Preview pane enabled.' : 'Preview pane disabled.',
+      timestamp: new Date().toISOString(),
+    }]);
+  }, [onSetPreview]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -471,10 +676,95 @@ export function ChatUI({
     }
   };
 
+  // --- Drag & drop file upload ---
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer.types.includes('Files')) {
+      setIsDragOver(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setIsDragOver(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = 0;
+    setIsDragOver(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+
+    setIsFileUploading(true);
+    const uploadedIds: string[] = [];
+    for (const file of files) {
+      const validationError = validateFile(file);
+      if (validationError) {
+        persistSystemMessage({
+          id: `err-${Date.now()}-${file.name}`,
+          role: 'system',
+          content: `Upload abgelehnt (${file.name}): ${validationError}`,
+          timestamp: new Date().toISOString(),
+        });
+        continue;
+      }
+      try {
+        const result = await uploadUserfile(file);
+        if (result.file?.id) {
+          uploadedIds.push(result.file.id);
+          if (onPinUserfile) {
+            onPinUserfile(result.file.id);
+          }
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Upload failed';
+        persistSystemMessage({
+          id: `err-${Date.now()}-${file.name}`,
+          role: 'system',
+          content: `Upload fehlgeschlagen (${file.name}): ${msg}`,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+    setIsFileUploading(false);
+    const count = uploadedIds.length;
+    if (count > 0) {
+      persistSystemMessage({
+        id: `upload-${Date.now()}`,
+        role: 'system',
+        content: `${count} Datei${count > 1 ? 'en' : ''} hochgeladen und als AI-Kontext gepinnt`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }, [onPinUserfile, persistSystemMessage]);
+
   // --- Render ---
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div
+      className="flex flex-col h-full overflow-hidden relative"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      <DropOverlay visible={isDragOver} />
       <MessageList
         messages={messages}
         toolEvents={toolEvents}
@@ -492,7 +782,11 @@ export function ChatUI({
         onSelectSession={session.handleSelectSession}
         onRestartChat={session.handleRestartChat}
         onNewChat={session.handleNewChat}
+        delegations={delegations}
+        messageDelegations={messageDelegations}
       />
+
+      {currentTodos.length > 0 && <TodoCard todos={currentTodos} />}
 
       <PendingActionsBar
         pendingActions={actions.pendingActions}
@@ -520,6 +814,7 @@ export function ChatUI({
         onFileUpload={handleFileUpload}
         isTranscribing={isTranscribing}
         onTranscribe={handleTranscription}
+        onSetPreview={handleSetPreview}
       />
     </div>
   );

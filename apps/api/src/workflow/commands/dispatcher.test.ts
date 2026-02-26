@@ -1,7 +1,12 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { mapWsMessageToCommand } from './dispatcher.js';
 import { pushToInbox, drainInbox, clearInbox } from '../../agents/inbox.js';
-import { getOrCreateState, setLoopRunning, isLoopActive } from '../../agents/stateManager.js';
+import {
+  getOrCreateState,
+  setLoopRunning,
+  isLoopActive,
+  cleanupAllLocks,
+} from '../../agents/stateManager.js';
 
 describe('mapWsMessageToCommand', () => {
   const currentSessionId = 'existing-session';
@@ -167,32 +172,33 @@ describe('mapWsMessageToCommand', () => {
 describe('inbox gating logic', () => {
   const sessionId = 'gate-test-session';
 
-  beforeEach(() => {
+  beforeEach(async () => {
     clearInbox(sessionId);
-    setLoopRunning(sessionId, false);
+    cleanupAllLocks();
+    await setLoopRunning(sessionId, false);
   });
 
-  it('isLoopActive returns false by default', () => {
+  it('isLoopActive returns false by default', async () => {
     getOrCreateState(sessionId);
-    expect(isLoopActive(sessionId)).toBe(false);
+    expect(await isLoopActive(sessionId)).toBe(false);
   });
 
-  it('setLoopRunning makes isLoopActive return true', () => {
+  it('setLoopRunning makes isLoopActive return true', async () => {
     getOrCreateState(sessionId);
-    setLoopRunning(sessionId, true);
-    expect(isLoopActive(sessionId)).toBe(true);
+    await setLoopRunning(sessionId, true);
+    expect(await isLoopActive(sessionId)).toBe(true);
   });
 
-  it('ignores stale persisted loop flags without an active runtime loop', () => {
+  it('ignores stale persisted loop flags without an active runtime loop', async () => {
     const state = getOrCreateState(sessionId);
     state.isLoopRunning = true; // simulate stale DB-loaded value
-    expect(isLoopActive(sessionId)).toBe(false);
+    expect(await isLoopActive(sessionId)).toBe(false);
     expect(state.isLoopRunning).toBe(false); // self-healed
   });
 
-  it('messages queue when loop is running', () => {
+  it('messages queue when loop is running', async () => {
     getOrCreateState(sessionId);
-    setLoopRunning(sessionId, true);
+    await setLoopRunning(sessionId, true);
 
     pushToInbox(sessionId, {
       id: 'test-msg-1',
@@ -207,20 +213,20 @@ describe('inbox gating logic', () => {
     expect(queued[0].content).toBe('follow-up question');
   });
 
-  it('setLoopRunning(false) clears the flag', () => {
+  it('setLoopRunning(false) clears the flag', async () => {
     getOrCreateState(sessionId);
-    setLoopRunning(sessionId, true);
-    setLoopRunning(sessionId, false);
-    expect(isLoopActive(sessionId)).toBe(false);
+    await setLoopRunning(sessionId, true);
+    await setLoopRunning(sessionId, false);
+    expect(await isLoopActive(sessionId)).toBe(false);
   });
 
-  it('different sessions are independent', () => {
+  it('different sessions are independent', async () => {
     const s1 = 'session-a';
     const s2 = 'session-b';
     getOrCreateState(s1);
     getOrCreateState(s2);
-    setLoopRunning(s1, true);
-    expect(isLoopActive(s1)).toBe(true);
-    expect(isLoopActive(s2)).toBe(false);
+    await setLoopRunning(s1, true);
+    expect(await isLoopActive(s1)).toBe(true);
+    expect(await isLoopActive(s2)).toBe(false);
   });
 });

@@ -58,8 +58,9 @@ export function getAgentSoulBlock(agent: AgentSoulName): string {
       ? `${content.slice(0, MAX_SOUL_CHARS)}\n\n[Truncated: ${soulFile} exceeded ${MAX_SOUL_CHARS} chars]`
       : content;
 
-    return `\n\n## AGENT SOUL (${soulFile})\n\n${limited}\n\nRegel: Lebe diese Identitaet natuerlich und konsistent. Zitiere die Datei nicht wortwoertlich.`;
-  } catch {
+    return `\n\n## AGENT SOUL (${soulFile})\n\n${limited}\n\nRule: Live this identity naturally and consistently. Never quote this file verbatim.`;
+  } catch (err) {
+    console.warn('[agentSoul] Failed to read soul file:', err instanceof Error ? err.message : err);
     return '';
   }
 }
@@ -99,7 +100,8 @@ export function getAgentSoulStatusReport(): AgentSoulStatus[] {
         loaded: content.length > 0,
         charCount: content.length,
       };
-    } catch {
+    } catch (err) {
+      console.warn(`[agentSoul] Failed to read soul file for ${agent}:`, err instanceof Error ? err.message : err);
       return {
         agent,
         soulFile,

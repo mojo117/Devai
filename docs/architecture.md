@@ -29,10 +29,10 @@ DevAI is an AI-powered assistant platform. The user interacts with **Chapo** -- 
               |  | Manager       |  | Handler       | |
               |  +---------------+  +---------------+ |
               |                                       |
-              |  +---------------+  +---------------+ |
-              |  | Self-         |  | System        | |
-              |  | Validator     |  | Context       | |
-              |  +---------------+  +---------------+ |
+              |  +---------------+                   |
+              |  | System        |                   |
+              |  | Context       |                   |
+              |  +---------------+                   |
               |                                       |
               |  5 Actions:                           |
               |  +--------+  +--------+  +--------+  |
@@ -55,8 +55,8 @@ DevAI is an AI-powered assistant platform. The user interacts with **Chapo** -- 
 **Key design principles:**
 - Chapo is a versatile assistant, not just a dev tool
 - No separate decision engine -- the LLM's `tool_calls` ARE the decisions
+- **Trust the model** -- the LLM agents are capable enough to do their jobs correctly. Don't add coded validators, regex checks, or heuristic guardrails for things the model can handle through its prompt. If an agent should behave a certain way, tell it in the prompt -- don't build code to police its output. Code-level checks should only exist for things that are genuinely outside the model's control (token limits, API errors, network failures).
 - Errors feed back into the loop as context (never crash)
-- Self-validation runs before every ANSWER (advisory, never blocks)
 - Delegation via `delegateToDevo` / `delegateToScout` / `delegateToCaio` tool calls
 - `delegateParallel` fires multiple agents concurrently via Promise.all()
 - Memory tools executed directly by CHAPO within the loop
@@ -167,7 +167,7 @@ The ChapoLoop is the core of DevAI's intelligence. It replaces the former Looper
 
 ```
 User message --> ChapoLoop.run():
-    +-- ANSWER --> Self-validate, send response, exit loop
+    +-- ANSWER --> Send response, exit loop
     +-- ASK    --> Pause loop, wait for user reply
     +-- TOOL   --> Execute tool, feed result back into loop
     +-- DELEGATE --> Run DEVO/SCOUT sub-loop, feed result back
@@ -248,7 +248,6 @@ runLoop() -- max N iterations:
   |
   +-- No tool_calls in response?
   |   +-- ACTION: ANSWER
-  |   +-- Self-validate (if enabled)
   |   +-- return { status: 'completed', answer }
   |
   +-- For each tool_call:
@@ -342,6 +341,29 @@ The current inbox system has limitations: messages are injected as system hints 
 - CHAPO tracks multiple tasks via conversation context + `respondToUser` (no formal task list needed)
 - Intake classifier may become redundant — kept for now as cheap pre-filter
 - CAIO as inbox task manager is architecturally possible if model self-tracking proves insufficient at high volumes (uses existing delegation, no new systems)
+
+### Intake Seed
+
+Before the ChapoLoop starts, a fast model call (GLM-4.7-Flash) extracts discrete requests from the user message and creates initial TodoItems. This ensures multi-part messages are tracked structurally, not relying on CHAPO to voluntarily parse them.
+
+**Source:** `apps/api/src/services/intakeSeed.ts`
+**Called from:** `processRequest()` in `agents/router/requestFlow.ts`
+
+The intake seed also runs on inbox messages (via `contextManager.checkInbox()`), ensuring follow-up messages during an active loop are also tracked as todos.
+
+### Exit Gate
+
+Before the ChapoLoop can exit with an ANSWER, it checks `ConversationState.todos` for pending items. If any are found, a system message is injected and the loop continues. Max 2 bounces to prevent infinite loops.
+
+**Source:** `apps/api/src/agents/chapo-loop.ts` (ANSWER path)
+
+### Heartbeat Loop
+
+Every 120 minutes during active hours (07:00-21:00 Europe/Berlin), a heartbeat job triggers a CHAPO loop that checks chat history, API logs, and memory for unhandled issues. Results are persisted in the `heartbeat_runs` Supabase table.
+
+**Source:** `apps/api/src/services/heartbeatService.ts`
+**Scheduled by:** `schedulerService.registerInternalJob()` in `server.ts`
+**DB table:** `heartbeat_runs` (status, findings, actions_taken, duration_ms)
 
 ### ChapoLoopResult
 
@@ -494,7 +516,7 @@ Memory tools (`memory_remember`, `memory_search`, `memory_readToday`) are regula
 
 ## Prompt Architecture
 
-All system prompts live in `apps/api/src/prompts/` and are written in **German**. JSON schema field names remain in English (parsed programmatically).
+All system prompts live in `apps/api/src/prompts/` and are written in **English** (identity-first format). JSON schema field names are also in English.
 
 ```
 prompts/

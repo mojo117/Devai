@@ -101,7 +101,8 @@ export async function executeSkill(
   const executeFilePath = join(resolve(config.skillsDir), skillId, 'execute.ts');
   try {
     await access(executeFilePath);
-  } catch {
+  } catch (err) {
+    console.warn(`[skills] Skill "${skillId}" execute.ts not found:`, err instanceof Error ? err.message : err);
     return { success: false, error: `Skill "${skillId}" has no execute.ts` };
   }
 

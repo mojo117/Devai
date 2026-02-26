@@ -1,13 +1,13 @@
+import { nanoid } from 'nanoid';
 import type { ContentBlock } from '../../llm/types.js';
 import { getTextContent } from '../../llm/types.js';
 import { getTrustMode } from '../../db/queries.js';
 import { rememberNote } from '../../memory/workspaceMemory.js';
 import * as stateManager from '../stateManager.js';
 import { warmSystemContextForSession } from '../systemContext.js';
-import {
-  classifyTaskComplexity,
-  selectModel,
-} from '../../llm/modelSelector.js';
+import { resolveModelSelection } from '../../llm/modelSelector.js';
+import { getAgent } from './agentAccess.js';
+import { tryHandleSlashCommand } from './slashCommands.js';
 import { ChapoLoop } from '../chapo-loop.js';
 import type {
   AgentName,
@@ -16,7 +16,6 @@ import type {
 import {
   extractExplicitRememberNote,
   getProjectRootFromState,
-  isSmallTalk,
   loadRecentConversationHistory,
   looksLikeContinuePrompt,
   parseYesNo,
@@ -32,8 +31,10 @@ export async function processRequest(
   conversationHistory: Array<{ role: string; content: string }> | undefined,
   projectRoot: string | null,
   sendEvent: SendEventFn,
+  parallelTurnId?: string,
 ): Promise<string> {
   await stateManager.ensureStateLoaded(sessionId);
+  const traceId = nanoid(12);
   // Default to empty array if not provided
   const history = conversationHistory ?? [];
 
@@ -67,47 +68,41 @@ export async function processRequest(
     }
   }
 
-  // Lightweight small-talk response (avoid forcing project clarification on greetings).
-  if (isSmallTalk(getTextContent(userMessage))) {
-    return 'Hey. Womit soll ich dir helfen: Code aendern, Bug fixen, oder etwas nachschlagen?';
-  }
-
   const explicitRemember = extractExplicitRememberNote(getTextContent(userMessage));
   if (explicitRemember) {
     try {
       const saved = await rememberNote(explicitRemember.note, {
         sessionId,
         source: 'chat.explicit_remember',
-        promoteToLongTerm: explicitRemember.promoteToLongTerm,
       });
-      const longTermInfo = saved.longTerm ? ` und zusaetzlich in ${saved.longTerm.filePath}` : '';
-      return `Notiert. Gespeichert in ${saved.daily.filePath}${longTermInfo}.`;
+      return `Notiert. Gespeichert in ${saved.daily.filePath}.`;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       return `Ich konnte die Notiz nicht speichern: ${message}`;
     }
   }
 
+  // Slash commands — safety-net in case the fast-path in commandHandlers didn't catch them
+  const slashResult = await tryHandleSlashCommand(sessionId, getTextContent(userMessage));
+  if (slashResult !== null) return slashResult;
+
   // Keep the last actual request for approval/resume flows.
   stateManager.setOriginalRequest(sessionId, getTextContent(userMessage));
   await warmSystemContextForSession(sessionId, projectRoot || getProjectRootFromState(sessionId));
 
-  // FAST PATH: Early task classification (no LLM call!)
-  const taskComplexity = classifyTaskComplexity(getTextContent(userMessage));
-  const modelSelection = selectModel(taskComplexity);
+  const chapo = getAgent('chapo');
+  const modelSelection = resolveModelSelection(chapo, sessionId);
 
-  console.info('[agents] processRequest start', {
+  console.info(`[trace:${traceId}] processRequest start`, {
     sessionId,
     projectRoot: projectRoot || null,
     messageLength: getTextContent(userMessage).length,
-    taskComplexity,
     selectedModel: `${modelSelection.provider}/${modelSelection.model}`,
   });
 
   // Initialize or get state
   const state = stateManager.getOrCreateState(sessionId);
   stateManager.setOriginalRequest(sessionId, getTextContent(userMessage));
-  stateManager.setGatheredInfo(sessionId, 'taskComplexity', taskComplexity);
   stateManager.setGatheredInfo(sessionId, 'modelSelection', modelSelection);
   const trustMode = await getTrustMode();
   stateManager.setGatheredInfo(sessionId, 'trustMode', trustMode);
@@ -115,9 +110,8 @@ export async function processRequest(
   try {
     const loopProjectRoot = projectRoot || getProjectRootFromState(sessionId);
     const loop = new ChapoLoop(sessionId, sendEvent, loopProjectRoot, modelSelection, {
-      selfValidationEnabled: taskComplexity !== 'trivial',
-      maxIterations: taskComplexity === 'trivial' ? 8 : 20,
-    });
+      maxIterations: 30,
+    }, traceId, parallelTurnId);
     const loopResult = await loop.run(userMessage, history);
 
     if (loopResult.status === 'error') {
@@ -126,8 +120,39 @@ export async function processRequest(
 
     return loopResult.answer;
   } catch (error) {
-    stateManager.setPhase(sessionId, 'error');
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error(`[trace:${traceId}] ChapoLoop crashed, attempting recovery:`, errorMessage);
+
+    // Attempt recovery: let CHAPO process the error intelligently
+    try {
+      const recoveryLoop = new ChapoLoop(sessionId, sendEvent, projectRoot || getProjectRootFromState(sessionId), modelSelection, {
+        maxIterations: 3,
+      }, traceId);
+      // Sanitize history to prevent re-triggering crashes from oversized/malformed messages
+      const sanitizedHistory = history.slice(-6).map(msg => ({
+        ...msg,
+        content: typeof msg.content === 'string'
+          ? msg.content.slice(0, 5000)
+          : String(msg.content).slice(0, 5000),
+      }));
+      const errorHistory = [
+        ...sanitizedHistory,
+        { role: 'user', content: getTextContent(userMessage) },
+        { role: 'system', content: `[CRITICAL ERROR] The previous processing attempt crashed with: ${errorMessage}. Explain what happened to the user in plain language and suggest next steps. Do NOT retry the same operation that caused the crash.` },
+      ];
+      const recovery = await recoveryLoop.run(
+        `Erkläre dem User was schiefgelaufen ist: ${errorMessage}`,
+        errorHistory,
+      );
+      if (recovery.status !== 'error') {
+        return recovery.answer;
+      }
+    } catch (recoveryErr) {
+      console.error('[agents] Recovery loop also failed:', recoveryErr);
+    }
+
+    // Absolute fallback if recovery also fails
+    stateManager.setPhase(sessionId, 'error');
 
     stateManager.addHistoryEntry(
       sessionId,

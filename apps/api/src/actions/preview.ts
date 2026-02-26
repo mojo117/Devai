@@ -77,7 +77,8 @@ async function tryRead(path: string): Promise<string | null> {
   try {
     const result = await readFile(path);
     return result.content;
-  } catch {
+  } catch (err) {
+    console.warn('[preview] Failed to read file for preview:', err instanceof Error ? err.message : err);
     return null;
   }
 }

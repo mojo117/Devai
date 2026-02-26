@@ -1,5 +1,11 @@
 import { nanoid } from 'nanoid';
-import { getOrCreateState, getState, schedulePersist } from './core.js';
+import { getOrCreateState, getState, schedulePersist, deleteState } from './core.js';
+import {
+  acquireSessionLock,
+  tryAcquireSessionLock,
+  updateSessionActivity,
+  cleanupAllLocks,
+} from './loopLock.js';
 import type {
   AgentAction,
   AgentHistoryEntry,
@@ -14,8 +20,33 @@ import type {
   UserQuestion,
 } from '../types.js';
 
-// Runtime-only loop activity map. This must not be reconstructed from persisted state.
+// --- Parallel Loop Types ---
+
+export interface ParallelLoopAction {
+  iteration: number;
+  tool: string;
+  summary: string;
+}
+
+export interface ParallelLoopEntry {
+  turnId: string;
+  taskLabel: string;
+  originalPrompt: string;
+  status: 'running' | 'completed' | 'aborted';
+  finalAnswer?: string;
+  actions: ParallelLoopAction[];
+}
+
+export type SessionMode = 'serial' | 'parallel';
+
+// Runtime-only: sessionId → Map<turnId, ParallelLoopEntry>
+const activeLoops = new Map<string, Map<string, ParallelLoopEntry>>();
+
+// Backwards-compatible: tracks whether ANY loop is active for a session
 const activeLoopSessions = new Set<string>();
+
+// Module-level lock for Set operations
+const loopSetLock = new Map<string, Promise<void>>();
 
 // Phase Management
 export function setPhase(sessionId: string, phase: AgentPhase): void {
@@ -93,7 +124,24 @@ export function ensureActiveTurnId(sessionId: string, preferredTurnId?: string):
   return nextTurnId;
 }
 
-export function setLoopRunning(sessionId: string, running: boolean): void {
+export async function setLoopRunning(sessionId: string, running: boolean): Promise<void> {
+  const release = await acquireSessionLock(sessionId);
+  try {
+    const state = getOrCreateState(sessionId);
+    state.isLoopRunning = running;
+    if (running) {
+      activeLoopSessions.add(sessionId);
+    } else {
+      activeLoopSessions.delete(sessionId);
+    }
+    updateSessionActivity(sessionId);
+  } finally {
+    release();
+  }
+}
+
+/** Synchronous version for contexts where we already hold the lock */
+export function setLoopRunningSync(sessionId: string, running: boolean): void {
   const state = getOrCreateState(sessionId);
   state.isLoopRunning = running;
   if (running) {
@@ -101,20 +149,216 @@ export function setLoopRunning(sessionId: string, running: boolean): void {
   } else {
     activeLoopSessions.delete(sessionId);
   }
+  updateSessionActivity(sessionId);
 }
 
-export function isLoopActive(sessionId: string): boolean {
-  if (activeLoopSessions.has(sessionId)) {
-    return true;
-  }
+export async function isLoopActive(sessionId: string): Promise<boolean> {
+  const release = await acquireSessionLock(sessionId);
+  try {
+    if (activeLoopSessions.has(sessionId)) {
+      return true;
+    }
 
-  // Self-heal stale persisted flags from older runs/restarts.
+    // Self-heal stale persisted flags from older runs/restarts.
+    const state = getState(sessionId);
+    if (state?.isLoopRunning) {
+      state.isLoopRunning = false;
+    }
+    return false;
+  } finally {
+    release();
+  }
+}
+
+/** Non-blocking check - returns null if can't acquire lock immediately */
+export function isLoopActiveSync(sessionId: string): boolean | null {
+  const release = tryAcquireSessionLock(sessionId);
+  if (!release) {
+    // Lock is held - loop is definitely active
+    return null; // Indicate "unknown - check async version"
+  }
+  try {
+    if (activeLoopSessions.has(sessionId)) {
+      return true;
+    }
+    const state = getState(sessionId);
+    if (state?.isLoopRunning) {
+      state.isLoopRunning = false;
+    }
+    return false;
+  } finally {
+    release();
+  }
+}
+
+// --- Parallel Loop Management ---
+
+export function getSessionMode(sessionId: string): SessionMode {
   const state = getState(sessionId);
-  if (state?.isLoopRunning) {
-    state.isLoopRunning = false;
-  }
-  return false;
+  const mode = state?.taskContext.gatheredInfo.loopMode;
+  return mode === 'parallel' ? 'parallel' : 'serial';
 }
+
+export function setSessionMode(sessionId: string, mode: SessionMode): void {
+  const state = getOrCreateState(sessionId);
+  state.taskContext.gatheredInfo.loopMode = mode;
+  schedulePersist(sessionId);
+}
+
+export async function registerParallelLoop(
+  sessionId: string,
+  turnId: string,
+  taskLabel: string,
+  originalPrompt: string,
+): Promise<void> {
+  const release = await acquireSessionLock(sessionId);
+  try {
+    let sessionLoops = activeLoops.get(sessionId);
+    if (!sessionLoops) {
+      sessionLoops = new Map();
+      activeLoops.set(sessionId, sessionLoops);
+    }
+    sessionLoops.set(turnId, {
+      turnId,
+      taskLabel,
+      originalPrompt,
+      status: 'running',
+      actions: [],
+    });
+    // Keep activeLoopSessions in sync
+    activeLoopSessions.add(sessionId);
+    updateSessionActivity(sessionId);
+  } finally {
+    release();
+  }
+}
+
+export async function unregisterParallelLoop(sessionId: string, turnId: string): Promise<void> {
+  const release = await acquireSessionLock(sessionId);
+  try {
+    const sessionLoops = activeLoops.get(sessionId);
+    if (!sessionLoops) return;
+    sessionLoops.delete(turnId);
+    if (sessionLoops.size === 0) {
+      activeLoops.delete(sessionId);
+      activeLoopSessions.delete(sessionId);
+      // Also clear persisted flag
+      const state = getState(sessionId);
+      if (state) state.isLoopRunning = false;
+    }
+    updateSessionActivity(sessionId);
+  } finally {
+    release();
+  }
+}
+
+const MAX_ACTIONS_PER_LOOP = 50;
+
+export function appendLoopAction(
+  sessionId: string,
+  turnId: string,
+  action: ParallelLoopAction,
+): void {
+  const entry = activeLoops.get(sessionId)?.get(turnId);
+  if (!entry) return;
+  entry.actions.push(action);
+  // Trim oldest actions if over limit
+  if (entry.actions.length > MAX_ACTIONS_PER_LOOP) {
+    entry.actions = entry.actions.slice(-MAX_ACTIONS_PER_LOOP);
+  }
+}
+
+export function getOtherLoopContexts(
+  sessionId: string,
+  excludeTurnId: string,
+): ParallelLoopEntry[] {
+  const sessionLoops = activeLoops.get(sessionId);
+  if (!sessionLoops) return [];
+  const entries: ParallelLoopEntry[] = [];
+  for (const [turnId, entry] of sessionLoops) {
+    if (turnId !== excludeTurnId) entries.push(entry);
+  }
+  return entries;
+}
+
+export async function updateLoopStatus(
+  sessionId: string,
+  turnId: string,
+  status: 'completed' | 'aborted',
+  finalAnswer?: string,
+): Promise<void> {
+  const release = await acquireSessionLock(sessionId);
+  try {
+    const entry = activeLoops.get(sessionId)?.get(turnId);
+    if (!entry) return;
+    entry.status = status;
+    if (finalAnswer) entry.finalAnswer = finalAnswer;
+    updateSessionActivity(sessionId);
+  } finally {
+    release();
+  }
+
+  // Auto-cleanup after 5 minutes (outside lock to avoid blocking)
+  setTimeout(() => {
+    void (async () => {
+      const cleanupRelease = await acquireSessionLock(sessionId);
+      try {
+        const sessions = activeLoops.get(sessionId);
+        if (sessions) {
+          sessions.delete(turnId);
+          if (sessions.size === 0) {
+            activeLoops.delete(sessionId);
+            activeLoopSessions.delete(sessionId);
+            // Clean up session from memory after all loops done
+            deleteState(sessionId);
+          }
+        }
+      } finally {
+        cleanupRelease();
+      }
+    })();
+  }, 5 * 60 * 1000);
+}
+
+export function updateLoopLabel(
+  sessionId: string,
+  turnId: string,
+  taskLabel: string,
+): void {
+  const entry = activeLoops.get(sessionId)?.get(turnId);
+  if (entry) entry.taskLabel = taskLabel;
+}
+
+export function getActiveLoopCount(sessionId: string): number {
+  const sessionLoops = activeLoops.get(sessionId);
+  if (!sessionLoops) return 0;
+  let count = 0;
+  for (const entry of sessionLoops.values()) {
+    if (entry.status === 'running') count++;
+  }
+  return count;
+}
+
+export async function abortAllLoops(sessionId: string): Promise<string[]> {
+  const release = await acquireSessionLock(sessionId);
+  try {
+    const sessionLoops = activeLoops.get(sessionId);
+    if (!sessionLoops) return [];
+    const turnIds: string[] = [];
+    for (const [turnId, entry] of sessionLoops) {
+      if (entry.status === 'running') {
+        entry.status = 'aborted';
+        turnIds.push(turnId);
+      }
+    }
+    updateSessionActivity(sessionId);
+    return turnIds;
+  } finally {
+    release();
+  }
+}
+
+// --- Approvals ---
 
 export function grantApproval(sessionId: string): void {
   const state = getOrCreateState(sessionId);

@@ -33,8 +33,9 @@ export async function getStagingLogs(lines: number = DEFAULT_LINES, projectPath?
 
   try {
     await stat(logPath);
-  } catch {
+  } catch (err) {
     // Log file doesn't exist - return placeholder message
+    console.warn('[logs] Staging log file not found:', err instanceof Error ? err.message : err);
     return {
       lines: ['[Staging logs not available - log file does not exist]'],
       totalLines: 1,
