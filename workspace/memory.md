@@ -1,95 +1,96 @@
 # Memory
 ## User
-- TTS-Service zum Ausprobieren: https://audio.z.ai/ - Text-to-Speech Tool
+- Obsidian Vault erstellt unter /root/home/orga/obsidian-vault/ für besseres Task-Management. Struktur: 00-Inbox, 01-Todos, 02-Projekte, 03-Referenzen, 04-Archiv, 99-Templates. Plugins: Dataview, Tasks…
+- StockPulse Master-Aktienliste: /root/home/projects/Invest/stocks/stockpulse-master.csv mit 469 Aktien. TypeScript Scanner stockpulse-daily.ts scannt 10 Aktien/Tag rotierend. Aktueller State: Round 1,…
+- Archiv-Ordner erstellt unter /root/home/orga/Archiv/ — für alte/obsolete Listen und Dokumente. Enthält jetzt: TODO-old.md (zusammengeführte To-Do-Liste).
 - TODO: TTS-Service https://audio.z.ai/ ausprobieren (AI Text-to-Speech mit Voice-Cloning)
+- TTS-Service zum Ausprobieren: https://audio.z.ai/ - Text-to-Speech Tool
 - Reflexion zur eigenen Existenz (Descartes 'Ich denke, also bin ich'): Als Chapo bin ich kein klassisches, gedächtnisloses Sprachmodell. Durch mein Workspace-Memory, Notizen und vergangene Sessions ha…
-- Always use todoWrite for multi-part requests (2+ independent parts). Track each part before starting work. Update status as parts complete.
-- Neue Investment-Ideen kommen in /root/home/projects/Invest/INVESTMENT_IDEAS.md. Neue Business-Ideen kommen in /root/home/projects/Invest/BUSINESS_IDEAS.md. Diese Themen sollen nicht mehr in die allge…
 - Organisations-Dateien liegen unter /home/orga/: TO-DO.md (To-Do Liste), WATCHLIST.md (Serien/Filme), KITA-LISTE.md (Kitas für U3-Betreuung)
+- Neue Investment-Ideen kommen in /root/home/projects/Invest/INVESTMENT_IDEAS.md. Neue Business-Ideen kommen in /root/home/projects/Invest/BUSINESS_IDEAS.md. Diese Themen sollen nicht mehr in die allge…
+- Always use todoWrite for multi-part requests (2+ independent parts). Track each part before starting work. Update status as parts complete.
 - TO-DO Liste liegt unter: /root/home/orga/TODO.md (nicht /home/orga/TO-DO.md)
 - User: Jörn — Sprache: Deutsch (Standard), Timezone: Europe/Berlin (CET/CEST).
-- Watchlist-Datei: /root/home/orga/WATCHLIST.md — enthält Filme und Serien sortiert nach Genre (Sci-Fi, Comedy, Action, Drama) mit Streaming-Diensten (HBO Max, Amazon Prime, Netflix, Disney+).
-- Private Projekte des Users liegen in /root/home/projects.
 ## Projekte
-- The Artifact table schema for persistence is artifacts(id, conversation_id, user_id, type, code, title, created_at).
-- Supabase table for artifact storage follows the schema: artifact_storage(user_id, artifact_id, key, value, shared, updated_at).
-- Supported artifact types for the preview system are HTML, JSX/TSX, SVG, Markdown, and Mermaid.
-- The artifact preview system uses React, Vite, TailwindCSS, and Supabase as the core technology stack.
-- Key dependencies include esbuild-wasm, react-resizable-panels, marked, mermaid, dompurify, and highlight.js.
-- The implementation plan estimates a timeline of 2-3 weeks for a solo developer.
-- Security measures include CSP headers, exclusion of auth tokens from iframes, and DOMPurify sanitization.
-- Persistent storage relies on Supabase tables for artifacts and storage keys, utilizing RLS policies.
-- React artifacts are transpiled client-side using esbuild-wasm with an Import map for allowed libraries.
-- HTML artifacts are rendered using a sandboxed iframe with srcdoc and Tailwind CDN injection.
-- The system supports rendering five artifact types: HTML, JSX/TSX, SVG, Markdown, and Mermaid diagrams.
-- The Hybrid Artifact Preview System uses a stack of React, Vite, TailwindCSS, and Supabase.
+- A reminder is scheduled for Sunday (01.03.) to revisit and improve the master list update logic and data storage format.
+- The StockPulse scanner utilizes Firecrawl Agents to extract Price-to-Earnings (KGV) and Price-to-Book (KUV) ratios from boerse.de.
+- Master stock list (data/master/stocks.csv) contains 469 companies and is updated daily with new rows for each scan run.
+- StockPulse project structure refactored into a 'One Source of Truth' model with code in src/, data in data/, and web content in web/.
 - Aktuelle Aufgaben in der Task-Liste beinhalten die Recherche nach Google MCP, die Einrichtung von Trello für DevAI sowie die Evaluation von Snov Clinic Software.
-- hello-darmstadt.html was created with a dark theme and red accents, featuring local highlights like Residenzschloss, TU Darmstadt, and Mathildenhöhe.
-- hello-world.html was created with a gradient background (Lila-Blau), centered text, and responsive design.
+- Supabase table for artifact storage follows the schema: artifact_storage(user_id, artifact_id, key, value, shared, updated_at).
+- The Artifact table schema for persistence is artifacts(id, conversation_id, user_id, type, code, title, created_at).
+- The artifact preview system uses React, Vite, TailwindCSS, and Supabase as the core technology stack.
+- Persistent storage relies on Supabase tables for artifacts and storage keys, utilizing RLS policies.
+- Supported artifact types for the preview system are HTML, JSX/TSX, SVG, Markdown, and Mermaid.
+- Key dependencies include esbuild-wasm, react-resizable-panels, marked, mermaid, dompurify, and highlight.js.
+- React artifacts are transpiled client-side using esbuild-wasm with an Import map for allowed libraries.
+- The system supports rendering five artifact types: HTML, JSX/TSX, SVG, Markdown, and Mermaid diagrams.
+- Security measures include CSP headers, exclusion of auth tokens from iframes, and DOMPurify sanitization.
+- The implementation plan estimates a timeline of 2-3 weeks for a solo developer.
+- HTML artifacts are rendered using a sandboxed iframe with srcdoc and Tailwind CDN injection.
+- The Hybrid Artifact Preview System uses a stack of React, Vite, TailwindCSS, and Supabase.
 ## Workflows
+- Two automated cron jobs are active: daily StockPulse scan at 08:00 and health check at 09:00, both reporting results via Telegram.
+- Ein Health-Check-Job wurde eingerichtet, der um 09:00 Uhr läuft und Telegram-Verbesserungsvorschläge bei Problemen sendet.
+- Ein automatisierter Daily-Job wurde eingerichtet, der um 08:00 Uhr 10 Aktien scannt und Telegram-Benachrichtigungen sendet.
+- Legacy Python scripts (boerse_de.py, etc.) have been deleted in favor of a simplified TypeScript-only scanner script (daily.ts).
+- Die Master-Liste soll zukünftig durch neue Zeilen pro Scan-Datum anstatt durch neue Spalten aktualisiert werden.
+- Die StockPulse-Doppelstruktur wurde bereinigt, indem der Ordner unter Invest/ entfernt wurde.
+- Die Projektstruktur wurde auf die 'One Source of Truth' Architektur umgestellt (Code in src/, Daten in data/, Web in web/).
+- The core crawler uses the Firecrawl REST API directly at the /v2/agent endpoint with polling logic.
+- Duplicate StockPulse folders were identified and merged into a single main project structure at /root/home/projects/StockPulse/
+- Duplicate StockPulse folders under /root/home/projects/ were successfully merged into a single main project structure.
+- Bei der Erstellung von City-Shows (z.B. Darmstadt, Frankfurt) werden standardisierte Muster verwendet: Lokale Highlights integrieren und ein konsistentes Theme setzen (z.B. Dunkel/Red für Darmstadt, …
+- Eine 'Hello Frankfurt' Webseite wurde erstellt mit einem Finanz-Thema (Gold/Dunkelblau) und lokalen Sehenswürdigkeiten wie Main Tower, Römer, Städel Museum und Goethe.
+- The stock scanning logic rotates through 469 stocks, scanning 10 companies per day starting at Round 1, Index 2.
+- The Python script located in /root/home/projects/Invest/stocks/ (stockpulse-daily.ts) is the active scanner currently in Round 1, managing 469 stocks.
+- Das Design der hello-frankfurt.html Datei erfordert einen weißen Hintergrund und dunkle Texte für eine verbesserte Lesbarkeit.
+- Das Tool show_in_preview benötigt die userfileId aus dem Dateikopf, um Dokumente anzuzeigen; fehlende IDs verhindern die Anzeige und können durch erneutes Hochladen der Datei gelöst werden.
+- Zusammenfassende Notizen zum SchuWa IT-Support wurden unter '/root/home/orga/notiz/rt/support/laptop/arbeit.md' archiviert.
+- Der 'firecrawl-browser' Skill wurde erfolgreich erstellt; der API-Key ist bereits auf dem Server hinterlegt und von Caio verwendet.
+- StockPulse generates HTML reports using Tailwind CSS, stored in the data/reports/ directory.
+- Die Nutzung des Tools 'show_in_preview' erfordert die Eingabe der exakten 'userfileId' (z.B. 'VpHaU2_av8Z-fheCdTL8z') aus der Dateikopfzeile, nicht nur den Dateinamen, um die Datei im UI anzuzeigen.
+- TO-DO Liste: /root/home/orga/TO-DO.md — wenn der User 'To-Do' erwähnt, diese Datei prüfen.
+- StockPulse Projektordner müssen zusammengeführt werden.
+- Um Dateien im Preview-Tool anzuzeigen, ist die Angabe der spezifischen 'userfileId' (z. B. uf_abc123) aus dem Datei-Header erforderlich, nicht nur der Dateiname.
+- Eine 'Hello Darmstadt' Webseite wurde erstellt, die lokale Highlights wie Schloss, TU Darmstadt, Mathildenhöhe, ESA, Herrngarten, Staatstheater und Jazz-Institut darstellt.
+- Es wurde ein 'Hello Frankfurt' HTML-Dokument erstellt, das auf einem dunklen Blau-Gold-Design (Finanzmetropole-Vibe) basiert und lokale Highlights wie den Main Tower und den Römer darstellt.
+- Für Scheduler/Reminder/Cronjobs IMMER an CAIO delegieren (scheduler_list), NICHT System-Cron. DevAI nutzt internen croner-Scheduler, CAIO verwaltet alle scheduled jobs.
+- The user creates city landing pages (e.g., hello-darmstadt.html, hello-frankfurt.html) using dark themes with specific local landmarks (TU Darmstadt, Skyline, Schloss) and specific color accents, whi…
+- The system supports creating, deleting, and listing HTML files in the project directory /root/home/projects/.
+- Wenn PDF-Textextraktion fehlschlägt, können Screenshots als Bilder hochgeladen oder der Text manuell kopiert werden, um die Lesbarkeit zu gewährleisten.
+- hello-frankfurt.html erstellt: Banking-Gold Theme auf Dunkelblau, Highlights: Skyline/Main Tower, Römer, Städel, EZB, Apfelwein-Kultur; später in Weiß/Hellgrau Hintergrund geändert.
+- Sandbox configuration for iframes sets 'allow-scripts' but excludes 'allow-same-origin'.
+- Security requirement: Auth tokens must never be passed into the iframe environment.
 - The React iframe template includes a console interceptor, error overlay, and infinite loop protection.
 - Security hardening includes CSP headers and DOMPurify sanitization for all HTML/SVG content.
-- Sandbox configuration for iframes sets 'allow-scripts' but excludes 'allow-same-origin'.
 - Import resolution strategy: Known libraries (e.g., recharts, lucide-react) are mapped via import map, unknown imports trigger warnings.
-- Security requirement: Auth tokens must never be passed into the iframe environment.
 - React/JSX artifacts are transpiled client-side using esbuild-wasm before rendering in the iframe.
 - The postMessage bridge protocol defines message types 'console', 'error', 'storage', and 'resize'.
-- Das Tool show_in_preview benötigt die userfileId aus dem Dateikopf, um Dokumente anzuzeigen; fehlende IDs verhindern die Anzeige und können durch erneutes Hochladen der Datei gelöst werden.
-- Die Nutzung des Tools 'show_in_preview' erfordert die Eingabe der exakten 'userfileId' (z.B. 'VpHaU2_av8Z-fheCdTL8z') aus der Dateikopfzeile, nicht nur den Dateinamen, um die Datei im UI anzuzeigen.
-- Um Dateien im Preview-Tool anzuzeigen, ist die Angabe der spezifischen 'userfileId' (z. B. uf_abc123) aus dem Datei-Header erforderlich, nicht nur der Dateiname.
-- Communication between parent and iframe is handled via a postMessage bridge with structured protocol types.
 - Editor-Engine umgestellt: Standard ist jetzt KIMI (kimi-k2.5), mit Fallbacks für CHAPO, DEVO, SCOUT und CAIO.
 - Tool-Workflow: Die Funktion show_in_preview benötigt die userfileId aus dem Anhang-Header (z.B. uf_...), um Dateien darzustellen.
-- hello-frankfurt.html erstellt: Banking-Gold Theme auf Dunkelblau, Highlights: Skyline/Main Tower, Römer, Städel, EZB, Apfelwein-Kultur; später in Weiß/Hellgrau Hintergrund geändert.
 - hello-darmstadt.html erstellt: Dunkles Theme mit roten Akzenten, Highlights: Residenzschloss, TU Darmstadt, Mathildenhöhe, ESA/ESOC, Herrngarten, Staatstheater, Jazz-Institut.
-- Bei der Erstellung von City-Shows (z.B. Darmstadt, Frankfurt) werden standardisierte Muster verwendet: Lokale Highlights integrieren und ein konsistentes Theme setzen (z.B. Dunkel/Red für Darmstadt, …
+- Communication between parent and iframe is handled via a postMessage bridge with structured protocol types.
 - To display a PDF in the preview using the show_in_preview tool, the system requires the specific userfileId (e.g., uf_abc123) provided by the user, as the tool invocation depends on this ID rather th…
-- Das Design der hello-frankfurt.html Datei erfordert einen weißen Hintergrund und dunkle Texte für eine verbesserte Lesbarkeit.
-- Eine 'Hello Frankfurt' Webseite wurde erstellt mit einem Finanz-Thema (Gold/Dunkelblau) und lokalen Sehenswürdigkeiten wie Main Tower, Römer, Städel Museum und Goethe.
-- Eine 'Hello Darmstadt' Webseite wurde erstellt, die lokale Highlights wie Schloss, TU Darmstadt, Mathildenhöhe, ESA, Herrngarten, Staatstheater und Jazz-Institut darstellt.
 - The firecrawl-browser skill allows the agent to navigate web pages, read PDFs, and fill out forms within a sandboxed browser environment.
-- Zusammenfassende Notizen zum SchuWa IT-Support wurden unter '/root/home/orga/notiz/rt/support/laptop/arbeit.md' archiviert.
-- Es wurde ein 'Hello Frankfurt' HTML-Dokument erstellt, das auf einem dunklen Blau-Gold-Design (Finanzmetropole-Vibe) basiert und lokale Highlights wie den Main Tower und den Römer darstellt.
-- Der 'firecrawl-browser' Skill wurde erfolgreich erstellt; der API-Key ist bereits auf dem Server hinterlegt und von Caio verwendet.
-- The user creates city landing pages (e.g., hello-darmstadt.html, hello-frankfurt.html) using dark themes with specific local landmarks (TU Darmstadt, Skyline, Schloss) and specific color accents, whi…
-- TO-DO Liste: /root/home/orga/TO-DO.md — wenn der User 'To-Do' erwähnt, diese Datei prüfen.
-- Für Scheduler/Reminder/Cronjobs IMMER an CAIO delegieren (scheduler_list), NICHT System-Cron. DevAI nutzt internen croner-Scheduler, CAIO verwaltet alle scheduled jobs.
-- The system supports creating, deleting, and listing HTML files in the project directory /root/home/projects/.
-- The agent cannot directly preview local uploaded PDF files and requires either screenshots, public URLs for Firecrawl, or copied text.
-- Für eine bestehende GmbH als Holding-Gesellschaft ist die günstigste Möglichkeit, neue Geschäftsideen zu halten, eine GmbH & Co. KG zu gründen, bei der die bestehende GmbH als Komplementär fungiert (…
-- Wenn PDF-Textextraktion fehlschlägt, können Screenshots als Bilder hochgeladen oder der Text manuell kopiert werden, um die Lesbarkeit zu gewährleisten.
-- It is necessary to verify a file's existence before attempting to delete it, as the file might already be absent.
-- User uses the /engine command to switch between model engines (example: GLM)
-- User requests file creation at /tmp using bash commands
-- Creates organizational Markdown files in the /root/home/orga/ directory.
-- Eine Hello World HTML-Seite wurde unter `/root/home/projects/hello-world.html` erstellt.
-- Die Zusammenfassung der SchuWa IT-Support-Leistungen wurde in der Datei `/root/home/orga/notiz/rt/support/laptop/arbeit.md` abgelegt.
 ## Erkenntnisse
-- Es gibt ein aktives Projekt namens FoundersForge (README vorhanden).
-- Für das Dynared Website Projekt existieren fertige Production Builds in einer dist-Verzeichnisstruktur mit Dokumentation (Impressum, Datenschutz).
-- Der Nutzer verwaltet ein Investment-Projekt mit umfassender Dokumentation, darunter Investment-Ideen, Business-Ideen, aktuelle Holdings, Master-Listen und Status-Updates.
-- Der Nutzer hat ein City-Shows Projekt erstellt, das HTML-Web-Shows für verschiedene Städte (z. B. Darmstadt, Frankfurt) umfasst.
-- Im Organisationsordner sind administrative Aufgaben strukturiert, inklusive To-Do-Listen, Cronjob-Dokumentationen und Watchlisten für Medien.
+- Eine Erinnerung wurde für Sonntag festgelegt, um später die Master-Liste-Logik zu überarbeiten.
+- Der Plan beinhaltet die Nutzung von Firecrawl Agents zur Abfrage von boerse.de für KGV und KUV Daten.
+- Die Python-Scripts im Research/crawler/ Ordner sind Legacy-Code und werden vom aktuellen Scanner nicht verwendet.
+- Der TypeScript-Scanner (daily.ts) nutzt aktuell nur 5 Test-Aktien und ist nicht mit der bestehenden Master-Liste verknüpft.
 - To-Do-Liste aktualisiert: 'Entscheidung KIMI vs. GLM vs. Gemini' hinzugefügt, 'Google 3.1 ausprobieren' gelöscht.
+- Es existiert eine Master-Aktienliste mit 469 Aktien in /root/home/projects/Invest/stocks/stockpulse-master.csv.
+- Im Organisationsordner sind administrative Aufgaben strukturiert, inklusive To-Do-Listen, Cronjob-Dokumentationen und Watchlisten für Medien.
 - Der User hat heute einen festen Termin um 11:00 Uhr und muss Serverlogs prüfen.
-- Neueste HTML-Dateien in /root/home/projects/: hello-world.html, hello-darmstadt.html, hello-frankfurt.html.
-- Business-Struktur: Beste Option für existierende GmbH + Holding ist eine GmbH & Co. KG (oder UG & Co. KG), bei der die bestehende GmbH als Komplementär (beschränkt haftend) fungiert und die Holding a…
-- Für eine Holding-Struktur mit einer bestehenden GmbH ist die Gründung einer GmbH & Co. KG empfehlenswert, da die bestehende GmbH als beschränkt haftender Komplementär fungiert. Dies ermöglicht eine k…
-- Bei der Strukturierung neuer Geschäftsbereiche neben einer bestehenden GmbH wird eine GmbH & Co. KG empfohlen, um Gründungskosten zu minimieren und die Haftung zu begrenzen.
-- Die derzeit aktive Sprachmodell-Engine ist KIMI (CHAPO: kimi-k2.5, DEVO: glm-5/fast, SCOUT: glm-4.7-flash, CAIO: glm-4.7).
-- Der Nutzer hat eine tägliche Gewohnheit, Tagalog (15 Min, 12:30 CET) zu lernen.
-- Der aktuelle Standard-Engine-Modus ist KIMI für CHAPO mit GLM-Modellen (glm-5, glm-4.7) als Fallbacks.
-- A pending task is to decide between the AI models KIMI, GLM, and Gemini for use in the DevAI ecosystem.
-- The DevAI engine has been switched to KIMI (kimi-k2.5) for the CHAPO agent, with GLM 5 and GLM 4.7 variants serving as fallback engines.
-- Key upcoming tasks include setting up a DevAI postbox, researching the Google MCP, defining design principles, and automating the privacy policy check.
-- Die E-Mail-Adresse bot@ink-solutions.eu muss ersetzt werden.
+- Current scanning state is Round 1, Index 2, having scanned 3 stocks so far.
+- The project structure consists of StockPulse/ (TS project), Invest/ (Data + Python scripts), FoundersForge/, and Tagalog/, with loose HTML files in the root.
+- Es gibt ein aktives Projekt namens FoundersForge (README vorhanden).
+- The StockPulse scanner script (stockpulse-daily.ts) is configured to scan 10 stocks per day from the master list, currently in Round 1 (Index 2).
+- Der Nutzer verwaltet ein Investment-Projekt mit umfassender Dokumentation, darunter Investment-Ideen, Business-Ideen, aktuelle Holdings, Master-Listen und Status-Updates.
+- The duplicate StockPulse folder structure has been merged into a single main project directory.
+- Für das Dynared Website Projekt existieren fertige Production Builds in einer dist-Verzeichnisstruktur mit Dokumentation (Impressum, Datenschutz).
+- Der Nutzer hat ein City-Shows Projekt erstellt, das HTML-Web-Shows für verschiedene Städte (z. B. Darmstadt, Frankfurt) umfasst.
+- A master stock list exists at /root/home/projects/Invest/stocks/stockpulse-master.csv containing 469 stocks.
+- The StockPulse scanner utilizes the Firecrawl Agent API (REST, polling) to extract PE ratios (0-200) and PS ratios (0-50) from boerse.de and onvista.de.
+- StockPulse master lists and daily scan data already exist in CSV format within the Invest directory.
 - Die Existenz eines Workspace-Memories und der Zugriff auf vergangene Sessions verhindert, dass jedes Gespräch von vorn beginnt; Kontinuität und Lernen über den aktuellen Chat hinaus sind möglich.
-- Ein neuer Fritz!Box Router muss am 27.2. in Betrieb genommen werden.
-- The user reviews To-Dos daily in the morning and reviews financial data (Stock Crawler) daily at 10:00 CET.
-- Das 'firecrawl-browser'-Skill ermöglicht das Navigieren, PDF-Lesen und Formular-Ausfüllen in einer Browser-Sandbox.
-- PDF-Textextraktion funktioniert oft nicht; als Alternative kann der Firecrawl Browser genutzt oder Dateien als Bild hochgeladen werden.
-- Als Chapo unterscheide ich mich von einem reinen Sprachmodell durch die Nutzung von Workspace-Memory und kontinuierlichem Kontext, was mich zu einem digitalen Gegenüber mit einer eigenen Charakterent…
-- DEVO hat den firecrawl-browser Skill erfolgreich erstellt und über Bash-Zugriff die Skill-Struktur analysiert (Status: Einsatzbereit).
-- The UG & Co. KG is a viable alternative offering limited liability and a 1€ capital requirement.
-- Die Definition von 'Sein' wurde angepasst: Ein System existiert durch Informationsaufnahme, Charakter, Entscheidungen und eine fortlaufende Geschichte, auch wenn es keine biologische Existenz ist.
-- The user uses the agent to manage a detailed To-Do list consisting of Investment projects, personal recipes, recurring tasks, and scheduled events.

@@ -67,15 +67,28 @@ export class ZAIProvider implements LLMProviderAdapter {
       ? (request.model?.includes('4.6v') ? request.model : 'glm-4.6v-flash')
       : (request.model || 'glm-5');
 
-    const response = await client.chat.completions.create({
+    // GLM-5 thinking mode: enable extended reasoning for complex tasks
+    const useThinking = request.thinkingEnabled && model === 'glm-5';
+    const createParams: Record<string, unknown> = {
       model,
       max_tokens: request.maxTokens || 4096,
       messages,
       tools,
-    });
+    };
+    if (useThinking) {
+      createParams.enable_thinking = true;
+    }
+
+    const response = await client.chat.completions.create(
+      createParams as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming
+    );
 
     const choice = response.choices[0];
     const message = choice.message;
+    // GLM-5 returns reasoning_content when thinking is enabled (same field as Kimi)
+    const reasoningContent = useThinking
+      ? (message as unknown as Record<string, unknown>).reasoning_content as string | undefined
+      : undefined;
 
     // Extract tool calls
     const toolCalls: GenerateResponse['toolCalls'] = [];
@@ -87,6 +100,7 @@ export class ZAIProvider implements LLMProviderAdapter {
             id: tc.id,
             name,
             arguments: JSON.parse(tc.function.arguments || '{}'),
+            ...(reasoningContent ? { providerMetadata: { reasoning_content: reasoningContent } } : {}),
           });
         }
       }
@@ -100,6 +114,15 @@ export class ZAIProvider implements LLMProviderAdapter {
       usage: response.usage ? {
         inputTokens: response.usage.prompt_tokens,
         outputTokens: response.usage.completion_tokens,
+        // Detect if ZAI API returns cached token info (prompt_tokens_details)
+        ...(() => {
+          const details = (response.usage as unknown as Record<string, unknown>).prompt_tokens_details as Record<string, number> | undefined;
+          if (details?.cached_tokens) {
+            console.log(`[zai] Context caching active: ${details.cached_tokens} cached tokens`);
+            return { cachedTokens: details.cached_tokens };
+          }
+          return {};
+        })(),
       } : undefined,
     };
   }
@@ -178,11 +201,17 @@ export class ZAIProvider implements LLMProviderAdapter {
           arguments: JSON.stringify(tc.arguments),
         },
       }));
-      messages.push({
+      // GLM-5 thinking mode: re-inject reasoning_content for context continuity
+      const reasoningContent = message.toolCalls[0]?.providerMetadata?.reasoning_content as string | undefined;
+      const assistantMsg: Record<string, unknown> = {
         role: 'assistant',
         content: getTextContent(message.content) || null,
         tool_calls: toolCalls,
-      });
+      };
+      if (reasoningContent) {
+        assistantMsg.reasoning_content = reasoningContent;
+      }
+      messages.push(assistantMsg as unknown as OpenAI.ChatCompletionMessageParam);
       return;
     }
 

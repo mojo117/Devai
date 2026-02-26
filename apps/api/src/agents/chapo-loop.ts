@@ -341,9 +341,13 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
       // Thinking mode: enable extended reasoning on complex first-turn queries
       const thinkingEnabled = shouldEnableThinking(userText, this.iteration);
 
+      // Kimi search: enable Kimi's built-in web search for research-oriented queries
+      const kimiSearchEnabled = provider === 'moonshot' &&
+        /\b(search|research|find|look\s*up|documentation|latest|aktuell|suche|recherche|finde)\b/i.test(userText);
+
       // Call LLM with conversation + filtered tools
       const t0 = Date.now();
-      console.log(`${trace}[chapo-loop] LLM call #${this.iteration} starting (${provider}/${model}, ${tools.length}/${allTools.length} tools, thinking=${thinkingEnabled})`);
+      console.log(`${trace}[chapo-loop] LLM call #${this.iteration} starting (${provider}/${model}, ${tools.length}/${allTools.length} tools, thinking=${thinkingEnabled}${kimiSearchEnabled ? ', kimi-search' : ''})`);
       const [response, err] = await this.errorHandler.safe('llm_call', () =>
         llmRouter.generateWithFallback(provider, {
           model,
@@ -353,6 +357,7 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
           toolsEnabled: true,
           sameProviderFallbacks,
           thinkingEnabled,
+          kimiSearchEnabled,
         })
       );
 

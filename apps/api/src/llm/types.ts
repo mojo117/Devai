@@ -48,6 +48,10 @@ export interface GenerateRequest {
   maxTokens?: number;
   /** Models to try on the same provider before falling back cross-provider. */
   sameProviderFallbacks?: string[];
+  /** Enable extended thinking/reasoning for this request (GLM-5, Kimi K2.5). */
+  thinkingEnabled?: boolean;
+  /** Enable Kimi's built-in web search for research tasks (Kimi K2.5 only). */
+  kimiSearchEnabled?: boolean;
 }
 
 export interface ToolCall {
@@ -65,6 +69,8 @@ export interface GenerateResponse {
   usage?: {
     inputTokens: number;
     outputTokens: number;
+    /** Cached prompt tokens (if provider supports prompt caching) */
+    cachedTokens?: number;
   };
 }
 
