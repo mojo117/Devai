@@ -17,10 +17,12 @@ import { getCombinedSystemContextBlock, warmSystemContextForSession, warmMemoryR
 import { SessionLogger } from '../audit/sessionLogger.js';
 import { getAgent, getToolsForAgent } from './router.js';
 import { getToolsForLLM } from '../tools/registry.js';
+import { filterToolsForQuery } from '../tools/toolFilter.js';
 import * as stateManager from './stateManager.js';
 import { ChapoLoopContextManager } from './chapo-loop/contextManager.js';
 import { ChapoLoopGateManager } from './chapo-loop/gateManager.js';
 import { ChapoToolExecutor } from './chapo-loop/toolExecutor.js';
+import { reviewAnswer } from './reflexion.js';
 import { buildToolResultContent } from './utils.js';
 import { config as appConfig } from '../config.js';
 import { logSchedulerExecution } from '../db/schedulerQueries.js';
@@ -42,6 +44,25 @@ interface ChapoLoopConfig {
   maxIterations: number;
 }
 
+/**
+ * Heuristic: enable extended thinking for complex first-turn queries.
+ * Thinking mode adds latency but improves reasoning on complex tasks.
+ * Only fires on the first iteration (planning phase).
+ */
+function shouldEnableThinking(userMessage: string, iteration: number): boolean {
+  // Only on first iteration — subsequent iterations are tool-result processing
+  if (iteration > 0) return false;
+
+  // Complex task keywords (EN + DE)
+  const complexPattern = /\b(debug|fix|refactor|plan|architect|design|why|how|analy[sz]|investigat|review|explain|compar|evaluat|warum|wieso|erkl[aä]r|vergleich|untersu|fehler|problem)\b/i;
+  if (complexPattern.test(userMessage)) return true;
+
+  // Long messages are usually complex tasks
+  if (userMessage.length > 500) return true;
+
+  return false;
+}
+
 // Module-level map for /stop to reach running loop instances
 const activeLoopInstances = new Map<string, Map<string, ChapoLoop>>();
 
@@ -60,6 +81,7 @@ export class ChapoLoop {
   private conversation: ConversationManager;
   private sessionLogger?: SessionLogger;
   private iteration = 0;
+  private reflexionUsed = false;
   private totalTokensUsed = 0;
   private contextManager: ChapoLoopContextManager;
   private gateManager: ChapoLoopGateManager;
@@ -246,7 +268,8 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
   private async runLoop(userMessage: string | ContentBlock[]): Promise<ChapoLoopResult> {
     const chapo = getAgent('chapo');
     const chapoToolNames = getToolsForAgent('chapo');
-    const tools = getToolsForLLM().filter((t) => chapoToolNames.includes(t.name));
+    const allTools = getToolsForLLM().filter((t) => chapoToolNames.includes(t.name));
+    const userText = getTextContent(userMessage);
 
     const provider = (this.modelSelection.provider || 'anthropic') as LLMProvider;
     const model = this.modelSelection.model || chapo.model;
@@ -261,7 +284,7 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
     let lastErrorMessage = '';
     const PROGRESS_THRESHOLD = 3;
 
-    console.log(`${trace}[chapo-loop] Tools: ${tools.length}`);
+    console.log(`${trace}[chapo-loop] Tools (unfiltered): ${allTools.length}`);
 
     for (this.iteration = 0; this.iteration < this.config.maxIterations; this.iteration++) {
       // --- Abort check (for /stop command) ---
@@ -311,9 +334,16 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
         }
       }
 
-      // Call LLM with conversation + tools
+      // Tool RAG: filter tools to relevant categories based on conversation
+      const recentContext = this.conversation.getMessages().slice(-3).map((m) => getTextContent(m.content)).join(' ');
+      const tools = filterToolsForQuery(allTools, userText, recentContext);
+
+      // Thinking mode: enable extended reasoning on complex first-turn queries
+      const thinkingEnabled = shouldEnableThinking(userText, this.iteration);
+
+      // Call LLM with conversation + filtered tools
       const t0 = Date.now();
-      console.log(`${trace}[chapo-loop] LLM call #${this.iteration} starting (${provider}/${model}, ${tools.length} tools)`);
+      console.log(`${trace}[chapo-loop] LLM call #${this.iteration} starting (${provider}/${model}, ${tools.length}/${allTools.length} tools, thinking=${thinkingEnabled})`);
       const [response, err] = await this.errorHandler.safe('llm_call', () =>
         llmRouter.generateWithFallback(provider, {
           model,
@@ -322,6 +352,7 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
           tools,
           toolsEnabled: true,
           sameProviderFallbacks,
+          thinkingEnabled,
         })
       );
 
@@ -374,11 +405,32 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
         continue;
       }
 
-      // No tool calls → ACTION: ANSWER (direct — loop ends)
+      // No tool calls → ACTION: ANSWER
       if (!response.toolCalls || response.toolCalls.length === 0) {
         const answer = response.content || '';
-        const userText = getTextContent(userMessage);
-        return this.answerValidator.validateAndNormalize(userText, answer, this.iteration, this.emitDecisionPath.bind(this));
+        const userTextForReview = getTextContent(userMessage);
+
+        // Reflexion: self-review on first answer attempt for non-trivial responses
+        if (this.iteration < 5 && !this.reflexionUsed && answer.length >= 200) {
+          const review = await reviewAnswer(
+            userTextForReview, answer, provider, chapo.fastModel,
+          );
+          if (!review.approved && review.feedback) {
+            this.reflexionUsed = true;
+            console.log(`${trace}[chapo-loop] Reflexion rejected answer: ${review.feedback}`);
+            this.conversation.addMessage({
+              role: 'assistant',
+              content: answer,
+            });
+            this.conversation.addMessage({
+              role: 'system',
+              content: `[Self-Review Feedback] Your answer has issues: ${review.feedback}. Please revise your response.`,
+            });
+            continue;
+          }
+        }
+
+        return this.answerValidator.validateAndNormalize(userTextForReview, answer, this.iteration, this.emitDecisionPath.bind(this));
       }
 
       // Add assistant message with tool calls to conversation
