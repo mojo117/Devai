@@ -26,7 +26,7 @@ export type ToolName =
   | 'github_createPR'
   // Logs Tools
   | 'logs_getStagingLogs'
-  // DevOps Tools (DEVO)
+  // DevOps Tools
   | 'bash_execute'
   | 'devo_exec_session_start'
   | 'devo_exec_session_write'
@@ -41,7 +41,7 @@ export type ToolName =
   | 'pm2_save'
   | 'npm_install'
   | 'npm_run'
-  // Web Tools (SCOUT agent)
+  // Web & Research Tools
   | 'web_search'
   | 'web_fetch'
   | 'scout_search_fast'
@@ -61,25 +61,25 @@ export type ToolName =
   // History Tools (conversation history search)
   | 'history_search'
   | 'history_listSessions'
-  // Scheduler Tools (DEVO)
+  // Scheduler Tools
   | 'scheduler_create'
   | 'scheduler_list'
   | 'scheduler_update'
   | 'scheduler_delete'
   | 'reminder_create'
   | 'notify_user'
-  // TaskForge Tools (CAIO)
+  // TaskForge Tools
   | 'taskforge_list_tasks'
   | 'taskforge_get_task'
   | 'taskforge_create_task'
   | 'taskforge_move_task'
   | 'taskforge_add_comment'
   | 'taskforge_search'
-  // Email Tool (CAIO)
+  // Email Tool
   | 'send_email'
-  // Telegram Tools (CAIO)
+  // Telegram Tools
   | 'telegram_send_document'
-  // Web Document Delivery (CAIO)
+  // Web Document Delivery
   | 'deliver_document'
   // Userfile Search
   | 'search_files'
@@ -120,7 +120,7 @@ export type ToolCategory = 'native' | 'mcp' | 'meta';
  * Unified tool definition that covers all tool types:
  * - native: built-in tools (fs, git, bash, etc.)
  * - mcp: tools discovered from MCP servers at runtime
- * - meta: agent coordination tools (delegateToDevo, escalateToChapo, etc.)
+ * - meta: agent meta-tools (chapo_plan_set, todoWrite, askUser, etc.)
  */
 export interface ToolDef {
   name: string;
@@ -277,7 +277,7 @@ export function registerMcpTools(tools: ToolDefinition[]): void {
 }
 
 /**
- * Register meta-tools (agent coordination tools like delegateToDevo, escalateToChapo).
+ * Register meta-tools (chapo_plan_set, todoWrite, askUser, etc.).
  * Called by agent definitions during setup.
  */
 export function registerMetaTools(
