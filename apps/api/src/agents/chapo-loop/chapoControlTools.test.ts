@@ -17,7 +17,7 @@ describe('chapoControlTools', () => {
       title: 'Short execution plan',
       steps: [
         { id: 's1', text: 'Inspect logs', owner: 'chapo', status: 'todo' },
-        { id: 's2', text: 'Delegate fix to DEVO', owner: 'devo', status: 'doing' },
+        { id: 's2', text: 'Apply fix', owner: 'chapo', status: 'doing' },
       ],
     });
 
@@ -29,7 +29,7 @@ describe('chapoControlTools', () => {
     };
     expect(plan?.title).toBe('Short execution plan');
     expect(plan?.steps).toHaveLength(2);
-    expect(plan?.steps?.[1].owner).toBe('devo');
+    expect(plan?.steps?.[1].owner).toBe('chapo');
     expect(plan?.version).toBe(1);
   });
 });
