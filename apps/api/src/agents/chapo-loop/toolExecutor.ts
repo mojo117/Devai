@@ -5,23 +5,9 @@ import type { DecisionPathInsights } from '../answer-validator.js';
 import type {
   AgentStreamEvent,
   ChapoLoopResult,
-  LoopDelegationResult,
   RiskLevel,
 } from '../types.js';
-import {
-  buildDelegation,
-  parseParallelDelegations,
-  type ParallelDelegation,
-} from './delegationUtils.js';
 import type { QueueQuestionOptions } from './gateManager.js';
-import {
-  buildDelegationDecisionPath,
-  buildDelegationThinkingStatus,
-  delegateParallel as runParallelDelegations,
-  delegateToAgent as runDelegationToAgent,
-  resolveDelegationTarget,
-  type DelegationRunnerDeps,
-} from './delegationRunner.js';
 import {
   setChapoPlan,
 } from './chapoControlTools.js';
@@ -61,8 +47,6 @@ interface ToolExecutorDeps {
     totalIterations: number,
   ) => Promise<ChapoLoopResult>;
   emitDecisionPath: (insights: DecisionPathInsights) => void;
-  getDelegationRunnerDeps: () => DelegationRunnerDeps;
-  buildVerificationEnvelope: (delegation: ParallelDelegation, result: LoopDelegationResult) => string;
   buildToolResultContent: (
     result: { success: boolean; result?: unknown; error?: string },
   ) => { content: string; isError: boolean };
@@ -79,7 +63,7 @@ export class ChapoToolExecutor {
         steps: toolCall.arguments.steps as Array<{
           id: string;
           text: string;
-          owner: 'chapo' | 'devo' | 'scout' | 'caio';
+          owner: 'chapo';
           status: 'todo' | 'doing' | 'done' | 'blocked';
         }>,
       });
@@ -271,112 +255,6 @@ export class ChapoToolExecutor {
       // Blocking: pause loop, wait for user reply (existing behavior)
       const earlyReturn = await this.deps.queueQuestion(question, this.deps.iteration + 1);
       return { earlyReturn };
-    }
-
-    // ACTION: DELEGATE in parallel to multiple agents
-    if (toolCall.name === 'delegateParallel') {
-      const delegations = parseParallelDelegations(toolCall.arguments.delegations);
-      if (delegations.length === 0) {
-        return {
-          toolResult: {
-            toolUseId: toolCall.id,
-            result: 'Error: delegateParallel benoetigt mindestens eine gueltige Delegation.',
-            isError: true,
-          },
-        };
-      }
-
-      this.deps.emitDecisionPath({
-        path: 'tool',
-        reason: `Unabhaengige Teilaufgaben werden parallel delegiert (${delegations.length}).`,
-        confidence: 0.8,
-        unresolvedAssumptions: [],
-      });
-
-      this.deps.sendEvent({
-        type: 'agent_thinking',
-        agent: 'chapo',
-        status: `Delegiere parallel (${delegations.length} Aufgaben)...`,
-      });
-
-      const [parallelResult, parallelErr] = await this.deps.errorHandler.safe(
-        `delegate:parallel:${this.deps.iteration}`,
-        () => runParallelDelegations(
-          this.deps.getDelegationRunnerDeps(),
-          delegations,
-          this.deps.buildVerificationEnvelope,
-        ),
-      );
-
-      if (parallelErr) {
-        return {
-          toolResult: {
-            toolUseId: toolCall.id,
-            result: `Parallel-Delegation Fehler: ${this.deps.errorHandler.formatForLLM(parallelErr)}`,
-            isError: true,
-          },
-        };
-      }
-
-      const failedCount = parallelResult.results.filter((entry) => !entry.success).length;
-      this.deps.sendEvent({
-        type: 'tool_result',
-        agent: 'chapo',
-        toolName: toolCall.name,
-        result: { delegated: true, parallel: delegations.length },
-        success: failedCount === 0,
-      });
-      return {
-        toolResult: {
-          toolUseId: toolCall.id,
-          result: parallelResult.summary,
-          isError: failedCount > 0,
-        },
-      };
-    }
-
-    // ACTION: DELEGATE to DEVO/CAIO/SCOUT through one unified pipeline
-    const delegationTarget = resolveDelegationTarget(toolCall.name);
-    if (delegationTarget) {
-      const delegation = buildDelegation(delegationTarget, toolCall.arguments);
-      this.deps.emitDecisionPath(buildDelegationDecisionPath(delegation));
-
-      this.deps.sendEvent({
-        type: 'agent_thinking',
-        agent: 'chapo',
-        status: buildDelegationThinkingStatus(delegation),
-      });
-
-      const [delegationResult, delegationErr] = await this.deps.errorHandler.safe(
-        `delegate:${delegation.target}:${this.deps.iteration}`,
-        () => runDelegationToAgent(this.deps.getDelegationRunnerDeps(), delegation, 'chapo'),
-      );
-
-      if (delegationErr) {
-        return {
-          toolResult: {
-            toolUseId: toolCall.id,
-            result: `${delegation.target.toUpperCase()} Fehler: ${this.deps.errorHandler.formatForLLM(delegationErr)}`,
-            isError: true,
-          },
-        };
-      }
-
-      const envelope = this.deps.buildVerificationEnvelope(delegation, delegationResult);
-      this.deps.sendEvent({
-        type: 'tool_result',
-        agent: 'chapo',
-        toolName: toolCall.name,
-        result: { delegated: true, agent: delegation.target, status: delegationResult.status },
-        success: delegationResult.status === 'success' || delegationResult.status === 'partial',
-      });
-      return {
-        toolResult: {
-          toolUseId: toolCall.id,
-          result: envelope,
-          isError: delegationResult.status === 'failed',
-        },
-      };
     }
 
     // requestApproval — handle as user question

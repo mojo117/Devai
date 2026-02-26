@@ -4,10 +4,6 @@
  * A continuous loop where the LLM's tool_calls ARE the decisions:
  *   - No tool_calls = ANSWER → normalize → respond → exit
  *   - askUser = ASK → pause loop → wait for user reply
- *   - delegateToDevo = DELEGATE → run DEVO sub-loop → feed result back
- *   - delegateToCaio = DELEGATE → run CAIO sub-loop → feed result back
- *   - delegateParallel = DELEGATE → run multiple delegations concurrently
- *   - delegateToScout = DELEGATE → run SCOUT → feed result back
  *   - any other tool = TOOL → execute → feed result back → continue
  *
  * Errors at any point feed back into the loop as context.
@@ -22,9 +18,6 @@ import { SessionLogger } from '../audit/sessionLogger.js';
 import { getAgent, getToolsForAgent } from './router.js';
 import { getToolsForLLM } from '../tools/registry.js';
 import * as stateManager from './stateManager.js';
-import { SubAgentRunner } from './sub-agent-runner.js';
-import { type ParallelDelegation } from './chapo-loop/delegationUtils.js';
-import { type DelegationRunnerDeps } from './chapo-loop/delegationRunner.js';
 import { ChapoLoopContextManager } from './chapo-loop/contextManager.js';
 import { ChapoLoopGateManager } from './chapo-loop/gateManager.js';
 import { ChapoToolExecutor } from './chapo-loop/toolExecutor.js';
@@ -36,9 +29,6 @@ import type {
   AgentStreamEvent,
   ModelSelection,
   ChapoLoopResult,
-  LoopDelegationResult,
-  LoopDelegationStatus,
-  ToolEvidence,
   RiskLevel,
 } from './types.js';
 import type { LLMProvider, ContentBlock } from '../llm/types.js';
@@ -69,7 +59,6 @@ export class ChapoLoop {
   private answerValidator: AnswerValidator;
   private conversation: ConversationManager;
   private sessionLogger?: SessionLogger;
-  private subAgentRunner = new SubAgentRunner();
   private iteration = 0;
   private totalTokensUsed = 0;
   private contextManager: ChapoLoopContextManager;
@@ -78,7 +67,6 @@ export class ChapoLoop {
 
   // Execution metrics for structured logging (3.2)
   private toolCallLog: Array<{ name: string; durationMs: number; success: boolean }> = [];
-  private delegationLog: Array<{ target: string; durationMs: number; status: string }> = [];
 
   // Parallel loop support
   private parallelTurnId: string | undefined;
@@ -110,64 +98,6 @@ export class ChapoLoop {
 
   dispose(): void {
     this.contextManager.dispose();
-  }
-
-  private deriveDelegationStatus(
-    evidence: ToolEvidence[],
-    escalated: boolean,
-    hasContent: boolean,
-  ): LoopDelegationStatus {
-    if (escalated) return 'escalated';
-    if (evidence.length === 0 && !hasContent) return 'failed';
-
-    const failures = evidence.filter((e) => !e.success && !e.pendingApproval);
-    const successes = evidence.filter((e) => e.success);
-    const pending = evidence.filter((e) => e.pendingApproval);
-
-    if (failures.length === 0 && successes.length > 0) return 'success';
-    if (successes.length > 0 && failures.length > 0) return 'partial';
-    if (failures.length > 0 && successes.length === 0) return 'failed';
-    if (pending.length > 0 && successes.length === 0 && failures.length === 0) return 'partial';
-    return 'success';
-  }
-
-  private buildVerificationEnvelope(
-    delegation: ParallelDelegation,
-    result: LoopDelegationResult,
-  ): string {
-    const lines: string[] = [
-      `[DELEGATION RESULT — ${delegation.target.toUpperCase()}]`,
-      `Objective: ${delegation.objective}`,
-    ];
-
-    if (delegation.expectedOutcome) {
-      lines.push(`Expected Outcome: ${delegation.expectedOutcome}`);
-    }
-
-    lines.push('');
-    lines.push(`Status: ${result.status.toUpperCase()}`);
-
-    if (result.toolEvidence.length > 0) {
-      lines.push('Evidence:');
-      for (const ev of result.toolEvidence.slice(-12)) {
-        const icon = ev.success ? 'OK' : (ev.pendingApproval ? 'PENDING' : 'ERROR');
-        const extra = ev.externalId ? ` id=${ev.externalId}` : '';
-        lines.push(`  - [${icon}] ${ev.tool}${extra}: ${ev.summary}`);
-      }
-    }
-
-    if (result.escalation) {
-      lines.push(`\nEscalation: ${result.escalation}`);
-    }
-
-    if (result.findings) {
-      if (result.findings.recommendations.length > 0) {
-        lines.push(`\nRecommendations: ${result.findings.recommendations.join('; ')}`);
-      }
-    }
-
-    lines.push(`\nAgent Response:\n${result.summary}`);
-    return lines.join('\n');
   }
 
   private emitDecisionPath(insights: DecisionPathInsights): void {
@@ -215,14 +145,7 @@ export class ChapoLoop {
 ${systemContextBlock}
 ${this.projectRoot ? `Working Directory: ${this.projectRoot}` : ''}
 
-You are Chapo in the decision loop. Execute tasks DIRECTLY:
-- Delegate development tasks (domain "development") to DEVO
-- Delegate communication/admin tasks (domain "communication") to CAIO
-- Delegate research tasks (domain "research") to SCOUT
-- When delegating: provide domain + objective + optional constraints/context/expectedOutcome
-- Never mention specific tool names in delegations; the target agent picks their own tools
-- Use direct read-only tools only for context gathering or quick fact checks
-- Use delegateParallel only for independent sub-tasks
+You are Chapo in the decision loop. Execute ALL tasks directly using available tools:
 - Use askUser ONLY when you genuinely need clarification
 - When you have the answer, respond directly WITHOUT tool calls`;
 
@@ -291,7 +214,6 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
         exitReason: result.status,
         provider: `${this.modelSelection.provider || 'anthropic'}/${this.modelSelection.model}`,
         toolCalls: this.toolCallLog.length,
-        delegations: this.delegationLog.length,
       },
     }).catch((logErr) => console.error('[chapo-loop] execution log failed:', logErr));
 
@@ -307,7 +229,6 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       provider: this.modelSelection.provider,
       errorMessage: result.status === 'error' ? result.answer : undefined,
       metadata: {
-        delegations: this.delegationLog.length,
         traceId: this.traceId || undefined,
       },
     }).catch((logErr) => console.error('[chapo-loop] agent execution log failed:', logErr));
@@ -477,8 +398,6 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
         queueQuestion: this.queueQuestion.bind(this),
         queueApproval: this.queueApproval.bind(this),
         emitDecisionPath: this.emitDecisionPath.bind(this),
-        getDelegationRunnerDeps: this.getDelegationRunnerDeps.bind(this),
-        buildVerificationEnvelope: this.buildVerificationEnvelope.bind(this),
         buildToolResultContent,
       });
 
@@ -494,19 +413,6 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
           const toolDuration = Date.now() - toolT0;
           if (outcome.earlyReturn) {
             earlyReturn = outcome.earlyReturn;
-            // Log delegation metrics if this was a delegation
-            if (toolCall.name.startsWith('delegate')) {
-              const target = toolCall.name.replace('delegateTo', '').replace('delegateParallel', 'parallel');
-              this.delegationLog.push({ target, durationMs: toolDuration, status: earlyReturn.status });
-              // Log to parallel buffer
-              if (this.parallelTurnId) {
-                stateManager.appendLoopAction(this.sessionId, this.parallelTurnId, {
-                  iteration: this.iteration,
-                  tool: toolCall.name,
-                  summary: `${target.toUpperCase()} delegation: ${earlyReturn.status}`,
-                });
-              }
-            }
             break;
           }
           if (outcome.toolResult) {
@@ -634,18 +540,6 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
     return this.gateManager.queueApproval(description, riskLevel, totalIterations);
   }
 
-  private getDelegationRunnerDeps(): DelegationRunnerDeps {
-    return {
-      sessionId: this.sessionId,
-      projectRoot: this.projectRoot,
-      modelSelection: this.modelSelection,
-      sendEvent: this.sendEvent,
-      errorHandler: this.errorHandler,
-      subAgentRunner: this.subAgentRunner,
-      deriveDelegationStatus: this.deriveDelegationStatus.bind(this),
-      buildToolResultContent,
-    };
-  }
 }
 
 /** Build a short 1-line summary for the parallel context buffer. */
@@ -665,20 +559,6 @@ function buildActionSummary(
   if (toolName === 'fs_listFiles') {
     const path = typeof args.path === 'string' ? args.path : '?';
     return `${path} aufgelistet`;
-  }
-
-  // Delegations
-  if (toolName === 'delegateToDevo') {
-    const obj = typeof args.objective === 'string' ? args.objective.slice(0, 60) : '?';
-    return `DEVO: ${obj}`;
-  }
-  if (toolName === 'delegateToCaio') {
-    const obj = typeof args.objective === 'string' ? args.objective.slice(0, 60) : '?';
-    return `CAIO: ${obj}`;
-  }
-  if (toolName === 'delegateToScout') {
-    const obj = typeof args.objective === 'string' ? args.objective.slice(0, 60) : '?';
-    return `SCOUT: ${obj}`;
   }
 
   // Web
