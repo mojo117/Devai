@@ -12,6 +12,15 @@ import type {
   SettingResponse,
 } from './types';
 
+/** uuid() requires secure context (HTTPS). Fallback for HTTP. */
+const uuid = (): string =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? uuid()
+    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+      });
+
 const API_BASE = '/api';
 
 /**
@@ -795,7 +804,7 @@ async function sendWsCommand(
   onEvent?: (event: ChatStreamEvent) => void
 ): Promise<MultiAgentResponse> {
   const ws = await ensureChatWsConnected();
-  const requestId = crypto.randomUUID();
+  const requestId = uuid();
 
   const timeoutId = window.setTimeout(() => {
     const pending = pendingWsRequests.get(requestId);

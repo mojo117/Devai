@@ -17,6 +17,15 @@ import { validateFile } from './uploadConstants';
 import { TodoCard } from '../TodoCard';
 import { getLatestArtifact, parseToolEventArtifacts } from '../PreviewPanel/artifactParser';
 
+/** uuid() requires secure context (HTTPS). Fallback for HTTP. */
+const uuid = (): string =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? uuid()
+    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+      });
+
 export function ChatUI({
   projectRoot,
   allowedRoots,
@@ -202,7 +211,7 @@ export function ChatUI({
         setToolEvents((prev) => [
           ...prev,
           {
-            id: crypto.randomUUID(),
+            id: uuid(),
             type: 'thinking',
             result: event.status,
             agent: event.agent as AgentName | undefined,
@@ -224,13 +233,13 @@ export function ChatUI({
       case 'status': {
         setToolEvents((prev) => [
           ...prev,
-          { id: crypto.randomUUID(), type: 'status', result: (event as Record<string, unknown>).status, agent: eventAgent },
+          { id: uuid(), type: 'status', result: (event as Record<string, unknown>).status, agent: eventAgent },
         ]);
         break;
       }
       case 'tool_call': {
         const ev = event as Record<string, unknown>;
-        const id = String(ev.id || crypto.randomUUID());
+        const id = String(ev.id || uuid());
         const name = (ev.toolName as string | undefined) || (ev.name as string | undefined);
         const args = ev.args ?? ev.arguments;
         upsertToolEvent(setToolEvents, id, { type: 'tool_call', name, arguments: args, agent: eventAgent });
@@ -238,7 +247,7 @@ export function ChatUI({
       }
       case 'tool_result_chunk': {
         const ev = event as Record<string, unknown>;
-        const id = String(ev.id || crypto.randomUUID());
+        const id = String(ev.id || uuid());
         const name = (ev.toolName as string | undefined) || (ev.name as string | undefined);
         const chunk = typeof ev.chunk === 'string' ? ev.chunk : '';
         upsertToolEvent(setToolEvents, id, { type: 'tool_result', name, chunk, agent: eventAgent });
@@ -246,7 +255,7 @@ export function ChatUI({
       }
       case 'tool_result': {
         const ev = event as Record<string, unknown>;
-        const id = String(ev.id || crypto.randomUUID());
+        const id = String(ev.id || uuid());
         const name = (ev.toolName as string | undefined) || (ev.name as string | undefined);
         const result = ev.result ?? { result: ev.result, success: ev.success };
         upsertToolEvent(setToolEvents, id, { type: 'tool_result', name, result, completed: Boolean(ev.completed), agent: eventAgent });
@@ -279,7 +288,7 @@ export function ChatUI({
         setToolEvents((prev) => [
           ...prev,
           {
-            id: String(event.messageId || crypto.randomUUID()),
+            id: String(event.messageId || uuid()),
             type: 'status',
             name: 'inbox',
             result: String(event.preview || 'Message received'),
@@ -293,7 +302,7 @@ export function ChatUI({
         setToolEvents((prev) => [
           ...prev,
           {
-            id: crypto.randomUUID(),
+            id: uuid(),
             type: 'status',
             name: 'inbox',
             result: `Processing ${event.count} follow-up message(s)...`,
@@ -308,7 +317,7 @@ export function ChatUI({
         setToolEvents((prev) => [
           ...prev,
           {
-            id: ev.turnId || crypto.randomUUID(),
+            id: ev.turnId || uuid(),
             type: 'status',
             name: 'parallel_loop',
             result: `Parallel Loop gestartet: ${ev.taskLabel}`,
@@ -323,7 +332,7 @@ export function ChatUI({
         setToolEvents((prev) => [
           ...prev,
           {
-            id: ev.turnId || crypto.randomUUID(),
+            id: ev.turnId || uuid(),
             type: 'status',
             name: 'parallel_loop',
             result: `Loop fertig: ${ev.taskLabel}`,
@@ -338,7 +347,7 @@ export function ChatUI({
         setToolEvents((prev) => [
           ...prev,
           {
-            id: crypto.randomUUID(),
+            id: uuid(),
             type: 'status',
             name: 'mode',
             result: ev.mode === 'parallel' ? 'Parallel Mode aktiviert' : 'Serial Mode aktiviert',
@@ -350,7 +359,7 @@ export function ChatUI({
       }
       case 'partial_response': {
         const partialMessage: ChatMessage = {
-          id: crypto.randomUUID(),
+          id: uuid(),
           role: 'assistant',
           content: String((event as Record<string, unknown>).message || ''),
           timestamp: new Date().toISOString(),
@@ -372,7 +381,7 @@ export function ChatUI({
 
   const sendChatMessage = async (content: string) => {
     const userMessage: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: uuid(),
       role: 'user',
       content,
       timestamp: new Date().toISOString(),
@@ -431,7 +440,7 @@ export function ChatUI({
       const shouldRetry = /network|fetch|timeout|503|502|504|tempor/i.test(err);
 
       const errorMessage: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: uuid(),
         role: 'assistant',
         content: shouldRetry
           ? 'Verbindung zum Server kurz unterbrochen. Du kannst die letzte Nachricht unten erneut senden.'
@@ -519,7 +528,7 @@ export function ChatUI({
     } catch (error) {
       const err = error instanceof Error ? error.message : 'Unknown error';
       const errorMsg: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: uuid(),
         role: 'assistant',
         content: `Error: ${err}`,
         timestamp: new Date().toISOString(),
