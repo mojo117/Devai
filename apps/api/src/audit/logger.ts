@@ -20,8 +20,8 @@ async function ensureDir(): Promise<void> {
   try {
     await mkdir(dirname(AUDIT_LOG_PATH), { recursive: true });
     dirCreated = true;
-  } catch {
-    // Directory may already exist
+  } catch (err) {
+    console.warn('[audit] Failed to create audit log dir:', err instanceof Error ? err.message : err);
     dirCreated = true;
   }
 }

@@ -13,7 +13,7 @@ import { registerMetaTools, registerAgentTools } from '../tools/registry.js';
 export const SCOUT_AGENT: AgentDefinition = {
   name: 'scout',
   role: 'Exploration Specialist',
-  model: 'glm-4.7-flash', // ZAI GLM-4.7 Flash - FREE
+  model: 'glm-4.7', // ZAI GLM-4.7 - upgraded from flash
   fallbackModel: 'claude-sonnet-4-20250514',
 
   capabilities: {
@@ -46,6 +46,8 @@ export const SCOUT_AGENT: AgentDefinition = {
     'scout_crawl_focused',
     'scout_extract_schema',
     'scout_research_bundle',
+    // Userfile search
+    'search_files',
     // Escalation
     'escalateToChapo',
   ],

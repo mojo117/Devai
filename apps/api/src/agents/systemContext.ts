@@ -1,13 +1,9 @@
-import { resolve } from 'path';
 import * as stateManager from './stateManager.js';
-import { loadDevaiMdContext, formatDevaiMdBlock } from '../scanner/devaiMdLoader.js';
-import { loadClaudeMdContext, formatClaudeMdBlock } from '../scanner/claudeMdLoader.js';
 import { loadWorkspaceMdContext, formatWorkspaceMdBlock, type WorkspaceLoadMode } from '../scanner/workspaceMdLoader.js';
 import { getSetting } from '../db/queries.js';
 import { MEMORY_BEHAVIOR_BLOCK } from '../prompts/context.js';
 import { getSchedulerErrors } from '../scheduler/schedulerService.js';
-import { formatMemoryQualityBlock, retrieveRelevantMemories } from '../memory/service.js';
-import { buildRecentFocusBlock, syncManualEdits } from '../memory/recentFocusRenderer.js';
+import { retrieveRelevantMemories } from '../memory/service.js';
 import { config } from '../config.js';
 
 const GLOBAL_CONTEXT_MAX_CHARS = 4000;
@@ -70,20 +66,6 @@ export function formatContextBlock(meta: ContextBlockMeta, content: string): str
   return `${formatContextHeader(meta, tokensEstimate)}\n${trimmed}`;
 }
 
-function toStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((entry): entry is string => typeof entry === 'string')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-}
-
-function summarizeSources(sources: string[], fallback: string): string {
-  if (sources.length === 0) return fallback;
-  if (sources.length <= 2) return sources.join(', ');
-  return `${sources[0]}, ${sources[1]}, +${sources.length - 2} more`;
-}
-
 function asNonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 }
@@ -101,7 +83,8 @@ function parseGlobalContextSetting(raw: string | null): { content: string; enabl
       const enabled = typeof parsed.enabled === 'boolean' ? parsed.enabled : true;
       return { content, enabled };
     }
-  } catch {
+  } catch (err) {
+    console.warn('[systemContext] Failed to parse global context:', err instanceof Error ? err.message : err);
     return { content: raw, enabled: true };
   }
 
@@ -127,47 +110,6 @@ function resolveWorkspaceMode(sessionId: string): WorkspaceLoadMode {
   return 'main';
 }
 
-export async function getDevaiMdBlockForSession(sessionId: string): Promise<string> {
-  const state = stateManager.getState(sessionId);
-  if (state?.taskContext.gatheredInfo.devaiMdBlock) {
-    return state.taskContext.gatheredInfo.devaiMdBlock;
-  }
-
-  const uiHost = state?.taskContext.gatheredInfo.uiHost || null;
-  try {
-    const ctx = await loadDevaiMdContext();
-    const block = formatDevaiMdBlock(ctx, { uiHost });
-    stateManager.setGatheredInfo(sessionId, 'devaiMdBlock', block);
-    stateManager.setGatheredInfo(sessionId, 'devaiMdSourcePath', ctx?.path || '');
-    return block;
-  } catch {
-    return '';
-  }
-}
-
-export async function getClaudeMdBlockForSession(sessionId: string, projectRoot: string | null): Promise<string> {
-  const state = stateManager.getState(sessionId);
-  const existing = state?.taskContext.gatheredInfo.claudeMdBlock || '';
-
-  if (!projectRoot) return existing;
-
-  const normalizedRoot = resolve(projectRoot);
-  const cachedRoot = state?.taskContext.gatheredInfo.claudeMdProjectRoot || '';
-  if (cachedRoot === normalizedRoot && existing) return existing;
-
-  try {
-    const ctx = await loadClaudeMdContext(normalizedRoot);
-    const block = formatClaudeMdBlock(ctx);
-    stateManager.setGatheredInfo(sessionId, 'claudeMdBlock', block);
-    stateManager.setGatheredInfo(sessionId, 'claudeMdSourcePaths', ctx.files.map((file) => file.path));
-    stateManager.setGatheredInfo(sessionId, 'claudeMdProjectRoot', normalizedRoot);
-    stateManager.setGatheredInfo(sessionId, 'projectRoot', normalizedRoot);
-    return block;
-  } catch {
-    return existing;
-  }
-}
-
 export async function getWorkspaceMdBlockForSession(sessionId: string): Promise<string> {
   const state = stateManager.getState(sessionId);
   const mode = resolveWorkspaceMode(sessionId);
@@ -184,8 +126,30 @@ export async function getWorkspaceMdBlockForSession(sessionId: string): Promise<
     stateManager.setGatheredInfo(sessionId, 'workspaceMdMode', mode);
     stateManager.setGatheredInfo(sessionId, 'workspaceMdDiagnostics', ctx.diagnostics);
     return block;
-  } catch {
+  } catch (err) {
+    console.warn('[systemContext] Failed to load workspace MD:', err instanceof Error ? err.message : err);
     return existing;
+  }
+}
+
+export async function warmMemoryRetrievalForSession(
+  sessionId: string,
+  userQuery: string,
+): Promise<void> {
+  try {
+    const memories = await retrieveRelevantMemories(userQuery);
+    if (memories.length === 0) {
+      stateManager.setGatheredInfo(sessionId, 'memoryRetrievalBlock', '');
+      return;
+    }
+    const lines = memories
+      .slice(0, 5)
+      .map((m) => `- [${m.namespace}] ${m.content}`);
+    const block = `## Relevant Memories (vector search)\n${lines.join('\n')}`;
+    stateManager.setGatheredInfo(sessionId, 'memoryRetrievalBlock', block);
+  } catch (err) {
+    console.warn('[systemContext] Memory retrieval failed:', err instanceof Error ? err.message : err);
+    stateManager.setGatheredInfo(sessionId, 'memoryRetrievalBlock', '');
   }
 }
 
@@ -209,40 +173,33 @@ export async function refreshGlobalContextBlockForSession(sessionId: string): Pr
   return block;
 }
 
-export async function warmMemoryBlockForSession(sessionId: string, userMessage: string): Promise<string> {
-  const state = stateManager.getState(sessionId);
-  const projectRoot = state?.taskContext.gatheredInfo.projectRoot || null;
+function buildCurrentTimeBlock(): string {
+  const now = new Date();
+  const berlinParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Berlin',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  }).formatToParts(now);
 
-  let projectName: string | undefined;
-  if (projectRoot) {
-    const parts = projectRoot.split('/').filter(Boolean);
-    projectName = parts[parts.length - 1]?.toLowerCase();
-  }
+  const get = (type: string): string => berlinParts.find((p) => p.type === type)?.value ?? '00';
+  const berlinISO = `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}`;
 
-  try {
-    const { block, quality } = await retrieveRelevantMemories(userMessage, projectName);
-    const qualityBlock = formatMemoryQualityBlock(quality);
-    stateManager.setGatheredInfo(sessionId, 'memoryBlock', block);
-    stateManager.setGatheredInfo(sessionId, 'memoryQualityBlock', qualityBlock);
-    stateManager.setGatheredInfo(sessionId, 'memoryNamespaces', quality.namespaces);
-    stateManager.setGatheredInfo(sessionId, 'memoryRetrievedHits', quality.totalHits);
-    return block;
-  } catch {
-    stateManager.setGatheredInfo(sessionId, 'memoryQualityBlock', '');
-    return '';
-  }
-}
+  // Compute Berlin UTC offset (handles CET/CEST automatically via Intl)
+  const berlinMs = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Berlin' })).getTime();
+  const offsetMin = Math.round((berlinMs - now.getTime()) / 60_000);
+  const sign = offsetMin >= 0 ? '+' : '-';
+  const oh = String(Math.floor(Math.abs(offsetMin) / 60)).padStart(2, '0');
+  const om = String(Math.abs(offsetMin) % 60).padStart(2, '0');
+  const offsetStr = `${sign}${oh}:${om}`;
 
-export async function warmRecentFocusBlockForSession(sessionId: string): Promise<string> {
-  try {
-    await syncManualEdits();
-    const block = await buildRecentFocusBlock();
-    stateManager.setGatheredInfo(sessionId, 'recentFocusBlock', block);
-    return block;
-  } catch {
-    stateManager.setGatheredInfo(sessionId, 'recentFocusBlock', '');
-    return '';
-  }
+  return [
+    '## Current Time',
+    `Berlin (Europe/Berlin): ${berlinISO}${offsetStr}`,
+    `UTC: ${now.toISOString()}`,
+    `Timezone offset: UTC${offsetStr}`,
+    'Use Berlin time for user-facing output. Use UTC with Z suffix for tool datetime parameters.',
+  ].join('\n');
 }
 
 function buildContextBlocks(sessionId: string): ContextBlock[] {
@@ -251,7 +208,7 @@ function buildContextBlocks(sessionId: string): ContextBlock[] {
   const schedulerErrors = getSchedulerErrors();
   const schedulerErrorBlock = schedulerErrors.length > 0
     ? [
-      '## Letzte Scheduler-Fehler',
+      '## Recent Scheduler Errors',
       ...schedulerErrors.slice(-5).map((entry) =>
         `- [${entry.timestamp}] ${entry.jobName} (${entry.jobId}): ${entry.error}`
       ),
@@ -261,7 +218,7 @@ function buildContextBlocks(sessionId: string): ContextBlock[] {
   // Inject communication platform so CHAPO knows which channel the user is on
   const platform = info.platform || '';
   const platformBlock = platform
-    ? `## Kommunikationskanal\nDer Benutzer kommuniziert gerade über: **${platform === 'telegram' ? 'Telegram' : 'Web-UI'}**.\nDateien an den Benutzer ${platform === 'telegram' ? 'via Telegram senden (telegram_send_document)' : 'im Web-UI zum Download bereitstellen (deliver_document)'}.`
+    ? `## Communication Channel\nThe user is currently communicating via: **${platform === 'telegram' ? 'Telegram' : 'Web-UI'}**.\nSend files to the user ${platform === 'telegram' ? 'via Telegram (telegram_send_document)' : 'via Web-UI download (deliver_document)'}.`
     : '';
 
   const workspaceDiagnostics =
@@ -274,34 +231,21 @@ function buildContextBlocks(sessionId: string): ContextBlock[] {
     ? `${workspaceRoot}${workspaceMode ? ` (mode=${workspaceMode})` : ''}`
     : 'workspace/*.md';
 
-  const memoryNamespaces = summarizeSources(toStringArray(info.memoryNamespaces), 'memory.search');
-  const claudeSources = summarizeSources(
-    toStringArray(info.claudeMdSourcePaths),
-    `${asNonEmptyString(info.claudeMdProjectRoot) || 'project-root'}/CLAUDE.md`,
-  );
-  const devaiSource = asNonEmptyString(info.devaiMdSourcePath) || 'devai.md';
   const platformName = asNonEmptyString(info.platform) || 'unknown';
 
+  // NOTE: devai_instructions (devai.md) and project_instructions (CLAUDE.md) were removed.
+  // Essential runtime context is now baked into the CHAPO system prompt directly,
+  // avoiding ~13KB of developer-facing CLAUDE.md content in every session.
   const primaryCandidates: ContextBlock[] = [
     {
       meta: {
-        kind: 'devai_instructions',
-        source: devaiSource,
+        kind: 'current_time',
+        source: 'system.clock',
         priority: 'high',
-        freshness: 'cached',
-        sensitivity: 'medium',
+        freshness: 'live',
+        sensitivity: 'low',
       },
-      content: asNonEmptyString(info.devaiMdBlock) || '',
-    },
-    {
-      meta: {
-        kind: 'project_instructions',
-        source: claudeSources,
-        priority: 'high',
-        freshness: 'cached',
-        sensitivity: 'medium',
-      },
-      content: asNonEmptyString(info.claudeMdBlock) || '',
+      content: buildCurrentTimeBlock(),
     },
     {
       meta: {
@@ -315,6 +259,16 @@ function buildContextBlocks(sessionId: string): ContextBlock[] {
     },
     {
       meta: {
+        kind: 'memory_retrieval',
+        source: 'memory.vectorSearch',
+        priority: 'medium',
+        freshness: 'dynamic',
+        sensitivity: 'low',
+      },
+      content: asNonEmptyString(info.memoryRetrievalBlock) || '',
+    },
+    {
+      meta: {
         kind: 'user_global_context',
         source: asNonEmptyString(info.globalContextSource) || 'settings.globalContext',
         priority: 'medium',
@@ -322,36 +276,6 @@ function buildContextBlocks(sessionId: string): ContextBlock[] {
         sensitivity: 'high',
       },
       content: asNonEmptyString(info.globalContextBlock) || '',
-    },
-    {
-      meta: {
-        kind: 'recent_focus',
-        source: 'memory.recent_topics',
-        priority: 'medium',
-        freshness: 'dynamic',
-        sensitivity: 'low',
-      },
-      content: asNonEmptyString(info.recentFocusBlock) || '',
-    },
-    {
-      meta: {
-        kind: 'memory_quality',
-        source: memoryNamespaces,
-        priority: 'medium',
-        freshness: 'dynamic',
-        sensitivity: 'medium',
-      },
-      content: asNonEmptyString(info.memoryQualityBlock) || '',
-    },
-    {
-      meta: {
-        kind: 'memory_retrieval',
-        source: memoryNamespaces,
-        priority: 'medium',
-        freshness: 'dynamic',
-        sensitivity: 'medium',
-      },
-      content: asNonEmptyString(info.memoryBlock) || '',
     },
     {
       meta: {
@@ -468,14 +392,7 @@ export function getCombinedSystemContextBlock(sessionId: string): string {
 export async function warmSystemContextForSession(
   sessionId: string,
   projectRoot: string | null,
-  userMessage?: string
 ): Promise<void> {
-  await getDevaiMdBlockForSession(sessionId);
-  await getClaudeMdBlockForSession(sessionId, projectRoot);
   await getWorkspaceMdBlockForSession(sessionId);
   await refreshGlobalContextBlockForSession(sessionId);
-  await warmRecentFocusBlockForSession(sessionId);
-  if (userMessage) {
-    await warmMemoryBlockForSession(sessionId, userMessage);
-  }
 }

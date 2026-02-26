@@ -159,7 +159,8 @@ export async function pingHost(hostOrAlias: string): Promise<boolean> {
   try {
     const result = await executeSSH(hostOrAlias, 'echo "ok"', { timeout: 10000 });
     return result.exitCode === 0 && result.stdout.trim() === 'ok';
-  } catch {
+  } catch (err) {
+    console.warn('[ssh] Host ping failed:', err instanceof Error ? err.message : err);
     return false;
   }
 }

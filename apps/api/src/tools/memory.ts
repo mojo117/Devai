@@ -6,14 +6,12 @@ import {
 
 export async function memoryRemember(
   content: string,
-  options?: { promoteToLongTerm?: boolean; sessionId?: string; source?: string }
+  options?: { sessionId?: string; source?: string }
 ): Promise<{
   saved: true;
   dailyPath: string;
-  longTermPath?: string;
 }> {
   const result = await rememberNote(content, {
-    promoteToLongTerm: options?.promoteToLongTerm,
     sessionId: options?.sessionId,
     source: options?.source || 'tool.memory_remember',
   });
@@ -21,13 +19,12 @@ export async function memoryRemember(
   return {
     saved: true,
     dailyPath: result.daily.filePath,
-    longTermPath: result.longTerm?.filePath,
   };
 }
 
 export async function memorySearch(
   query: string,
-  options?: { limit?: number; includeLongTerm?: boolean }
+  options?: { limit?: number }
 ): Promise<{
   query: string;
   count: number;
@@ -35,7 +32,6 @@ export async function memorySearch(
 }> {
   const result = await searchWorkspaceMemory(query, {
     limit: options?.limit,
-    includeLongTerm: options?.includeLongTerm,
   });
 
   return {

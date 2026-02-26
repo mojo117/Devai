@@ -94,7 +94,8 @@ function extractDomainFromUrl(url: string): string {
   try {
     const urlObj = new URL(url);
     return urlObj.hostname.replace('www.', '');
-  } catch {
+  } catch (err) {
+    console.warn('[perplexity] Failed to parse URL:', err instanceof Error ? err.message : err);
     return url;
   }
 }

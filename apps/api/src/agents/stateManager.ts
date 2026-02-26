@@ -32,6 +32,12 @@ export {
   clearAllStates,
 } from './state-manager/core.js';
 
+export type {
+  ParallelLoopAction,
+  ParallelLoopEntry,
+  SessionMode,
+} from './state-manager/sessionState.js';
+
 export {
   setPhase,
   setActiveAgent,
@@ -44,6 +50,18 @@ export {
   ensureActiveTurnId,
   setLoopRunning,
   isLoopActive,
+  // Parallel loop management
+  getSessionMode,
+  setSessionMode,
+  registerParallelLoop,
+  unregisterParallelLoop,
+  appendLoopAction,
+  getOtherLoopContexts,
+  updateLoopStatus,
+  updateLoopLabel,
+  getActiveLoopCount,
+  abortAllLoops,
+  // Approvals
   grantApproval,
   isApprovalGranted,
   addHistoryEntry,
@@ -62,4 +80,7 @@ export {
   getActiveParallelExecutions,
   getStateSummary,
 } from './state-manager/sessionState.js';
+
+// Test utilities
+export { cleanupAllLocks } from './state-manager/loopLock.js';
 

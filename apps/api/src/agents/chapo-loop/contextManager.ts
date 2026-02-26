@@ -1,60 +1,26 @@
 import { compactMessages } from '../../memory/compaction.js';
-import { drainInbox, offInboxMessage, onInboxMessage } from '../inbox.js';
 import type { ConversationManager } from '../conversation-manager.js';
-import type { AgentStreamEvent, InboxMessage } from '../types.js';
+import type { AgentStreamEvent } from '../types.js';
+import { getOtherLoopContexts } from '../stateManager.js';
+import type { ParallelLoopEntry } from '../stateManager.js';
 
 const COMPACTION_THRESHOLD = 160_000;
 
 export class ChapoLoopContextManager {
-  private hasInboxMessages = false;
-  private inboxHandler: ((msg: InboxMessage) => void) | null = null;
   private originalUserMessage = '';
 
   constructor(
     private sessionId: string,
     private sendEvent: (event: AgentStreamEvent) => void,
     private conversation: ConversationManager,
-  ) {
-    // Subscribe to inbox events for reactive awareness
-    this.inboxHandler = (msg: InboxMessage) => {
-      this.hasInboxMessages = true;
-      this.sendEvent({
-        type: 'message_queued',
-        messageId: msg.id,
-        preview: 'Got it — I\'ll handle that too',
-      });
-    };
-    onInboxMessage(this.sessionId, this.inboxHandler);
-  }
+  ) {}
 
   dispose(): void {
-    if (this.inboxHandler) {
-      offInboxMessage(this.sessionId, this.inboxHandler);
-      this.inboxHandler = null;
-    }
+    // no-op — inbox lifecycle removed (simple queue model)
   }
 
   setPinnedRequest(userMessage: string): void {
     this.originalUserMessage = userMessage;
-  }
-
-  checkInbox(): boolean {
-    // Always check the actual inbox — the reactive hasInboxMessages flag
-    // can miss messages queued before the handler was registered.
-    const messages = drainInbox(this.sessionId);
-    this.hasInboxMessages = false;
-
-    if (messages.length === 0) return false;
-
-    for (const msg of messages) {
-      this.conversation.addMessage({
-        role: 'user',
-        content: msg.content,
-      });
-    }
-
-    this.sendEvent({ type: 'inbox_processing', count: messages.length });
-    return true;
   }
 
   async checkAndCompact(): Promise<void> {
@@ -71,6 +37,16 @@ export class ChapoLoopContextManager {
     const toKeep = messages.slice(compactCount);
 
     const result = await compactMessages(toCompact, this.sessionId);
+
+    // If compaction LLM call failed, keep original context to avoid drift
+    if (result.failed) {
+      this.sendEvent({
+        type: 'agent_thinking',
+        agent: 'chapo',
+        status: 'Compaction failed — keeping original context',
+      });
+      return;
+    }
 
     // Replace conversation: summary + kept messages
     this.conversation.clear();
@@ -98,7 +74,55 @@ export class ChapoLoopContextManager {
     });
   }
 
-  drainRemainingMessages(): InboxMessage[] {
-    return drainInbox(this.sessionId);
+  /**
+   * Build a system message showing what other parallel loops are doing.
+   * Returns null if no other loops are active.
+   */
+  buildParallelContextMessage(turnId: string): string | null {
+    const others = getOtherLoopContexts(this.sessionId, turnId);
+    if (others.length === 0) return null;
+
+    const loopSections = others.map((entry) => formatLoopEntry(entry));
+    const activeCount = others.filter((e) => e.status === 'running').length;
+    const completedCount = others.filter((e) => e.status === 'completed').length;
+    const parts = [];
+    if (activeCount > 0) parts.push(`${activeCount} running`);
+    if (completedCount > 0) parts.push(`${completedCount} completed`);
+
+    return [
+      `[Parallel Context — ${parts.join(', ')}]`,
+      '',
+      ...loopSections,
+      '[Hinweis: Vermeide Konflikte mit Dateien die andere Loops bearbeiten.]',
+    ].join('\n');
   }
+
+}
+
+const MAX_ACTIONS_IN_CONTEXT = 20;
+
+function formatLoopEntry(entry: ParallelLoopEntry): string {
+  const promptPreview = entry.originalPrompt.length > 120
+    ? entry.originalPrompt.slice(0, 117) + '...'
+    : entry.originalPrompt;
+
+  const lines: string[] = [
+    `Loop "${entry.taskLabel}" (User: "${promptPreview}"):`,
+    `  Status: ${entry.status}`,
+  ];
+
+  // Show last N actions
+  const actions = entry.actions.slice(-MAX_ACTIONS_IN_CONTEXT);
+  for (const action of actions) {
+    lines.push(`  - ${action.tool} → ${action.summary}`);
+  }
+
+  if (entry.status === 'completed' && entry.finalAnswer) {
+    const answer = entry.finalAnswer.length > 200
+      ? entry.finalAnswer.slice(0, 197) + '...'
+      : entry.finalAnswer;
+    lines.push(`  Result: ${answer}`);
+  }
+
+  return lines.join('\n');
 }

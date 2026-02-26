@@ -17,18 +17,31 @@ const HARDCODED_ALLOWED_ROOTS: readonly string[] = [
 // Devai must not be able to modify its own deployment
 const HARDCODED_DENIED_PATHS: readonly string[] = [
   "/root/.openclaw",  // OpenClaw config, credentials, workspace — separate system
+  "/root/.ssh",       // SSH keys
+  "/root/.gnupg",     // GPG keys
+  "/root/.aws",       // Cloud credentials
+  "/root/.config/gcloud",
+  "/root/.config/gh",
+  "/root/.git-credentials",
+  "/root/.npmrc",
   "/opt/Devai",       // Devai's own deployment — prevent self-modification
 ] as const;
 
-// Directories/files within /opt/Devai that SCOUT must NOT read (secrets, runtime data)
+// Directories/files within self-inspection root that SCOUT must NOT read (secrets, runtime data)
 const SELF_INSPECTION_EXCLUDE: readonly string[] = [
   '.env',
+  '.env.local',
+  '.env.development',
+  '.env.staging',
+  '.env.production',
+  '.env.test',
   'secrets',
   'var',
   'workspace/memory',
   '.git',
   'node_modules',
 ] as const;
+const HARD_BLOCKED_EXTENSIONS = ['.env'] as const;
 
 export interface Config {
   nodeEnv: string;
@@ -39,6 +52,7 @@ export interface Config {
   openaiApiKey?: string;
   geminiApiKey?: string;
   zaiApiKey?: string;
+  moonshotApiKey?: string;
 
   // GitHub
   githubToken?: string;
@@ -65,6 +79,13 @@ export interface Config {
   toolMaxDiffChars: number;
   toolAllowedExtensions: string[];
 
+  // Preview pipeline
+  previewWorkspaces: PreviewWorkspaceConfig[];
+  previewSignedUrlTtlSec: number;
+  previewStorageBucket: string;
+  previewBuildTimeoutMs: number;
+  previewMaxMountBytes: number;
+
   // Supabase
   supabaseUrl: string;
   supabaseServiceKey: string;
@@ -84,9 +105,6 @@ export interface Config {
   looperMaxIterations: number;
   looperMaxConversationTokens: number;
   looperMaxToolRetries: number;
-  looperMinValidationConfidence: number;
-  looperSelfValidationEnabled: boolean;
-
   // Memory retrieval tuning
   memoryRetrievalThresholds: number[];
   memoryMinHitsBeforeStop: number;
@@ -95,6 +113,17 @@ export interface Config {
   gateQuestionTtlMs: number;
   gateQuestionDedup: boolean;
 
+  // Resilience: loop timeouts & cost caps
+  loopHardTimeoutMs: number;
+  delegationTimeoutMs: number;
+  costCapPerRunTokens: number;
+
+}
+
+export interface PreviewWorkspaceConfig {
+  id: string;
+  root: string;
+  mode: 'readwrite' | 'readonly';
 }
 
 export interface EnvValidationIssue {
@@ -121,6 +150,7 @@ export function loadConfig(): Config {
     openaiApiKey: process.env.OPENAI_API_KEY,
     geminiApiKey: process.env.GEMINI_API_KEY,
     zaiApiKey: process.env.ZAI_API_KEY,
+    moonshotApiKey: process.env.MOONSHOT_API_KEY,
 
     githubToken: process.env.GITHUB_TOKEN,
     githubOwner: process.env.GITHUB_OWNER,
@@ -149,6 +179,12 @@ export function loadConfig(): Config {
     toolMaxDiffChars: parseInt(process.env.TOOL_MAX_DIFF_CHARS || "12000", 10),
     toolAllowedExtensions: parseExtensions(process.env.TOOL_ALLOWED_EXTENSIONS),
 
+    previewWorkspaces: parsePreviewWorkspaces(process.env.PREVIEW_WORKSPACES),
+    previewSignedUrlTtlSec: Math.max(60, parseInt(process.env.PREVIEW_SIGNED_URL_TTL_SEC || '900', 10)),
+    previewStorageBucket: process.env.PREVIEW_STORAGE_BUCKET || 'preview-artifacts',
+    previewBuildTimeoutMs: Math.max(1_000, parseInt(process.env.PREVIEW_BUILD_TIMEOUT_MS || '45000', 10)),
+    previewMaxMountBytes: Math.max(128 * 1024, parseInt(process.env.PREVIEW_MAX_MOUNT_BYTES || String(8 * 1024 * 1024), 10)),
+
     supabaseUrl: process.env.DEVAI_SUPABASE_URL || process.env.SUPABASE_URL || "",
     // Support both DevAI-prefixed and standard Supabase env var names.
     // We prefer the service-role key, but some deployments used SUPABASE_SERVICE_KEY historically.
@@ -164,8 +200,6 @@ export function loadConfig(): Config {
     looperMaxIterations: parseInt(process.env.LOOPER_MAX_ITERATIONS || "25", 10),
     looperMaxConversationTokens: parseInt(process.env.LOOPER_MAX_CONVERSATION_TOKENS || "180000", 10),
     looperMaxToolRetries: parseInt(process.env.LOOPER_MAX_TOOL_RETRIES || "3", 10),
-    looperMinValidationConfidence: parseFloat(process.env.LOOPER_MIN_VALIDATION_CONFIDENCE || "0.7"),
-    looperSelfValidationEnabled: process.env.LOOPER_SELF_VALIDATION !== "false",
     memoryRetrievalThresholds: parseNumberList(
       process.env.MEMORY_RETRIEVAL_THRESHOLDS,
       [0.5, 0.35, 0.2],
@@ -176,6 +210,11 @@ export function loadConfig(): Config {
     contextProvenanceTags: process.env.CONTEXT_PROVENANCE_TAGS !== "false",
     gateQuestionTtlMs: Math.max(0, parseInt(process.env.GATE_QUESTION_TTL_MS || "600000", 10)),
     gateQuestionDedup: process.env.GATE_QUESTION_DEDUP !== "false",
+
+    // Resilience: loop timeouts & cost caps
+    loopHardTimeoutMs: parseInt(process.env.LOOP_HARD_TIMEOUT_MS || "720000", 10),
+    delegationTimeoutMs: parseInt(process.env.DELEGATION_TIMEOUT_MS || "720000", 10),
+    costCapPerRunTokens: parseInt(process.env.COST_CAP_PER_RUN_TOKENS || "500000", 10),
 
   };
 }
@@ -190,7 +229,8 @@ export function validateRequiredEnv(currentConfig: Config = config): EnvValidati
     currentConfig.zaiApiKey ||
     currentConfig.anthropicApiKey ||
     currentConfig.openaiApiKey ||
-    currentConfig.geminiApiKey,
+    currentConfig.geminiApiKey ||
+    currentConfig.moonshotApiKey,
   );
 
   if (!currentConfig.supabaseUrl) {
@@ -266,8 +306,8 @@ function buildTaskForgeKeyMap(): Record<string, string> {
 }
 
 function parseExtensions(value?: string): string[] {
-  if (!value) {
-    return [
+  const configured = !value
+    ? [
       ".md",
       ".txt",
       ".json",
@@ -280,16 +320,19 @@ function parseExtensions(value?: string): string[] {
       ".html",
       ".yml",
       ".yaml",
-      ".env",
       ".example",
       ".log",
-    ];
-  }
-  return value
-    .split(/[;,]/)
-    .map((ext) => ext.trim())
-    .filter(Boolean)
-    .map((ext) => (ext.startsWith(".") ? ext : `.${ext}`));
+    ]
+    : value
+      .split(/[;,]/)
+      .map((ext) => ext.trim())
+      .filter(Boolean)
+      .map((ext) => (ext.startsWith(".") ? ext : `.${ext}`));
+
+  return configured.filter((ext) => {
+    const lowered = ext.toLowerCase();
+    return !HARD_BLOCKED_EXTENSIONS.some((blocked) => lowered === blocked || lowered.startsWith(`${blocked}.`));
+  });
 }
 
 function parseNumberList(
@@ -314,4 +357,29 @@ function parseNumberList(
     unique.sort((a, b) => b - a);
   }
   return unique.length > 0 ? unique : fallback;
+}
+
+function parsePreviewWorkspaces(value?: string): PreviewWorkspaceConfig[] {
+  const fallback: PreviewWorkspaceConfig[] = [
+    { id: 'devai', root: '/opt/Klyde/projects/Devai', mode: 'readwrite' },
+    { id: 'devispace', root: '/opt/Klyde/projects/DeviSpace', mode: 'readwrite' },
+  ];
+
+  if (!value || !value.trim()) return fallback;
+
+  const parsed = value
+    .split(/[;,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [idRaw, rootRaw, modeRaw] = entry.split(':');
+      const id = (idRaw || '').trim().toLowerCase();
+      const root = (rootRaw || '').trim();
+      const mode = modeRaw?.trim().toLowerCase() === 'readonly' ? 'readonly' : 'readwrite';
+      if (!id || !root || !root.startsWith('/')) return null;
+      return { id, root, mode } as PreviewWorkspaceConfig;
+    })
+    .filter((entry): entry is PreviewWorkspaceConfig => Boolean(entry));
+
+  return parsed.length > 0 ? parsed : fallback;
 }

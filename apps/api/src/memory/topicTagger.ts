@@ -56,7 +56,7 @@ Rules:
 - Only propose sub-topic if work is clearly more specific than parent
 - file_paths: actual file paths mentioned or accessed
 - directories: parent directories of accessed files
-- Return ONLY the JSON object`;
+- Return ONLY the JSON object, compact, no extra whitespace`;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,7 +92,13 @@ function parseTagResponse(raw: string): TagResult | null {
     jsonString = codeBlockMatch[1].trim();
   }
 
-  const parsed: unknown = JSON.parse(jsonString);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonString);
+  } catch (err) {
+    console.warn('[topicTagger] JSON parse failed:', err instanceof Error ? err.message : err, 'raw:', jsonString.slice(0, 200));
+    return null;
+  }
 
   if (typeof parsed !== 'object' || parsed === null) {
     return null;
@@ -192,7 +198,7 @@ export async function tagCurrentWork(
     const userContent = buildTagInput(context);
 
     const response = await llmRouter.generateWithFallback(provider, {
-      model: 'glm-4.7-flash',
+      model: 'glm-4.7',
       systemPrompt,
       messages: [
         {
@@ -202,7 +208,7 @@ export async function tagCurrentWork(
       ],
       tools: [],
       toolsEnabled: false,
-      maxTokens: 150,
+      maxTokens: 300,
     });
 
     const result = parseTagResponse(response.content);

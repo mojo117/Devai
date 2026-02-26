@@ -20,7 +20,8 @@ async function tryRead(path: string): Promise<string | null> {
   try {
     const content = await readFile(path, 'utf-8');
     return content;
-  } catch {
+  } catch (err) {
+    console.warn('[devaiMdLoader] Failed to read file:', err instanceof Error ? err.message : err);
     return null;
   }
 }

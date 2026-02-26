@@ -20,8 +20,8 @@ export async function scanProject(projectRoot: string): Promise<ProjectContext> 
   try {
     const content = await readFile(packageJsonPath, 'utf-8');
     packageJson = JSON.parse(content);
-  } catch {
-    // No package.json
+  } catch (err) {
+    console.warn('[projectScanner] Failed to read package.json:', err instanceof Error ? err.message : err);
   }
 
   const framework = await detectFramework(runtimeRoot, packageJson);
@@ -101,7 +101,7 @@ async function fileExists(path: string): Promise<boolean> {
   try {
     await access(path);
     return true;
-  } catch {
+  } catch (_err) {
     return false;
   }
 }

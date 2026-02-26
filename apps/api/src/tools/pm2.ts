@@ -90,8 +90,9 @@ export async function pm2Status(
       })),
       host,
     };
-  } catch {
+  } catch (err) {
     // Fallback to text parsing if JSON fails
+    console.warn('[pm2] JSON status parse failed, falling back to text:', err instanceof Error ? err.message : err);
     const textResult = await executeSSH(host, 'pm2 status', { timeout: 15000 });
     throw new Error(`PM2 Status:\n${textResult.stdout}`);
   }

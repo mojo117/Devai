@@ -89,6 +89,8 @@ export class ChapoLoopGateManager {
     // State mutation + WS emission handled by projections via the event bus bridge:
     //   sendEvent → bridge → gate.question.queued → StateProjection + StreamProjection
     this.sendEvent({ type: 'user_question', question: questionPayload });
+    // Immediate flush: ensure gate state survives a crash between event emission and debounced persist
+    await stateManager.flushState(this.sessionId);
 
     return {
       answer: question,
@@ -118,6 +120,8 @@ export class ChapoLoopGateManager {
       request: approval,
       sessionId: this.sessionId,
     });
+    // Immediate flush: ensure gate state survives a crash between event emission and debounced persist
+    await stateManager.flushState(this.sessionId);
 
     return {
       answer: description,

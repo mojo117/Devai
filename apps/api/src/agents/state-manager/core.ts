@@ -1,4 +1,4 @@
-import { getAgentState, upsertAgentState } from '../../db/queries.js';
+import { getAgentState, upsertAgentState, getDefaultEngine } from '../../db/queries.js';
 import type { ConversationState, GatheredInfo } from '../types.js';
 import { PersistenceQueue } from './persistenceQueue.js';
 
@@ -132,6 +132,15 @@ export async function ensureStateLoaded(sessionId: string): Promise<Conversation
   const p = (async () => {
     const row = await getAgentState(sessionId);
     const state = row ? normalizeLoadedState(sessionId, row.state) : createState(sessionId);
+    // Apply global engine default if this session doesn't have one set
+    if (!state.taskContext.gatheredInfo.engineProfile) {
+      try {
+        const defaultEngine = await getDefaultEngine();
+        if (defaultEngine !== 'glm') {
+          state.taskContext.gatheredInfo.engineProfile = defaultEngine;
+        }
+      } catch (err) { console.warn('[state] Failed to load default engine:', err instanceof Error ? err.message : err); }
+    }
     stateStore.set(sessionId, state);
     scheduleMemoryCleanup(sessionId);
     // Persist immediately for newly created sessions or to normalize stored state shape.

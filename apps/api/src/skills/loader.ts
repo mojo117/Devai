@@ -42,7 +42,7 @@ async function hasExecuteFile(skillDir: string): Promise<boolean> {
   try {
     await access(join(skillDir, 'execute.ts'));
     return true;
-  } catch {
+  } catch (_err) {
     return false;
   }
 }
@@ -54,7 +54,8 @@ export async function loadSkillsFromDir(skillsDir: string): Promise<SkillLoadRes
 
   try {
     await access(resolvedDir);
-  } catch {
+  } catch (err) {
+    console.warn('[skills] Skills directory not accessible:', err instanceof Error ? err.message : err);
     return { skills, errors };
   }
 

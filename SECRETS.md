@@ -35,6 +35,16 @@ scp .env.enc root@77.42.90.193:/opt/Klyde/projects/Devai/
 scp secrets/devai.env.enc root@77.42.90.193:/root/secrets/
 ```
 
+### Automated Encrypt + Deploy + Decrypt + Reload
+```bash
+scripts/deploy-env.sh --host root@77.42.90.193 --target dev
+```
+
+For staging target:
+```bash
+scripts/deploy-env.sh --host root@77.42.90.193 --target staging
+```
+
 ### Decrypt on Baso
 ```bash
 # Decrypt and restart dev environment

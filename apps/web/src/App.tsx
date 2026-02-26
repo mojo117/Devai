@@ -1,10 +1,16 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { ChatUI, type ChatSessionState, type ChatSessionCommand, type ChatSessionCommandEnvelope } from './components/ChatUI';
 import { type AgentName, type AgentPhase } from './components/AgentStatus';
+import { PreviewPanel } from './components/PreviewPanel';
+import type { Artifact } from './components/PreviewPanel';
 import { BurgerMenu } from './components/BurgerMenu';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import {
+  createPreviewArtifact,
+  fetchPreviewArtifact,
   fetchHealth,
+  triggerPreviewScrape,
 } from './api';
 import type { HealthResponse } from './types';
 import { useAuth } from './hooks/useAuth';
@@ -25,6 +31,214 @@ function App() {
   const [chatSessionState, setChatSessionState] = useState<ChatSessionState | null>(null);
   const [sessionCommand, setSessionCommand] = useState<ChatSessionCommandEnvelope | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // Preview toggle backed by localStorage
+  const [previewEnabled, setPreviewEnabled] = useState(() => {
+    try { return localStorage.getItem('devai_preview') === 'on'; }
+    catch { return false; }
+  });
+
+  const [detectedArtifact, setDetectedArtifact] = useState<Artifact | null>(null);
+  const [currentArtifact, setCurrentArtifact] = useState<Artifact | null>(null);
+  const [previewCollapsed, setPreviewCollapsed] = useState(false);
+  const [mobilePreviewOpen, setMobilePreviewOpen] = useState(false);
+  const lastSubmittedArtifactKeyRef = useRef<string | null>(null);
+
+  // Swipe gesture detection for mobile preview panel
+  const touchStartRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY, t: Date.now() };
+  }, []);
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (!touchStartRef.current) return;
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - touchStartRef.current.x;
+    const dy = touch.clientY - touchStartRef.current.y;
+    const dt = Date.now() - touchStartRef.current.t;
+    touchStartRef.current = null;
+    // Must be fast horizontal swipe (>80px, <400ms, more horizontal than vertical)
+    if (dt > 400 || Math.abs(dx) < 80 || Math.abs(dy) > Math.abs(dx)) return;
+    if (dx < 0 && !mobilePreviewOpen && currentArtifact) {
+      // Swipe left → open preview (when there's an artifact)
+      setMobilePreviewOpen(true);
+    } else if (dx > 0 && mobilePreviewOpen) {
+      // Swipe right → close preview
+      setMobilePreviewOpen(false);
+    }
+  }, [mobilePreviewOpen, currentArtifact]);
+
+  useEffect(() => {
+    try { localStorage.setItem('devai_preview', previewEnabled ? 'on' : 'off'); }
+    catch { /* ignore */ }
+  }, [previewEnabled]);
+
+  useEffect(() => {
+    if (!detectedArtifact) {
+      setCurrentArtifact(null);
+      lastSubmittedArtifactKeyRef.current = null;
+      return;
+    }
+
+    setCurrentArtifact(detectedArtifact);
+
+    const sessionId = chatSessionState?.sessionId;
+    if (!previewEnabled || !sessionId) {
+      return;
+    }
+
+    if (detectedArtifact.remote?.status === 'ready' && detectedArtifact.remote.signedUrl) {
+      return;
+    }
+
+    const artifactKey = [
+      sessionId,
+      detectedArtifact.messageId || '',
+      detectedArtifact.id,
+      detectedArtifact.type,
+      detectedArtifact.filePath || '',
+    ].join('|');
+    if (lastSubmittedArtifactKeyRef.current === artifactKey) {
+      return;
+    }
+    lastSubmittedArtifactKeyRef.current = artifactKey;
+
+    let cancelled = false;
+    let pollHandle: number | null = null;
+
+    const attachRemote = (remote: {
+      id: string;
+      status: 'queued' | 'building' | 'ready' | 'failed';
+      signedUrl?: string;
+      signedUrlExpiresAt?: string;
+      error?: string | null;
+      mimeType?: string | null;
+      type?: Artifact['type'];
+    }) => {
+      setCurrentArtifact((prev) => {
+        const base = prev && prev.id === detectedArtifact.id ? prev : detectedArtifact;
+        return { ...base, remote };
+      });
+    };
+
+    const pollArtifact = async (artifactId: string, remaining = 20) => {
+      if (cancelled || remaining <= 0) return;
+      const res = await fetchPreviewArtifact(artifactId).catch(() => null);
+      if (cancelled || !res?.artifact) return;
+
+      const nextRemote = {
+        id: res.artifact.id,
+        status: res.artifact.status,
+        signedUrl: res.artifact.signedUrl,
+        signedUrlExpiresAt: res.artifact.signedUrlExpiresAt,
+        error: res.artifact.error,
+        mimeType: res.artifact.mimeType,
+        type: res.artifact.type,
+      } as const;
+      attachRemote(nextRemote);
+
+      if (res.artifact.status === 'ready' || res.artifact.status === 'failed') return;
+      pollHandle = window.setTimeout(() => {
+        void pollArtifact(artifactId, remaining - 1);
+      }, 1000);
+    };
+
+    const create = async () => {
+      try {
+        const res = await createPreviewArtifact({
+          sessionId,
+          messageId: detectedArtifact.messageId,
+          sourceKind: detectedArtifact.sourceKind,
+          type: detectedArtifact.type,
+          title: detectedArtifact.title,
+          language: detectedArtifact.language,
+          content: detectedArtifact.content,
+          entrypoint: detectedArtifact.filePath,
+          sourceFiles: detectedArtifact.filePath ? [detectedArtifact.filePath] : undefined,
+        });
+        if (cancelled) return;
+
+        attachRemote({
+          id: res.artifact.id,
+          status: res.artifact.status,
+          signedUrl: res.artifact.signedUrl,
+          signedUrlExpiresAt: res.artifact.signedUrlExpiresAt,
+          error: res.artifact.error,
+          mimeType: res.artifact.mimeType,
+          type: res.artifact.type,
+        });
+
+        if (res.artifact.status !== 'ready' && res.artifact.status !== 'failed') {
+          void pollArtifact(res.artifact.id, 20);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : String(err);
+        attachRemote({
+          id: `failed-${Date.now()}`,
+          status: 'failed',
+          error: message,
+          type: detectedArtifact.type,
+        });
+      }
+    };
+
+    void create();
+
+    return () => {
+      cancelled = true;
+      if (pollHandle) window.clearTimeout(pollHandle);
+    };
+  }, [detectedArtifact, chatSessionState?.sessionId, previewEnabled]);
+
+  const handleScrapeFallback = useCallback(async (artifactId: string) => {
+    const result = await triggerPreviewScrape(artifactId).catch(() => null);
+    if (!result?.artifact) return;
+
+    setCurrentArtifact((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        remote: {
+          id: result.artifact.id,
+          status: result.artifact.status,
+          signedUrl: result.artifact.signedUrl,
+          signedUrlExpiresAt: result.artifact.signedUrlExpiresAt,
+          error: result.artifact.error,
+          mimeType: result.artifact.mimeType,
+          type: result.artifact.type,
+        },
+      };
+    });
+
+    if (result.artifact.status === 'ready' || result.artifact.status === 'failed') return;
+
+    let remaining = 20;
+    while (remaining > 0) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // eslint-disable-next-line no-await-in-loop
+      const latest = await fetchPreviewArtifact(result.artifact.id).catch(() => null);
+      if (!latest?.artifact) continue;
+      setCurrentArtifact((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          remote: {
+            id: latest.artifact.id,
+            status: latest.artifact.status,
+            signedUrl: latest.artifact.signedUrl,
+            signedUrlExpiresAt: latest.artifact.signedUrlExpiresAt,
+            error: latest.artifact.error,
+            mimeType: latest.artifact.mimeType,
+            type: latest.artifact.type,
+          },
+        };
+      });
+      if (latest.artifact.status === 'ready' || latest.artifact.status === 'failed') break;
+      remaining -= 1;
+    }
+  }, []);
 
   const issueSessionCommand = useCallback((command: ChatSessionCommand) => {
     setSessionCommand((prev) => ({
@@ -130,7 +344,7 @@ function App() {
 
   return (
     <ErrorBoundary>
-    <div className="min-h-screen flex flex-col bg-devai-bg">
+    <div className="h-screen flex flex-col bg-devai-bg">
       {/* Header */}
       <header className="sticky top-0 z-40 bg-devai-surface/95 backdrop-blur border-b border-devai-border px-3 md:px-4 py-2">
         <div className="flex items-center justify-between gap-2 max-w-5xl mx-auto w-full">
@@ -199,6 +413,19 @@ function App() {
               {health ? '●' : '○'}
             </span>
             <button
+              onClick={() => setPreviewEnabled(p => !p)}
+              className={`transition-colors p-1 ${previewEnabled ? 'text-devai-accent' : 'text-devai-text-secondary hover:text-devai-text'}`}
+              title={previewEnabled ? 'Preview ausblenden' : 'Preview einblenden'}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                {previewEnabled ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                )}
+              </svg>
+            </button>
+            <button
               onClick={() => setMenuOpen(true)}
               className="text-devai-text-secondary hover:text-devai-text transition-colors p-1"
               title="Menu"
@@ -224,23 +451,140 @@ function App() {
         </div>
       )}
 
-      {/* Main Content - Chat centered */}
-      <div className="flex-1 flex w-full overflow-hidden min-h-0">
-        <div className="flex flex-col min-w-0 min-h-0 overflow-hidden flex-1 max-w-4xl mx-auto w-full">
-          <ChatUI
-            projectRoot={health?.projectRoot}
-            allowedRoots={health?.allowedRoots}
-            ignorePatterns={settings.ignorePatterns}
-            onPinFile={settings.addPinnedFile}
-            onLoadingChange={setChatLoading}
-            onAgentChange={handleAgentChange}
-            showSessionControls={false}
-            sessionCommand={sessionCommand}
-            onSessionStateChange={setChatSessionState}
-            pinnedUserfileIds={settings.pinnedUserfileIds}
-            onPinUserfile={settings.togglePinnedUserfile}
-          />
+      {/* Main Content */}
+      <div
+        className="flex-1 flex w-full overflow-hidden min-h-0 relative"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
+        {/* Desktop: side-by-side panels when preview enabled */}
+        {previewEnabled ? (
+          <div className="hidden md:flex flex-1 min-h-0 overflow-hidden">
+            <PanelGroup direction="horizontal" className="flex-1 w-full overflow-hidden min-h-0">
+              <Panel defaultSize={55} minSize={30}>
+                <div className="flex flex-col min-w-0 min-h-0 overflow-hidden h-full max-w-4xl mx-auto w-full">
+                  <ChatUI
+                    projectRoot={health?.projectRoot}
+                    allowedRoots={health?.allowedRoots}
+                    ignorePatterns={settings.ignorePatterns}
+                    onPinFile={settings.addPinnedFile}
+                    onLoadingChange={setChatLoading}
+                    onAgentChange={handleAgentChange}
+                    showSessionControls={false}
+                    sessionCommand={sessionCommand}
+                    onSessionStateChange={setChatSessionState}
+                    pinnedUserfileIds={settings.pinnedUserfileIds}
+                    onPinUserfile={settings.togglePinnedUserfile}
+                    onClearPinnedUserfiles={settings.clearPinnedUserfiles}
+                    onArtifactDetected={setDetectedArtifact}
+                    onSetPreview={setPreviewEnabled}
+                    previewEnabled={previewEnabled}
+                  />
+                </div>
+              </Panel>
+              <PanelResizeHandle className="w-1.5 bg-devai-border hover:bg-devai-accent/40 transition-colors cursor-col-resize" />
+              <Panel
+                defaultSize={45}
+                minSize={20}
+                collapsible
+                collapsedSize={3}
+                onCollapse={() => setPreviewCollapsed(true)}
+                onExpand={() => setPreviewCollapsed(false)}
+              >
+                <PreviewPanel
+                  artifact={currentArtifact}
+                  onClose={() => setPreviewEnabled(false)}
+                  collapsed={previewCollapsed}
+                  onToggleCollapse={() => setPreviewCollapsed(p => !p)}
+                  onScrapeFallback={handleScrapeFallback}
+                />
+              </Panel>
+            </PanelGroup>
+          </div>
+        ) : (
+          <div className="hidden md:flex flex-1 min-h-0 overflow-hidden">
+            <div className="flex flex-col min-w-0 min-h-0 overflow-hidden flex-1 max-w-4xl mx-auto w-full">
+              <ChatUI
+                projectRoot={health?.projectRoot}
+                allowedRoots={health?.allowedRoots}
+                ignorePatterns={settings.ignorePatterns}
+                onPinFile={settings.addPinnedFile}
+                onLoadingChange={setChatLoading}
+                onAgentChange={handleAgentChange}
+                showSessionControls={false}
+                sessionCommand={sessionCommand}
+                onSessionStateChange={setChatSessionState}
+                pinnedUserfileIds={settings.pinnedUserfileIds}
+                onPinUserfile={settings.togglePinnedUserfile}
+                onClearPinnedUserfiles={settings.clearPinnedUserfiles}
+                onArtifactDetected={setDetectedArtifact}
+                onSetPreview={setPreviewEnabled}
+                previewEnabled={previewEnabled}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Mobile: always full-width chat + preview arrow + slide-over */}
+        <div className="flex md:hidden flex-1 min-h-0 overflow-hidden relative">
+          <div className="flex flex-col min-w-0 min-h-0 overflow-hidden flex-1 w-full">
+            <ChatUI
+              projectRoot={health?.projectRoot}
+              allowedRoots={health?.allowedRoots}
+              ignorePatterns={settings.ignorePatterns}
+              onPinFile={settings.addPinnedFile}
+              onLoadingChange={setChatLoading}
+              onAgentChange={handleAgentChange}
+              showSessionControls={false}
+              sessionCommand={sessionCommand}
+              onSessionStateChange={setChatSessionState}
+              pinnedUserfileIds={settings.pinnedUserfileIds}
+              onPinUserfile={settings.togglePinnedUserfile}
+              onClearPinnedUserfiles={settings.clearPinnedUserfiles}
+              onArtifactDetected={setDetectedArtifact}
+              onSetPreview={setPreviewEnabled}
+              previewEnabled={previewEnabled}
+            />
+          </div>
+          {/* Right-edge arrow — always visible on mobile when there's an artifact */}
+          {currentArtifact && !mobilePreviewOpen && (
+            <button
+              onClick={() => setMobilePreviewOpen(true)}
+              className="absolute right-0 top-1/2 -translate-y-1/2 z-30 bg-devai-accent/80 active:bg-devai-accent text-white rounded-l-lg py-5 px-2 shadow-lg"
+              title="Preview"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+          )}
         </div>
+
+        {/* Mobile slide-over preview */}
+        {mobilePreviewOpen && (
+          <div className="md:hidden fixed inset-0 z-50">
+            {/* Left-edge arrow to go back */}
+            <button
+              onClick={() => setMobilePreviewOpen(false)}
+              className="absolute left-0 top-1/2 -translate-y-1/2 z-[60] bg-devai-accent/80 active:bg-devai-accent text-white rounded-r-lg py-5 px-2 shadow-lg"
+              title="Zurück"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+            {/* Full-screen preview */}
+            <div className="absolute inset-0 bg-devai-bg animate-slide-in-right">
+              <PreviewPanel
+                artifact={currentArtifact}
+                onClose={() => setMobilePreviewOpen(false)}
+                collapsed={false}
+                onToggleCollapse={() => setMobilePreviewOpen(false)}
+                onScrapeFallback={handleScrapeFallback}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Burger Menu */}

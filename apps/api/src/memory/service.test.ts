@@ -77,7 +77,7 @@ describe('memory service retrieval strategy', () => {
     expect(mocks.searchMemories).toHaveBeenCalledTimes(2);
     expect(mocks.searchMemories.mock.calls[0]?.[3]).toBe(thresholds[0]);
     expect(mocks.searchMemories.mock.calls[1]?.[3]).toBe(thresholds[1]);
-    expect(result.memoryIds.length).toBe(enoughHits);
+    expect(result.length).toBe(enoughHits);
     expect(mocks.reinforceMemory).toHaveBeenCalledTimes(enoughHits);
   });
 

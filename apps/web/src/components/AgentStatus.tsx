@@ -7,7 +7,7 @@
 
 import { useMemo } from 'react';
 
-export type AgentName = 'chapo' | 'devo' | 'scout';
+export type AgentName = 'chapo' | 'devo' | 'scout' | 'caio';
 export type AgentPhase = 'qualification' | 'thinking' | 'execution' | 'executing' | 'review' | 'error' | 'idle';
 
 interface AgentStatusProps {
@@ -35,6 +35,12 @@ const agentInfo: Record<AgentName, { name: string; role: string; color: string; 
     role: 'Explorer & Researcher',
     color: 'text-devai-accent border-devai-accent/40 bg-devai-accent/10',
     icon: '🔍',
+  },
+  caio: {
+    name: 'CAIO',
+    role: 'Communications & Admin',
+    color: 'text-emerald-300 border-emerald-500/40 bg-emerald-900/10',
+    icon: '📋',
   },
 };
 

@@ -1,89 +1,41 @@
-import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { config } from '../config.js';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import {
+  verifyToken,
+  authenticateUser,
+  issueAuthToken,
+  getCookieOptions,
+  type AuthUser,
+  type JwtPayload,
+} from '../services/authService.js'
 
-interface LoginBody {
-  username: string;
-  password: string;
-}
+export type { JwtPayload, AuthUser }
 
-interface JwtPayload {
-  username: string;
-  iat: number;
-  exp: number;
-}
-
-interface AdminUserRow {
-  email: string;
-  password_hash: string;
-  is_active?: boolean | null;
-}
-
-let _supabase: SupabaseClient | null = null;
-
-function getRequiredEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-  return value;
-}
-
-function getSupabaseClient(): SupabaseClient {
-  if (_supabase) return _supabase;
-
-  // Accept both DEVAI_SUPABASE_* and SUPABASE_* names via config.
-  // If these are missing, surface a consistent error to callers.
-  const url = config.supabaseUrl;
-  const serviceRoleKey = config.supabaseServiceKey;
-  if (!url || !serviceRoleKey) {
-    throw new Error('Supabase auth is not configured (missing URL and/or service role key).');
-  }
-
-  _supabase = createClient(url, serviceRoleKey, { auth: { persistSession: false } });
-  return _supabase;
-}
-
-function getJwtSecret(): string {
-  return getRequiredEnv('DEVAI_JWT_SECRET');
-}
-
-function getJwtExpiresIn(): string {
-  return process.env.JWT_EXPIRES_IN || '24h';
-}
-
-export function verifyToken(token: string): JwtPayload | null {
-  try {
-    return jwt.verify(token, getJwtSecret()) as JwtPayload;
-  } catch {
-    return null;
-  }
+function getRequestToken(request: FastifyRequest): string | undefined {
+  const cookieToken = request.cookies?.devai_token
+  const headerToken = request.headers.authorization?.startsWith('Bearer ')
+    ? request.headers.authorization.substring(7)
+    : undefined
+  return cookieToken || headerToken
 }
 
 export async function authMiddleware(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-  const cookieToken = request.cookies?.devai_token;
-  const headerToken = request.headers.authorization?.startsWith('Bearer ')
-    ? request.headers.authorization.substring(7)
-    : undefined;
-  const token = cookieToken || headerToken;
+  const token = getRequestToken(request)
 
   if (!token) {
-    return reply.status(401).send({ error: 'No token provided' });
+    return reply.status(401).send({ error: 'No token provided' })
   }
 
-  const payload = verifyToken(token);
+  const payload = verifyToken(token)
 
   if (!payload) {
-    return reply.status(401).send({ error: 'Invalid or expired token' });
+    return reply.status(401).send({ error: 'Invalid or expired token' })
   }
 
-  request.user = { username: payload.username } as { username: string };
+  request.user = { username: payload.username } as AuthUser
 }
 
 export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
-  app.post<{ Body: LoginBody }>('/api/auth/login', {
+  app.post<{ Body: { username: string; password: string } }>('/api/auth/login', {
     config: {
       rateLimit: {
         max: 5,
@@ -91,86 +43,34 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       },
     },
   }, async (request, reply) => {
-    const { username, password } = request.body;
+    const { username, password } = request.body
 
-    if (!username || !password) {
-      return reply.status(400).send({ error: 'Username and password required' });
+    const result = await authenticateUser(username, password)
+
+    if (!result.success) {
+      const status = result.error === 'Authentication unavailable' ? 500 : 401
+      if (status === 401) {
+        app.log.warn({ username }, 'Failed login attempt')
+      }
+      return reply.status(status).send({ error: result.error })
     }
 
-    const normalizedUsername = username.trim().toLowerCase();
-    let supabase: SupabaseClient;
-    try {
-      supabase = getSupabaseClient();
-    } catch (err) {
-      app.log.error({ err }, 'Auth is misconfigured (Supabase env missing)');
-      return reply.status(500).send({ error: 'Authentication unavailable' });
-    }
+    reply.setCookie('devai_token', result.token, getCookieOptions(result.expiresInSeconds))
 
-    const { data, error } = await supabase
-      .from('admin_users')
-      .select('email,password_hash,is_active')
-      .eq('email', normalizedUsername)
-      .maybeSingle<AdminUserRow>();
-
-    if (error) {
-      app.log.error({ err: error }, 'Failed to fetch admin user');
-      return reply.status(500).send({ error: 'Authentication unavailable' });
-    }
-
-    if (!data || data.is_active === false) {
-      app.log.warn({ username: normalizedUsername }, 'Login attempt for unknown or inactive user');
-      return reply.status(401).send({ error: 'Invalid credentials' });
-    }
-
-    const passwordValid = await bcrypt.compare(password, data.password_hash);
-    if (!passwordValid) {
-      app.log.warn({ username: normalizedUsername }, 'Login attempt with wrong password');
-      return reply.status(401).send({ error: 'Invalid credentials' });
-    }
-
-    let token: string;
-    try {
-      token = jwt.sign(
-        { username: normalizedUsername },
-        getJwtSecret(),
-        { expiresIn: getJwtExpiresIn() as jwt.SignOptions['expiresIn'] }
-      );
-    } catch (err) {
-      app.log.error({ err }, 'Failed to sign JWT');
-      return reply.status(500).send({ error: 'Authentication unavailable' });
-    }
-
-    reply.setCookie('devai_token', token, {
-      httpOnly: true,
-      secure: config.nodeEnv !== 'development',
-      sameSite: 'strict',
-      path: '/api',
-      maxAge: 86400, // 24h
-    });
-
-    return reply.send({
-      success: true,
-      token,
-      expiresIn: getJwtExpiresIn(),
-      user: { username: normalizedUsername },
-    });
-  });
+    return reply.send(result)
+  })
 
   app.get('/api/auth/verify', async (request, reply) => {
-    const cookieToken = request.cookies?.devai_token;
-    const headerToken = request.headers.authorization?.startsWith('Bearer ')
-      ? request.headers.authorization.substring(7)
-      : undefined;
-    const token = cookieToken || headerToken;
+    const token = getRequestToken(request)
 
     if (!token) {
-      return reply.status(401).send({ valid: false, error: 'No token provided' });
+      return reply.status(401).send({ valid: false, error: 'No token provided' })
     }
 
-    const payload = verifyToken(token);
+    const payload = verifyToken(token)
 
     if (!payload) {
-      return reply.status(401).send({ valid: false, error: 'Invalid or expired token' });
+      return reply.status(401).send({ valid: false, error: 'Invalid or expired token' })
     }
 
     return reply.send({
@@ -178,11 +78,35 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       token,
       user: { username: payload.username },
       expiresAt: new Date(payload.exp * 1000).toISOString(),
-    });
-  });
+    })
+  })
+
+  app.post('/api/auth/refresh', async (request, reply) => {
+    const token = getRequestToken(request)
+
+    if (!token) {
+      return reply.status(401).send({ valid: false, error: 'No token provided' })
+    }
+
+    const payload = verifyToken(token)
+    if (!payload) {
+      return reply.status(401).send({ valid: false, error: 'Invalid or expired token' })
+    }
+
+    const issued = issueAuthToken(payload.username)
+    reply.setCookie('devai_token', issued.token, getCookieOptions(issued.expiresInSeconds))
+
+    return reply.send({
+      valid: true,
+      token: issued.token,
+      expiresIn: issued.expiresIn,
+      expiresAt: issued.expiresAt,
+      user: { username: payload.username },
+    })
+  })
 
   app.post('/api/auth/logout', async (_request, reply) => {
-    reply.clearCookie('devai_token', { path: '/api' });
-    return reply.send({ success: true });
-  });
+    reply.clearCookie('devai_token', { path: '/api' })
+    return reply.send({ success: true })
+  })
 }

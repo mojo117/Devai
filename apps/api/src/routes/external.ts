@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
 import { commandDispatcher } from '../workflow/commands/dispatcher.js';
-import { ensureStateLoaded, getState, isLoopActive } from '../agents/stateManager.js';
+import { ensureStateLoaded, getState, isLoopActive, getSessionMode, setGatheredInfo, flushState } from '../agents/stateManager.js';
 import { pushToInbox } from '../agents/inbox.js';
 import type { InboxMessage } from '../agents/types.js';
 import {
@@ -14,11 +14,12 @@ import {
 import type { WorkflowCommand } from '../workflow/commands/types.js';
 import type { TelegramUpdate } from '../external/telegram.js';
 import { isAllowedChat, sendTelegramMessage, extractTelegramMessage, downloadTelegramFile } from '../external/telegram.js';
-import { createSession } from '../db/queries.js';
+import { createSession, saveMessage, setDefaultEngine } from '../db/queries.js';
 import { transcribeBuffer } from '../services/transcriptionService.js';
 import { uploadUserfileFromBuffer, isUploadError } from '../services/userfileService.js';
 import { shouldAttachPinnedContext } from '../external/pinnedContextPolicy.js';
 import { classifyInboundText } from '../agents/intakeClassifier.js';
+import { isValidEngine, formatEngineStatus, type EngineName } from '../llm/engineProfiles.js';
 
 export const externalRoutes: FastifyPluginAsync = async (app) => {
   app.post('/telegram/webhook', async (request, reply) => {
@@ -51,6 +52,32 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
             extracted.chatId,
             'Neue Konversation gestartet. Wir arbeiten jetzt in einer frischen Session ohne alte Datei-Kontexte.'
           );
+          return;
+        }
+
+        // Handle /engine command — switch LLM engine profile
+        const engineMatch = normalizedCommand.match(/^\/engine(?:\s+(.*))?$/);
+        if (engineMatch) {
+          await ensureStateLoaded(externalSession.session_id);
+          const arg = engineMatch[1]?.trim().toLowerCase();
+          if (!arg) {
+            const currentEngine = (getState(externalSession.session_id)
+              ?.taskContext.gatheredInfo.engineProfile as string) || 'glm';
+            await sendTelegramMessage(extracted.chatId, formatEngineStatus(currentEngine as EngineName));
+          } else if (isValidEngine(arg)) {
+            setGatheredInfo(externalSession.session_id, 'engineProfile', arg);
+            await flushState(externalSession.session_id);
+            await setDefaultEngine(arg);
+            await sendTelegramMessage(
+              extracted.chatId,
+              `Engine switched to ${arg.toUpperCase()}.\n\n${formatEngineStatus(arg)}`,
+            );
+          } else {
+            await sendTelegramMessage(
+              extracted.chatId,
+              `Unknown engine "${arg}". Available: glm, gemini, claude, kimi`,
+            );
+          }
           return;
         }
 
@@ -186,8 +213,9 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
             answer: intake.questionAnswer || messageText,
           };
         } else {
-          // Multi-message: if loop is running, queue and acknowledge via Telegram
-          if (isLoopActive(externalSession.session_id)) {
+          // Multi-message: if loop is running, queue (serial) or let dispatcher handle (parallel)
+          const loopActive = await isLoopActive(externalSession.session_id);
+          if (loopActive && getSessionMode(externalSession.session_id) === 'serial') {
             const inboxMsg: InboxMessage = {
               id: nanoid(),
               content: messageText,
@@ -196,6 +224,28 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
               source: 'telegram' as const,
             };
             pushToInbox(externalSession.session_id, inboxMsg);
+
+            // Persist queued message so it appears in chat history
+            saveMessage(externalSession.session_id, {
+              id: nanoid(),
+              role: 'user',
+              content: messageText,
+              timestamp: new Date().toISOString(),
+            }).catch(async (err) => {
+              const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+              console.error('[external] Failed to persist queued message:', errorMsg);
+              // Surface error to user via Telegram
+              await sendTelegramMessage(
+                extracted.chatId,
+                `⚠️ Nachricht konnte nicht gespeichert werden: ${errorMsg}`,
+              );
+            });
+
+            await sendTelegramMessage(
+              extracted.chatId,
+              'Ich bearbeite gerade noch deine vorige Nachricht. Diese Nachricht ist in der Warteschlange und kommt als Nächstes dran.',
+            );
+
             return;
           }
 

@@ -1,15 +1,83 @@
-import type { FastifyPluginAsync } from 'fastify';
-import type { WebSocket } from 'ws';
-import { nanoid } from 'nanoid';
-import { registerClient as registerActionClient, unregisterClient as unregisterActionClient, getConnectionStats } from './actionBroadcaster.js';
+import type { FastifyPluginAsync } from 'fastify'
+import type { WebSocket } from 'ws'
+import { nanoid } from 'nanoid'
+import { registerClient as registerActionClient, unregisterClient as unregisterActionClient, getConnectionStats } from './actionBroadcaster.js'
 import {
   registerChatClient, unregisterChatClient,
   getEventsSince, getCurrentSeq, getChatGatewayStats
-} from './chatGateway.js';
-import { getPendingActions } from '../actions/manager.js';
-import { verifyToken } from '../routes/auth.js';
-import { ensureStateLoaded, getState } from '../agents/stateManager.js';
-import { commandDispatcher, mapWsMessageToCommand } from '../workflow/commands/dispatcher.js';
+} from './chatGateway.js'
+import { getPendingActions } from '../actions/manager.js'
+import { verifyToken } from '../services/authService.js'
+import { ensureStateLoaded, getState } from '../agents/stateManager.js'
+import { commandDispatcher, mapWsMessageToCommand } from '../workflow/commands/dispatcher.js'
+
+const WS_RATE_LIMIT_MAX_MESSAGES = 120;
+const WS_RATE_LIMIT_WINDOW_MS = 60_000;
+const WS_HEARTBEAT_INTERVAL_MS = 30_000;
+const WS_HEARTBEAT_TIMEOUT_MS = 95_000;
+
+interface WsConnectionGuards {
+  allowMessage: () => boolean;
+  cleanup: () => void;
+}
+
+function createWsConnectionGuards(socket: WebSocket): WsConnectionGuards {
+  let messageCount = 0;
+  let windowStart = Date.now();
+  let lastSeenAt = Date.now();
+  let closed = false;
+
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    clearInterval(heartbeatTimer);
+  };
+
+  const closeWithError = (error: string, code: number) => {
+    cleanup();
+    try {
+      socket.send(JSON.stringify({ type: 'error', error }));
+    } catch (err) {
+      console.warn('[ws] Send failed while closing:', err instanceof Error ? err.message : err);
+    }
+    try {
+      socket.close(code, error.slice(0, 120));
+    } catch (err) {
+      console.warn('[ws] Close failed:', err instanceof Error ? err.message : err);
+    }
+  };
+
+  const heartbeatTimer = setInterval(() => {
+    const now = Date.now();
+    if (now - lastSeenAt > WS_HEARTBEAT_TIMEOUT_MS) {
+      closeWithError('WebSocket heartbeat timeout. Please reconnect.', 4000);
+      return;
+    }
+    try {
+      socket.send(JSON.stringify({ type: 'ping', timestamp: new Date().toISOString() }));
+    } catch (err) {
+      console.warn('[ws] Heartbeat ping send failed:', err instanceof Error ? err.message : err);
+    }
+  }, WS_HEARTBEAT_INTERVAL_MS);
+
+  return {
+    allowMessage: () => {
+      lastSeenAt = Date.now();
+      const now = Date.now();
+      if (now - windowStart >= WS_RATE_LIMIT_WINDOW_MS) {
+        windowStart = now;
+        messageCount = 0;
+      }
+      messageCount += 1;
+      if (messageCount > WS_RATE_LIMIT_MAX_MESSAGES) {
+        closeWithError('WebSocket message rate limit exceeded.', 4008);
+        return false;
+      }
+      return true;
+    },
+    cleanup,
+  };
+}
 
 export const websocketRoutes: FastifyPluginAsync = async (app) => {
   // WebSocket endpoint for real-time action updates
@@ -17,15 +85,16 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
     const url = new URL(request.url || '', `http://${request.headers.host}`);
 
     // Auth: require valid JWT token (query param or httpOnly cookie)
-    const token = url.searchParams.get('token') || request.cookies?.devai_token || '';
+    const token = request.cookies?.devai_token || url.searchParams.get('token') || '';
     if (!verifyToken(token)) {
       try {
         socket.send(JSON.stringify({ type: 'error', error: 'Invalid or expired token' }));
-      } catch { /* ignore */ }
+      } catch (err) { console.warn('[ws] Failed to send auth error:', err instanceof Error ? err.message : err); }
       socket.close();
       return;
     }
 
+    const guards = createWsConnectionGuards(socket);
     const sessionId = url.searchParams.get('sessionId') || undefined;
 
     // Register client
@@ -49,11 +118,13 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
 
     // Handle incoming messages (ping/pong, acknowledgments)
     socket.on('message', (data) => {
+      if (!guards.allowMessage()) return;
       try {
         const message = JSON.parse(data.toString());
 
         if (message.type === 'ping') {
           socket.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
+          return;
         }
 
         // Could add acknowledgment handling here for guaranteed delivery
@@ -64,10 +135,12 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
 
     // Handle disconnect
     socket.on('close', () => {
+      guards.cleanup();
       unregisterActionClient(socket, sessionId);
     });
 
     socket.on('error', (err) => {
+      guards.cleanup();
       console.error('[WS] Socket error:', err);
       unregisterActionClient(socket, sessionId);
     });
@@ -79,18 +152,19 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // WebSocket control plane for multi-agent chat streaming + resume/replay.
-  // Auth: requires ?token=<JWT> because browsers can't set Authorization headers for WS upgrades.
+  // Auth: prefer httpOnly cookie, fallback to ?token=<JWT>.
   app.get('/ws/chat', { websocket: true }, (socket: WebSocket, request) => {
     const url = new URL(request.url || '', `http://${request.headers.host}`);
-    const token = url.searchParams.get('token') || request.cookies?.devai_token || '';
+    const token = request.cookies?.devai_token || url.searchParams.get('token') || '';
     if (!verifyToken(token)) {
       try {
         socket.send(JSON.stringify({ type: 'error', error: 'Invalid or expired token' }));
-      } catch { /* ignore */ }
+      } catch (err) { console.warn('[ws] Failed to send auth error (chat):', err instanceof Error ? err.message : err); }
       socket.close();
       return;
     }
 
+    const guards = createWsConnectionGuards(socket);
     let sessionId: string | null = url.searchParams.get('sessionId');
 
     const joinSession = (id: string) => {
@@ -125,10 +199,12 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
     })();
 
     socket.on('message', async (data) => {
+      if (!guards.allowMessage()) return;
       let msg: Record<string, unknown>;
       try {
         msg = JSON.parse(data.toString()) as Record<string, unknown>;
-      } catch {
+      } catch (err) {
+        console.warn('[ws] Failed to parse incoming WS message:', err instanceof Error ? err.message : err);
         return;
       }
 
@@ -230,6 +306,7 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
     });
 
     socket.on('close', () => {
+      guards.cleanup();
       if (sessionId) {
         unregisterChatClient(socket, sessionId);
         unregisterActionClient(socket, sessionId);
@@ -238,6 +315,7 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
     });
 
     socket.on('error', () => {
+      guards.cleanup();
       if (sessionId) {
         unregisterChatClient(socket, sessionId);
         unregisterActionClient(socket, sessionId);

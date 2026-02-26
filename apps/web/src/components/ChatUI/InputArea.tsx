@@ -24,6 +24,7 @@ interface InputAreaProps {
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   isTranscribing: boolean;
   onTranscribe: (audioBlob: Blob) => void;
+  onSetPreview?: (enabled: boolean) => void;
 }
 
 export function InputArea({
@@ -44,6 +45,7 @@ export function InputArea({
   onFileUpload,
   isTranscribing,
   onTranscribe,
+  onSetPreview,
 }: InputAreaProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
@@ -96,6 +98,17 @@ export function InputArea({
     return () => document.removeEventListener('pointerdown', handleClick);
   }, [plusMenuOpen]);
 
+  const handleFormSubmit = useCallback((e: React.FormEvent) => {
+    e.preventDefault();
+    const previewMatch = input.trim().match(/^\/preview\s+(on|off)$/i);
+    if (previewMatch) {
+      onSetPreview?.(previewMatch[1].toLowerCase() === 'on');
+      setInput('');
+      return;
+    }
+    onSubmit(e);
+  }, [input, onSetPreview, setInput, onSubmit]);
+
   const handleDictateClick = useCallback(() => {
     setPlusMenuOpen(false);
     if (isRecording) {
@@ -111,7 +124,7 @@ export function InputArea({
   }, [fileInputRef]);
 
   return (
-    <form onSubmit={onSubmit} className="border-t border-devai-border p-3 sm:p-4">
+    <form onSubmit={handleFormSubmit} className="border-t border-devai-border p-3 sm:p-4">
       {retryState && !isLoading && (
         <div className="mb-2 flex items-center justify-between bg-devai-card border border-devai-border rounded px-3 py-2 text-xs text-devai-text-secondary">
           <span>Last message failed.</span>

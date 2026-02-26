@@ -1,17 +1,11 @@
 import { Fragment, useState, type RefObject } from 'react';
 import type { ChatMessage, SessionSummary } from '../../types';
-import type { ToolEvent } from './types';
+import type { ToolEvent, DelegationData } from './types';
+import { DelegationCard } from './DelegationCard';
+import { VisualProofCard } from './VisualProofCard';
 import { mergeConsecutiveThinking } from './mergeEvents';
-import type { MergedToolEvent } from './mergeEvents';
 import { renderMessageContent } from './utils';
 import { getUserfileDownloadUrl } from '../../api';
-
-const AGENT_COLORS: Record<string, string> = {
-  chapo: 'text-cyan-400',
-  devo: 'text-orange-400',
-  caio: 'text-blue-400',
-  scout: 'text-purple-400',
-};
 
 const AGENT_DOT_COLORS: Record<string, string> = {
   chapo: 'bg-cyan-400',
@@ -37,6 +31,8 @@ interface MessageListProps {
   onSelectSession: (id: string) => void;
   onRestartChat: () => void;
   onNewChat: () => void;
+  delegations: DelegationData[];
+  messageDelegations: Record<string, DelegationData[]>;
 }
 
 interface DecisionPathPayload {
@@ -86,12 +82,25 @@ export function MessageList({
   onSelectSession,
   onRestartChat,
   onNewChat,
+  delegations,
+  messageDelegations,
 }: MessageListProps) {
   const renderToolEventsBlock = (events: ToolEvent[], live: boolean) => {
     const merged = mergeConsecutiveThinking(events);
     return (
       <div className="space-y-1.5">
         {merged.map((event) => {
+          const visualProof = getVisualProofPayload(event);
+          if (visualProof) {
+            return (
+              <VisualProofCard
+                key={event.id}
+                imageUrl={visualProof.imageUrl}
+                caption={visualProof.caption}
+                sourceUrl={visualProof.sourceUrl}
+              />
+            );
+          }
           const doc = getDocumentDelivery(event);
           if (doc) {
             return (
@@ -234,13 +243,22 @@ export function MessageList({
       {/* Messages with associated tool events rendered inline */}
       {messages.map((message) => {
         const frozen = message.role === 'assistant' ? messageToolEvents[message.id] : undefined;
+        const frozenDelegations = message.role === 'assistant' ? messageDelegations[message.id] : undefined;
         return (
           <Fragment key={message.id}>
+            {frozenDelegations && frozenDelegations.map(d => (
+              <DelegationCard key={d.id} delegation={d} />
+            ))}
             {frozen && frozen.length > 0 && renderToolEventsBlock(frozen, false)}
             {renderMessage(message)}
           </Fragment>
         );
       })}
+
+      {/* Live delegation cards for current in-progress exchange */}
+      {delegations.map(d => (
+        <DelegationCard key={d.id} delegation={d} />
+      ))}
 
       {/* Live tool events for current in-progress exchange */}
       {toolEvents.length > 0 && renderToolEventsBlock(toolEvents, isLoading)}
@@ -275,6 +293,20 @@ function getDocumentDelivery(event: ToolEvent): { fileId: string; filename: stri
     downloadUrl: r.downloadUrl as string,
     mimeType: typeof r.mimeType === 'string' ? r.mimeType : undefined,
     description: r.description as string | undefined,
+  };
+}
+
+/** Check if a tool_result event represents a visual proof screenshot */
+function getVisualProofPayload(event: ToolEvent): { imageUrl: string; caption?: string; sourceUrl?: string } | null {
+  if (event.type !== 'tool_result') return null;
+  if (event.name !== 'capture_visual_proof' && event.name !== 'skill_capture-visual-proof') return null;
+  const r = event.result as Record<string, unknown> | undefined;
+  if (!r || typeof r !== 'object') return null;
+  if (typeof r.imageUrl !== 'string') return null;
+  return {
+    imageUrl: r.imageUrl as string,
+    caption: r.caption as string | undefined,
+    sourceUrl: r.url as string | undefined,
   };
 }
 
@@ -454,9 +486,9 @@ function InlineSystemEvent({
         )}
         {event.type === 'tool_call' && <span className="text-[10px] shrink-0">&#9654;</span>}
         {event.type === 'tool_result' && <span className="text-[10px] shrink-0">&#9664;</span>}
-        <span className="font-mono text-[11px] whitespace-nowrap">{getEventLabel()}</span>
+        <span className="font-mono text-[11px] whitespace-nowrap select-text">{getEventLabel()}</span>
         {detail && (
-          <span className="text-[10px] text-devai-text-secondary font-mono truncate min-w-0">
+          <span className="text-[10px] text-devai-text-secondary font-mono truncate min-w-0 select-text">
             _ {detail}
           </span>
         )}

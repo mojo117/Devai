@@ -9,11 +9,13 @@ import type { WorkflowEventEnvelope } from '../events/envelope.js';
 import { isIP } from 'node:net';
 import {
   WF_COMPLETED,
+  WF_FAILED,
   WF_TURN_STARTED,
   AGENT_THINKING,
   TOOL_CALL_STARTED,
   GATE_QUESTION_QUEUED,
   GATE_APPROVAL_QUEUED,
+  RESPONSE_PARTIAL,
 } from '../events/catalog.js';
 import { getExternalSessionBySessionId } from '../../db/schedulerQueries.js';
 import { sendTelegramMessage, sendTelegramChatAction, sendTelegramDocument } from '../../external/telegram.js';
@@ -78,7 +80,8 @@ function normalizeAndValidateImageUrl(rawUrl: string): string | null {
     if (parsed.protocol !== 'https:') return null;
     if (!isAllowedImageHost(parsed.hostname)) return null;
     return parsed.toString();
-  } catch {
+  } catch (err) {
+    console.warn('[externalOutput] Failed to parse image URL:', err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -90,8 +93,8 @@ function filenameFromUrl(url: string): string {
     if (name && name.includes('.')) {
       return decodeURIComponent(name);
     }
-  } catch {
-    // ignore
+  } catch (err) {
+    console.warn('[externalOutput] Failed to extract filename from URL:', err instanceof Error ? err.message : err);
   }
   return `image_${Date.now()}.png`;
 }
@@ -143,6 +146,8 @@ export class ExternalOutputProjection implements Projection {
   name = 'external-output';
   private readonly typingCooldownMs = 3500;
   private readonly lastTypingByChat = new Map<string, number>();
+  /** Sessions that already sent a gate event (question/approval) — suppress WF_COMPLETED for these. */
+  private readonly gateEventSentForSession = new Set<string>();
 
   private shouldSendTyping(chatId: string): boolean {
     const now = Date.now();
@@ -160,8 +165,10 @@ export class ExternalOutputProjection implements Projection {
       event.eventType !== AGENT_THINKING &&
       event.eventType !== TOOL_CALL_STARTED &&
       event.eventType !== WF_COMPLETED &&
+      event.eventType !== WF_FAILED &&
       event.eventType !== GATE_QUESTION_QUEUED &&
-      event.eventType !== GATE_APPROVAL_QUEUED
+      event.eventType !== GATE_APPROVAL_QUEUED &&
+      event.eventType !== RESPONSE_PARTIAL
     ) {
       return;
     }
@@ -184,7 +191,17 @@ export class ExternalOutputProjection implements Projection {
         return;
       }
 
+      if (event.eventType === RESPONSE_PARTIAL) {
+        const message = typeof payload.message === 'string' ? payload.message : '';
+        if (!message.trim()) return;
+        await sendTelegramMessage(chatId, message);
+        return;
+      }
+
       if (event.eventType === WF_COMPLETED) {
+        // If a gate event (question/approval) was already sent for this session,
+        // the WF_COMPLETED answer is the same question text — skip to avoid duplicate.
+        if (this.gateEventSentForSession.delete(event.sessionId)) return;
         const answer = typeof payload.answer === 'string' ? payload.answer : '';
         if (!answer.trim()) return;
         await sendTelegramMessage(chatId, answer);
@@ -192,7 +209,18 @@ export class ExternalOutputProjection implements Projection {
         return;
       }
 
+      if (event.eventType === WF_FAILED) {
+        const directError = typeof payload.error === 'string' ? payload.error : '';
+        const nestedError = payload.error && typeof payload.error === 'object'
+          ? (payload.error as Record<string, unknown>).message
+          : undefined;
+        const message = directError || (typeof nestedError === 'string' ? nestedError : 'Unbekannter Fehler.');
+        await sendTelegramMessage(chatId, `Fehler: ${message}`);
+        return;
+      }
+
       if (event.eventType === GATE_QUESTION_QUEUED) {
+        this.gateEventSentForSession.add(event.sessionId);
         const directQuestion = typeof payload.question === 'string' ? payload.question : '';
         const nestedQuestion = payload.question && typeof payload.question === 'object'
           ? (payload.question as Record<string, unknown>).question
@@ -202,6 +230,7 @@ export class ExternalOutputProjection implements Projection {
         return;
       }
 
+      this.gateEventSentForSession.add(event.sessionId);
       const directDescription = typeof payload.description === 'string' ? payload.description : '';
       const nestedDescription = payload.request && typeof payload.request === 'object'
         ? (payload.request as Record<string, unknown>).description

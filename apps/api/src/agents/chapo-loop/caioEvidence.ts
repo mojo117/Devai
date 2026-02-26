@@ -83,8 +83,8 @@ function summarizeEvidenceData(data: unknown, fallback: string): string {
       if (serialized.length > 0) {
         return serialized.length > 240 ? `${serialized.slice(0, 240)}...` : serialized;
       }
-    } catch {
-      // Ignore serialization issues and fall through to fallback.
+    } catch (err) {
+      console.warn('[caioEvidence] Serialization failed:', err instanceof Error ? err.message : err);
     }
   }
 

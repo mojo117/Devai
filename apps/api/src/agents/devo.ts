@@ -13,7 +13,8 @@ import { registerMetaTools, registerAgentTools } from '../tools/registry.js';
 export const DEVO_AGENT: AgentDefinition = {
   name: 'devo',
   role: 'Developer & DevOps Engineer',
-  model: 'glm-5', // ZAI GLM-5 - primary
+  model: 'glm-5', // ZAI GLM-5 - complex reasoning tasks
+  fastModel: 'glm-4.7-flash', // ZAI GLM-4.7 Flash (FREE) - routine tasks
   fallbackModel: 'claude-sonnet-4-20250514',
 
   capabilities: {
@@ -61,6 +62,7 @@ export const DEVO_AGENT: AgentDefinition = {
     // GitHub tools
     'github_triggerWorkflow',
     'github_getWorkflowRunStatus',
+    'github_createPR',
     // PM2 tools
     'pm2_status',
     'pm2_restart',
@@ -78,6 +80,9 @@ export const DEVO_AGENT: AgentDefinition = {
     'memory_remember',
     'memory_search',
     'memory_readToday',
+    // Conversation history search
+    'history_search',
+    'history_listSessions',
     // Skill management
     'skill_create',
     'skill_update',
