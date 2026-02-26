@@ -500,7 +500,7 @@ export async function rejectAction(actionId: string): Promise<{ action: Action }
 export interface AgentHistoryEntry {
   entryId: string;
   timestamp: string;
-  agent: 'chapo' | 'devo' | 'scout';
+  agent: 'chapo';
   action: string;
   input?: unknown;
   output?: unknown;

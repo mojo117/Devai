@@ -1,7 +1,6 @@
 import { Fragment, useState, type RefObject } from 'react';
 import type { ChatMessage, SessionSummary } from '../../types';
-import type { ToolEvent, DelegationData } from './types';
-import { DelegationCard } from './DelegationCard';
+import type { ToolEvent } from './types';
 import { VisualProofCard } from './VisualProofCard';
 import { mergeConsecutiveThinking } from './mergeEvents';
 import { renderMessageContent } from './utils';
@@ -9,9 +8,6 @@ import { getUserfileDownloadUrl } from '../../api';
 
 const AGENT_DOT_COLORS: Record<string, string> = {
   chapo: 'bg-cyan-400',
-  devo: 'bg-orange-400',
-  caio: 'bg-blue-400',
-  scout: 'bg-purple-400',
 };
 
 interface MessageListProps {
@@ -31,8 +27,6 @@ interface MessageListProps {
   onSelectSession: (id: string) => void;
   onRestartChat: () => void;
   onNewChat: () => void;
-  delegations: DelegationData[];
-  messageDelegations: Record<string, DelegationData[]>;
 }
 
 interface DecisionPathPayload {
@@ -52,12 +46,6 @@ function formatDecisionPath(path?: string): string {
   switch (path) {
     case 'answer':
       return 'Direct Answer';
-    case 'delegate_devo':
-      return 'Delegate to DEVO';
-    case 'delegate_caio':
-      return 'Delegate to CAIO';
-    case 'delegate_scout':
-      return 'Delegate to SCOUT';
     case 'tool':
       return 'Direct Tool Use';
     default:
@@ -82,8 +70,6 @@ export function MessageList({
   onSelectSession,
   onRestartChat,
   onNewChat,
-  delegations,
-  messageDelegations,
 }: MessageListProps) {
   const renderToolEventsBlock = (events: ToolEvent[], live: boolean) => {
     const merged = mergeConsecutiveThinking(events);
@@ -243,22 +229,13 @@ export function MessageList({
       {/* Messages with associated tool events rendered inline */}
       {messages.map((message) => {
         const frozen = message.role === 'assistant' ? messageToolEvents[message.id] : undefined;
-        const frozenDelegations = message.role === 'assistant' ? messageDelegations[message.id] : undefined;
         return (
           <Fragment key={message.id}>
-            {frozenDelegations && frozenDelegations.map(d => (
-              <DelegationCard key={d.id} delegation={d} />
-            ))}
             {frozen && frozen.length > 0 && renderToolEventsBlock(frozen, false)}
             {renderMessage(message)}
           </Fragment>
         );
       })}
-
-      {/* Live delegation cards for current in-progress exchange */}
-      {delegations.map(d => (
-        <DelegationCard key={d.id} delegation={d} />
-      ))}
 
       {/* Live tool events for current in-progress exchange */}
       {toolEvents.length > 0 && renderToolEventsBlock(toolEvents, isLoading)}

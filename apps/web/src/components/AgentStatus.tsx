@@ -1,13 +1,13 @@
 /**
  * AgentStatus Component
  *
- * Displays the current status of the multi-agent system.
- * Shows which agent is active and its current state.
+ * Displays the current status of the AI agent.
+ * Shows the agent's active state and current phase.
  */
 
 import { useMemo } from 'react';
 
-export type AgentName = 'chapo' | 'devo' | 'scout' | 'caio';
+export type AgentName = 'chapo';
 export type AgentPhase = 'qualification' | 'thinking' | 'execution' | 'executing' | 'review' | 'error' | 'idle';
 
 interface AgentStatusProps {
@@ -20,27 +20,9 @@ interface AgentStatusProps {
 const agentInfo: Record<AgentName, { name: string; role: string; color: string; icon: string }> = {
   chapo: {
     name: 'CHAPO',
-    role: 'Task Coordinator',
+    role: 'AI Assistant',
     color: 'text-purple-300 border-purple-500/40 bg-purple-900/10',
     icon: '🎯',
-  },
-  devo: {
-    name: 'DEVO',
-    role: 'Developer & DevOps',
-    color: 'text-emerald-300 border-emerald-500/40 bg-emerald-900/10',
-    icon: '🔧',
-  },
-  scout: {
-    name: 'SCOUT',
-    role: 'Explorer & Researcher',
-    color: 'text-devai-accent border-devai-accent/40 bg-devai-accent/10',
-    icon: '🔍',
-  },
-  caio: {
-    name: 'CAIO',
-    role: 'Communications & Admin',
-    color: 'text-emerald-300 border-emerald-500/40 bg-emerald-900/10',
-    icon: '📋',
   },
 };
 
@@ -67,7 +49,7 @@ export function AgentStatus({
       <div className="bg-devai-card border border-devai-border rounded-lg p-3">
         <div className="flex items-center gap-2 text-devai-text-secondary">
           <span className="text-lg">🤖</span>
-          <span className="text-sm">Multi-Agent System</span>
+          <span className="text-sm">CHAPO</span>
           <span className="text-xs text-devai-text-muted ml-auto">Idle</span>
         </div>
       </div>

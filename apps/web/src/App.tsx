@@ -269,14 +269,8 @@ function App() {
     return () => { cancelled = true; };
   }, [auth.isAuthed]);
 
-  // Agent icon/phase for header
-  const agentIcon = activeAgent === 'chapo'
-    ? '🎯'
-    : activeAgent === 'devo'
-    ? '🔧'
-    : activeAgent === 'scout'
-    ? '🔍'
-    : '🤖';
+  // Agent icon for header
+  const agentIcon = activeAgent ? '🎯' : '🤖';
 
   // Auth loading screen
   if (!auth.authChecked) {
