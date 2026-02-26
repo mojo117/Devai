@@ -28,7 +28,6 @@ function buildDefaultState(sessionId: string): ConversationState {
     },
     pendingApprovals: [],
     pendingQuestions: [],
-    parallelExecutions: [],
     todos: [],
     // Multi-message state
     isLoopRunning: false,
@@ -81,7 +80,6 @@ function normalizeLoadedState(sessionId: string, raw: unknown): ConversationStat
     agentHistory: Array.isArray(r.agentHistory) ? r.agentHistory : base.agentHistory,
     pendingApprovals: Array.isArray(r.pendingApprovals) ? r.pendingApprovals : base.pendingApprovals,
     pendingQuestions: Array.isArray(r.pendingQuestions) ? r.pendingQuestions : base.pendingQuestions,
-    parallelExecutions: Array.isArray(r.parallelExecutions) ? r.parallelExecutions : base.parallelExecutions,
     todos: Array.isArray(r.todos) ? r.todos : base.todos,
     // Loop activity is runtime-only and cannot be restored safely from DB.
     isLoopRunning: false,
