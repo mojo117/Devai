@@ -89,6 +89,7 @@ export interface Config {
   // Supabase
   supabaseUrl: string;
   supabaseServiceKey: string;
+  supabaseAccessToken?: string; // Management API access token for edge functions
 
   // TaskForge, Email, Telegram
   taskforgeApiKeys: Record<string, string>;
@@ -193,6 +194,8 @@ export function loadConfig(): Config {
       process.env.SUPABASE_SERVICE_ROLE_KEY ||
       process.env.SUPABASE_SERVICE_KEY ||
       "",
+    // Management API access token for edge function CRUD
+    supabaseAccessToken: process.env.DEVAI_SUPABASE_ACCESS_TOKEN || process.env.SUPABASE_ACCESS_TOKEN,
 
     dbPath: process.env.DB_PATH || resolve(process.cwd(), "../../var/devai.db"),
 

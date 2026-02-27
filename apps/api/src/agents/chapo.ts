@@ -235,16 +235,20 @@ export const CHAPO_META_TOOLS = [
   },
   {
     name: 'show_in_preview',
-    description: 'Zeigt eine hochgeladene Datei (PDF, Bild) in der Preview-Leiste an. Nutze dies wenn der User eine angehängte Datei in der Preview sehen will. Benötigt die userfileId aus den angehängten Dateien (z.B. "uf_abc123" oder die Nanoid aus der Datei-Kopfzeile).',
+    description: 'Zeigt eine Datei in der Preview-Leiste an. Optionen:\n1. userfileId: Für bereits hochgeladene Dateien (PDFs, Bilder)\n2. filePath: Für lokale Textdateien (markdown, txt, json) - wird automatisch hochgeladen falls nötig, mit 5 Min Cache für unveränderte Dateien.\nNutze filePath für lokale .md/.txt Dateien wie TO-DO.md.',
     parameters: {
       type: 'object',
       properties: {
         userfileId: {
           type: 'string',
-          description: 'Die ID der hochgeladenen Datei.',
+          description: 'Die ID einer bereits hochgeladenen Datei.',
+        },
+        filePath: {
+          type: 'string',
+          description: 'Pfad zur lokalen Datei (z.B. /root/home/orga/TO-DO.md). Für Textdateien.',
         },
       },
-      required: ['userfileId'],
+      required: [],
     },
     requiresConfirmation: false,
   },

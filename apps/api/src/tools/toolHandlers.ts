@@ -16,6 +16,7 @@ import * as taskforgeTools from './taskforge.js';
 import * as emailTools from './email.js';
 import * as telegramTools from './telegram.js';
 import * as contextApi from './context.js';
+import * as supabaseEdgeTools from './supabaseEdgeFunctions.js';
 import { skillCreate, skillUpdate, skillDelete, skillReload, skillList } from './skillHandlers.js';
 import { searchUserfiles } from '../services/userfileService.js';
 
@@ -284,6 +285,26 @@ export const TOOL_HANDLERS: Record<string, ToolHandler> = {
   skill_delete: async (args) => skillDelete(args),
   skill_reload: async () => skillReload(),
   skill_list: async () => skillList(),
+
+  supabase_list_functions: async () => supabaseEdgeTools.listFunctions(),
+  supabase_get_function: async (args) => supabaseEdgeTools.getFunction(args.functionName as string),
+  supabase_deploy_function: async (args) => supabaseEdgeTools.deployFunction({
+    functionName: args.functionName as string,
+    files: args.files as { name: string; content: string }[],
+    entrypointPath: args.entrypointPath as string | undefined,
+    importMapPath: args.importMapPath as string | undefined,
+    verifyJWT: args.verifyJWT as boolean | undefined,
+  }),
+  supabase_delete_function: async (args) => supabaseEdgeTools.deleteFunction(args.functionName as string),
+  supabase_invoke_function: async (args) => supabaseEdgeTools.invokeFunction(
+    args.functionName as string,
+    args.payload as Record<string, unknown> | undefined,
+    args.headers as Record<string, string> | undefined,
+  ),
+  supabase_get_function_logs: async (args) => supabaseEdgeTools.getFunctionLogs(
+    args.functionName as string,
+    args.limit as number | undefined,
+  ),
 };
 
 export const READ_ONLY_TOOLS = new Set([

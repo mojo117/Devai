@@ -17,8 +17,10 @@ interface DecisionPathInsights {
 import {
   setChapoPlan,
 } from './chapoControlTools.js';
-import { getUserfileById } from '../../db/userfileQueries.js';
-import { createUserfileSignedUrl, downloadUserfile, searchUserfiles } from '../../services/userfileService.js';
+import { getUserfileById, getRecentUserfileByOriginalName, type UserfileRow } from '../../db/userfileQueries.js';
+import { createUserfileSignedUrl, downloadUserfile, searchUserfiles, uploadUserfileFromBuffer } from '../../services/userfileService.js';
+import { readFile } from 'fs/promises';
+import { basename } from 'path';
 import { runHooks } from '../../hooks/hookRunner.js';
 
 interface ToolCallLike {
@@ -84,25 +86,92 @@ export class ChapoToolExecutor {
       };
     }
 
-    // ACTION: SHOW IN PREVIEW — display uploaded userfile in preview panel
+    // ACTION: SHOW IN PREVIEW — display file in preview panel
+    // Supports: userfileId (existing upload) or filePath (auto-upload with TTL freshness check)
     if (toolCall.name === 'show_in_preview') {
-      const userfileId = toolCall.arguments.userfileId as string;
-      if (!userfileId) {
+      const userfileId = toolCall.arguments.userfileId as string | undefined;
+      const filePath = toolCall.arguments.filePath as string | undefined;
+
+      if (!userfileId && !filePath) {
         return {
           toolResult: {
             toolUseId: toolCall.id,
-            result: 'Error: userfileId ist erforderlich.',
+            result: 'Error: userfileId oder filePath ist erforderlich.',
             isError: true,
           },
         };
       }
 
-      const file = await getUserfileById(userfileId);
+      let file: UserfileRow | null = userfileId ? await getUserfileById(userfileId) : null;
+
+      // If filePath provided, check for recent upload or upload fresh
+      if (filePath && !file) {
+        const filename = basename(filePath);
+        const isTextFile = filename.endsWith('.md') || filename.endsWith('.txt') || 
+          filename.endsWith('.markdown') || filename.endsWith('.json');
+        
+        // TTL: 5 minutes for text files, always fresh for others
+        const ttlMs = isTextFile ? 5 * 60 * 1000 : 0;
+        
+        // Check for recent upload
+        const recent = await getRecentUserfileByOriginalName(filename, ttlMs);
+        
+        if (recent) {
+          console.log(`[show_in_preview] Using cached userfile ${recent.id} for ${filename} (${Math.round((Date.now() - new Date(recent.uploaded_at).getTime()) / 1000)}s old)`);
+          file = recent;
+        } else {
+          // Upload fresh
+          try {
+            const buffer = await readFile(filePath);
+            const mimeType = filename.endsWith('.md') || filename.endsWith('.markdown')
+              ? 'text/markdown'
+              : filename.endsWith('.txt')
+                ? 'text/plain'
+                : filename.endsWith('.json')
+                  ? 'application/json'
+                  : 'application/octet-stream';
+            
+            const uploadResult = await uploadUserfileFromBuffer(buffer, filename, mimeType);
+            if (!uploadResult.success) {
+              return {
+                toolResult: {
+                  toolUseId: toolCall.id,
+                  result: `Error: Upload fehlgeschlagen für ${filename}`,
+                  isError: true,
+                },
+              };
+            }
+            
+            console.log(`[show_in_preview] Uploaded fresh ${filename} as ${uploadResult.file.id}`);
+            file = {
+              id: uploadResult.file.id,
+              original_name: uploadResult.file.originalName,
+              mime_type: uploadResult.file.mimeType,
+              storage_path: uploadResult.file.storagePath,
+              uploaded_at: uploadResult.file.uploadedAt,
+              size_bytes: uploadResult.file.sizeBytes,
+              filename: uploadResult.file.filename,
+              expires_at: uploadResult.file.expiresAt,
+              parsed_content: null,
+              parse_status: uploadResult.file.parseStatus,
+            } as UserfileRow;
+          } catch (readErr) {
+            return {
+              toolResult: {
+                toolUseId: toolCall.id,
+                result: `Error: Datei nicht gefunden oder nicht lesbar: ${filePath}`,
+                isError: true,
+              },
+            };
+          }
+        }
+      }
+
       if (!file) {
         return {
           toolResult: {
             toolUseId: toolCall.id,
-            result: `Error: Datei mit ID "${userfileId}" nicht gefunden.`,
+            result: `Error: Datei "${userfileId || filePath}" nicht gefunden.`,
             isError: true,
           },
         };
@@ -115,7 +184,8 @@ export class ChapoToolExecutor {
           file.mime_type === 'text/markdown';
         const isTextFile = isMarkdown ||
           file.mime_type === 'text/plain' ||
-          file.original_name.endsWith('.txt');
+          file.original_name.endsWith('.txt') ||
+          file.original_name.endsWith('.json');
         
         let content: string | undefined;
         if (isTextFile) {
@@ -140,7 +210,7 @@ export class ChapoToolExecutor {
             signedUrl: signed.url,
             filename: file.original_name,
             mimeType: file.mime_type,
-            userfileId,
+            userfileId: file.id,
             content,
           },
         });
