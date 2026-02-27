@@ -1,6 +1,6 @@
 export type MemoryType = 'semantic' | 'episodic' | 'procedural';
 export type MemoryPriority = 'highest' | 'high' | 'medium' | 'low';
-export type MemorySource = 'user_stated' | 'error_resolution' | 'pattern' | 'discovery' | 'compaction';
+export type MemorySource = 'user_stated' | 'error_resolution' | 'pattern' | 'discovery' | 'compaction' | 'episodic_turn' | 'episodic_tool' | 'topic_promotion';
 
 export interface MemoryCandidate {
   content: string;
