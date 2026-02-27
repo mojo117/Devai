@@ -1,11 +1,44 @@
-# Tier 5: Cost Optimization & Delegation — Detailed Implementation Plan
+# Tier 5: Backlog — All Unfinished Features
 
-> Prerequisite: Tier 2 completed (Reflexion, Hooks, Context Tiers)
+> Consolidated 2026-02-27. All features not yet implemented from Tiers 2-4 + deferred items.
+> Ready to implement when prioritized.
+
+---
+
+## TaskForge Tickets
+
+| # | Feature | Ticket | Priority |
+|---|---------|--------|----------|
+| **7** | Sub-Agent Delegation | [TaskFlow:69a13a6](https://taskforge.klyde.tech/task/69a13a630033f7b01816) | Medium |
+| **9** | Multi-Model Cost Routing | [TaskFlow:69a13a0](https://taskforge.klyde.tech/task/69a13a070037625d2d5f) | High |
+| **10** | Architect/Editor Split | [TaskFlow:69a13a3](https://taskforge.klyde.tech/task/69a13a3c002e700ec953) | High |
+| **11** | Plan Mode | [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002b7fd0a320) | Medium |
+| **12** | Sandboxed Execution | [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002dd36ce60b) | Low |
+| **15** | Episodic Memory | [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002d0982d6dd) | Medium |
+| **16** | Real-Time Streaming UI | [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002e7ba930f9) | Medium |
+
+---
+
+## Priority Ranking (by effort/impact)
+
+| # | Feature | Effort | Impact | Ticket |
+|---|---------|--------|--------|--------|
+| **9** | Multi-Model Cost Routing | 1 day | High | [TaskFlow:69a13a0](https://taskforge.klyde.tech/task/69a13a070037625d2d5f) |
+| **10** | Architect/Editor Split | 5 days | High | [TaskFlow:69a13a3](https://taskforge.klyde.tech/task/69a13a3c002e700ec953) |
+| **16a** | Token/Cost Live Display | 2 days | Medium | [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002e7ba930f9) |
+| **7** | Sub-Agent Delegation | 4 days | High | [TaskFlow:69a13a6](https://taskforge.klyde.tech/task/69a13a630033f7b01816) |
+| **11** | Plan Mode | 3 days | Medium | [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002b7fd0a320) |
+| **12** | Sandboxed Execution | 5 days | Medium | [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002dd36ce60b) |
+| **15** | Episodic Memory | 7 days | High | [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002d0982d6dd) |
+| **16b-c** | Progressive UI + Cancel | 3 days | Low | [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002e7ba930f9) |
+
+**Recommended order**: #9 → #16a → #10 → #7 → #11 → #12 → #15 → #16b-c
 
 ---
 
 ## #9. Multi-Model Cost Routing
 
+**Ticket**: [TaskFlow:69a13a0](https://taskforge.klyde.tech/task/69a13a070037625d2d5f)
 **Effort**: ~1 day | **Impact**: Immediate cost reduction on every session
 **Engine**: ALL (primary benefit: `/engine glm` with `glm-5` + `glm-4.7-flash`)
 
@@ -22,402 +55,217 @@ Extend the existing `shouldEnableThinking()` heuristic into a model tier selecto
 | **primary** | Iteration 0 (planning), error recovery, complex keywords | `glm-5` / `kimi-k2.5` | Needs full reasoning |
 | **fast** | Iteration > 3, simple tool-result follow-up, no errors | `glm-4.7-flash` | Execution-phase, just picks next tool |
 
-The `fastModel` already exists in every engine profile but is only used for summarization (`compaction.ts`). We reuse it for execution-phase iterations.
-
 ### Files to Modify
 
-#### 1. `apps/api/src/agents/chapo-loop.ts`
-
-Replace the static `model` usage in `runLoop()` with a dynamic `selectModelForIteration()`.
-
-**Current code** (line 273):
-```typescript
-const model = this.modelSelection.model || chapo.model;
-```
-
-**Change to** — add model tier selection inside the loop (before the LLM call, ~line 343):
-
-```typescript
-// Before the LLM call, select model tier
-const modelForThisTurn = selectModelForIteration({
-  iteration: this.iteration,
-  primaryModel: model,
-  fastModel: this.modelSelection.fastModel,
-  hadRecentError: lastErrorMessage !== '',
-  thinkingEnabled,
-  userText,
-});
-```
-
-And pass `modelForThisTurn` instead of `model` in the `generateWithFallback` call (line 347):
-```typescript
-model: modelForThisTurn,
-```
-
-**New function** (add near `shouldEnableThinking`):
-
-```typescript
-interface ModelTierInput {
-  iteration: number;
-  primaryModel: string;
-  fastModel?: string;
-  hadRecentError: boolean;
-  thinkingEnabled: boolean;
-  userText: string;
-}
-
-function selectModelForIteration(input: ModelTierInput): string {
-  const { iteration, primaryModel, fastModel, hadRecentError, thinkingEnabled, userText } = input;
-
-  // No fast model configured → always use primary
-  if (!fastModel) return primaryModel;
-
-  // Always use primary for:
-  // - First 2 iterations (planning + initial execution)
-  // - Thinking-enabled turns (complex reasoning)
-  // - Error recovery (need full reasoning to fix approach)
-  if (iteration < 2) return primaryModel;
-  if (thinkingEnabled) return primaryModel;
-  if (hadRecentError) return primaryModel;
-
-  // After iteration 3, downgrade to fast model for execution-phase
-  return fastModel;
-}
-```
-
-#### 2. `apps/api/src/agents/types.ts`
-
-Add `fastModel` to `ModelSelection` interface:
-
-```typescript
-export interface ModelSelection {
-  model: string;
-  provider?: LLMProvider;
-  fastModel?: string;                    // ADD THIS
-  sameProviderFallbacks?: string[];
-}
-```
-
-#### 3. `apps/api/src/llm/modelSelector.ts`
-
-Pass `fastModel` through from engine profile:
-
-```typescript
-// In resolveModelSelection():
-const effectiveFastModel = override?.fastModel ?? undefined;
-
-return {
-  model: effectiveModel,
-  provider: effectiveProvider,
-  fastModel: effectiveFastModel,          // ADD THIS
-  sameProviderFallbacks: ...,
-};
-```
-
-#### 4. Logging
-
-Update the existing log line (chapo-loop.ts ~line 344) to show which model tier was selected:
-
-```typescript
-console.log(`${trace}[chapo-loop] LLM call #${this.iteration} starting (${provider}/${modelForThisTurn}${modelForThisTurn !== model ? ' [fast]' : ''}, ${tools.length}/${allTools.length} tools, thinking=${thinkingEnabled})`);
-```
-
-### Engine Mapping
-
-| Engine | Primary | Fast | Cost Routing Active |
-|--------|---------|------|---------------------|
-| `/engine glm` | `glm-5` | `glm-4.7-flash` | Yes — iteration 2+ uses flash |
-| `/engine kimi` | `kimi-k2.5` | `glm-4.7-flash` | Yes — fast is cross-provider (ZAI) |
-| `/engine claude` | `claude-opus-4-5` | `glm-4.7-flash` | Yes — fast is cross-provider (ZAI) |
-| `/engine gemini` | `gemini-3.1-pro` | `glm-4.7-flash` | Yes — fast is cross-provider (ZAI) |
+| File | Change |
+|------|--------|
+| `apps/api/src/agents/chapo-loop.ts` | Add `selectModelForIteration()` function |
+| `apps/api/src/agents/types.ts` | Add `fastModel` to `ModelSelection` |
+| `apps/api/src/llm/modelSelector.ts` | Pass `fastModel` through |
 
 ### Verification
 
-1. Start session with `/engine glm`, send a multi-step task (e.g. "read file X, then edit Y, then commit")
+1. Start session with `/engine glm`, send a multi-step task
 2. Check logs: iterations 0-1 should show `glm-5`, iteration 2+ should show `glm-4.7-flash [fast]`
-3. Verify error recovery: trigger an error mid-loop → next iteration should use primary model
+
+---
+
+## #10. Architect/Editor Split Pattern
+
+**Ticket**: [TaskFlow:69a13a3](https://taskforge.klyde.tech/task/69a13a3c002e700ec953)
+**Effort**: ~5 days | **Impact**: Reduces hallucination in code generation
+**Engine**: ALL (primary benefit: `/engine glm` and `/engine kimi`)
+
+### Problem
+
+CHAPO uses a single model for both reasoning ("what needs to change?") and code generation ("write the code"). This leads to hallucination — the model invents file paths, generates wrong function signatures, or writes code that doesn't match the existing codebase.
+
+### Design
+
+Split file-editing tool calls into a 2-pass pipeline:
+1. **Architect pass** (primary model): Produces structured edit plan (JSON)
+2. **Editor pass** (fast model): Generates actual code from plan
+3. **Review pass** (optional): Validates generated code
+
+**Only intercepts**: `fs_writeFile` and `fs_edit`
+
+### Files to Create/Modify
+
+| File | Change Type |
+|------|------------|
+| `apps/api/src/agents/architectEditor.ts` | **NEW** |
+| `apps/api/src/agents/chapo-loop/toolExecutor.ts` | Modify (intercept) |
+| `apps/api/src/llm/engineProfiles.ts` | Modify (architectMode flag) |
 
 ---
 
 ## #7. Specialized Sub-Agent Delegation
 
+**Ticket**: [TaskFlow:69a13a6](https://taskforge.klyde.tech/task/69a13a630033f7b01816)
 **Effort**: ~4 days | **Impact**: Enables parallel work, protects parent context from bloat
 **Engine**: ALL
 
 ### Problem
 
-CHAPO handles everything sequentially in one context window. When a task requires "research X, then implement Y, then verify Z", each phase fills the context with data the next phase doesn't need. This leads to context overflow on complex tasks.
+CHAPO handles everything sequentially in one context window. When a task requires "research X, then implement Y, then verify Z", each phase fills the context with data the next phase doesn't need.
 
 ### Design
 
-Add 2 lightweight sub-agent types that CHAPO can delegate to:
+Add 2 lightweight sub-agent types:
 
-| Sub-Agent | Tools Available | Context | Use Case |
-|-----------|----------------|---------|----------|
-| **research** | fs_readFile, fs_glob, fs_grep, fs_listFiles, web_search, web_fetch | Own (isolated) | "Read these 5 files and tell me how auth works" |
-| **bash** | bash_execute only | Own (isolated) | "Run this test suite and report results" |
+| Sub-Agent | Tools Available | Use Case |
+|-----------|----------------|----------|
+| **research** | fs_readFile, fs_glob, fs_grep, fs_listFiles, web_search, web_fetch | "Read these files and summarize" |
+| **bash** | bash_execute only | "Run test suite and report results" |
 
-Sub-agents:
-- Share the same LLM router (same engine profile, same fallback chain)
-- Get their own `ConversationManager` (isolated context)
-- Return a structured summary to the parent CHAPO loop
-- Have strict limits: max 10 iterations, 60s timeout, 50k token budget
+Sub-agents have strict limits: max 10 iterations, 60s timeout, 50k token budget.
 
 ### Files to Create/Modify
 
-#### 1. New file: `apps/api/src/agents/sub-agent.ts`
-
-```typescript
-import { ConversationManager } from './conversation-manager.js';
-import { llmRouter } from '../llm/router.js';
-import { getToolsForLLM } from '../tools/registry.js';
-import type { LLMProvider, GenerateResponse } from '../llm/types.js';
-import { getTextContent } from '../llm/types.js';
-import { executeToolWithApprovalBridge } from '../actions/approvalBridge.js';
-import { buildToolResultContent } from './utils.js';
-
-type SubAgentType = 'research' | 'bash';
-
-const SUB_AGENT_TOOLS: Record<SubAgentType, string[]> = {
-  research: ['fs_readFile', 'fs_glob', 'fs_grep', 'fs_listFiles', 'web_search', 'web_fetch'],
-  bash: ['bash_execute'],
-};
-
-const SUB_AGENT_PROMPTS: Record<SubAgentType, string> = {
-  research: `You are a research sub-agent. Your job is to gather information and report findings.
-You have read-only access to files and web search. Gather the requested information efficiently.
-When done, provide a clear structured summary of your findings. Do NOT make changes to any files.`,
-  bash: `You are a bash execution sub-agent. Run the requested command(s) and report the results.
-Provide stdout, stderr, and exit code. Do NOT run destructive commands unless explicitly instructed.`,
-};
-
-interface SubAgentConfig {
-  type: SubAgentType;
-  task: string;
-  provider: LLMProvider;
-  model: string;
-  maxIterations?: number;
-  timeoutMs?: number;
-  tokenBudget?: number;
-}
-
-export interface SubAgentResult {
-  summary: string;
-  success: boolean;
-  iterations: number;
-  tokensUsed: number;
-}
-
-/**
- * Run a sub-agent to completion.
- * Returns a structured summary for injection into the parent loop.
- */
-export async function runSubAgent(config: SubAgentConfig): Promise<SubAgentResult> {
-  const maxIterations = config.maxIterations || 10;
-  const timeoutMs = config.timeoutMs || 60_000;
-  const tokenBudget = config.tokenBudget || 50_000;
-
-  const allowedTools = SUB_AGENT_TOOLS[config.type];
-  const allTools = getToolsForLLM().filter((t) => allowedTools.includes(t.name));
-  const conversation = new ConversationManager(tokenBudget);
-
-  conversation.setSystemPrompt(SUB_AGENT_PROMPTS[config.type]);
-  conversation.addMessage({ role: 'user', content: config.task });
-
-  let tokensUsed = 0;
-  const startTime = Date.now();
-
-  for (let i = 0; i < maxIterations; i++) {
-    // Timeout check
-    if (Date.now() - startTime > timeoutMs) {
-      return {
-        summary: `Sub-agent timed out after ${i} iterations.`,
-        success: false,
-        iterations: i,
-        tokensUsed,
-      };
-    }
-
-    const response = await llmRouter.generateWithFallback(config.provider, {
-      model: config.model,
-      messages: conversation.buildLLMMessages(),
-      systemPrompt: conversation.getSystemPrompt(),
-      tools: allTools,
-      toolsEnabled: true,
-    });
-
-    if (response.usage) {
-      tokensUsed += response.usage.inputTokens + response.usage.outputTokens;
-    }
-
-    // No tool calls = done
-    if (!response.toolCalls || response.toolCalls.length === 0) {
-      return {
-        summary: response.content || 'No findings.',
-        success: true,
-        iterations: i + 1,
-        tokensUsed,
-      };
-    }
-
-    // Execute tools
-    conversation.addMessage({
-      role: 'assistant',
-      content: response.content || '',
-      toolCalls: response.toolCalls,
-    });
-
-    const toolResults: { toolUseId: string; result: string; isError: boolean }[] = [];
-    for (const tc of response.toolCalls) {
-      try {
-        const result = await executeToolWithApprovalBridge(tc.name, tc.arguments, {
-          agentName: 'chapo-sub',
-        });
-        const content = buildToolResultContent(result);
-        toolResults.push({ toolUseId: tc.id, result: content.content, isError: content.isError });
-      } catch (err) {
-        toolResults.push({
-          toolUseId: tc.id,
-          result: `Error: ${err instanceof Error ? err.message : String(err)}`,
-          isError: true,
-        });
-      }
-    }
-
-    conversation.addMessage({ role: 'user', content: '', toolResults });
-  }
-
-  return {
-    summary: 'Sub-agent reached max iterations without completing.',
-    success: false,
-    iterations: maxIterations,
-    tokensUsed,
-  };
-}
-```
-
-#### 2. New tools: `apps/api/src/tools/definitions/delegateTools.ts`
-
-Register two new tools for CHAPO:
-
-```typescript
-import type { ToolDefinition, ToolResult } from '../types.js';
-import { runSubAgent } from '../../agents/sub-agent.js';
-import * as stateManager from '../../agents/stateManager.js';
-import type { LLMProvider } from '../../llm/types.js';
-
-export const delegateResearchTool: ToolDefinition = {
-  name: 'delegate_research',
-  description: 'Delegate a research task to a read-only sub-agent. The sub-agent can read files and search the web, then returns a summary. Use this for tasks like "read these files and summarize how X works" or "search the web for Y".',
-  parameters: {
-    type: 'object',
-    properties: {
-      task: {
-        type: 'string',
-        description: 'What to research. Be specific about what files to read or what to search for.',
-      },
-    },
-    required: ['task'],
-  },
-  execute: async (args, context): Promise<ToolResult> => {
-    const state = stateManager.getState(context.sessionId);
-    const provider = (state?.taskContext.gatheredInfo.provider || 'zai') as LLMProvider;
-    const model = state?.taskContext.gatheredInfo.fastModel as string || 'glm-4.7-flash';
-
-    const result = await runSubAgent({
-      type: 'research',
-      task: args.task as string,
-      provider,
-      model,
-    });
-
-    return {
-      success: result.success,
-      result: `[Research Sub-Agent — ${result.iterations} iterations, ${result.tokensUsed} tokens]\n\n${result.summary}`,
-    };
-  },
-};
-
-export const delegateBashTool: ToolDefinition = {
-  name: 'delegate_bash',
-  description: 'Delegate a bash command or test suite to an isolated sub-agent. The sub-agent runs the command(s) and returns stdout/stderr. Use this for running tests, builds, or other commands where you need the output.',
-  parameters: {
-    type: 'object',
-    properties: {
-      task: {
-        type: 'string',
-        description: 'What to run. Describe the command(s) and what output you need.',
-      },
-    },
-    required: ['task'],
-  },
-  execute: async (args, context): Promise<ToolResult> => {
-    const state = stateManager.getState(context.sessionId);
-    const provider = (state?.taskContext.gatheredInfo.provider || 'zai') as LLMProvider;
-    const model = state?.taskContext.gatheredInfo.fastModel as string || 'glm-4.7-flash';
-
-    const result = await runSubAgent({
-      type: 'bash',
-      task: args.task as string,
-      provider,
-      model,
-    });
-
-    return {
-      success: result.success,
-      result: `[Bash Sub-Agent — ${result.iterations} iterations]\n\n${result.summary}`,
-    };
-  },
-};
-```
-
-#### 3. Register tools in registry + agent access
-
-Add `delegate_research` and `delegate_bash` to:
-- `apps/api/src/tools/registry.ts` — register in unified registry
-- `apps/api/src/agents/router/agentAccess.ts` — add to CHAPO's allowed tool list
-- `apps/api/src/tools/toolFilter.ts` — add to a new `delegation` category
-
-#### 4. Update toolFilter.ts
-
-Add delegation category:
-```typescript
-delegation: ['delegate_research', 'delegate_bash'],
-```
-
-And trigger:
-```typescript
-delegation: /\b(research|investigat|explore|read.{0,10}files|find.{0,10}out|gather|collect|run.{0,10}test|test.{0,10}suite|build|compile)\b/i,
-```
-
-### Verification
-
-1. Send "research how the auth system works in this project" → should delegate to research sub-agent
-2. Send "run the test suite and tell me what fails" → should delegate to bash sub-agent
-3. Verify sub-agent results appear as tool results in the main conversation
-4. Verify parent context doesn't get bloated with sub-agent's intermediate steps
-5. Check logs for sub-agent iterations and token usage
+| File | Change Type |
+|------|------------|
+| `apps/api/src/agents/sub-agent.ts` | **NEW** |
+| `apps/api/src/tools/definitions/delegateTools.ts` | **NEW** |
+| `apps/api/src/tools/registry.ts` | Modify |
+| `apps/api/src/tools/toolFilter.ts` | Modify |
 
 ---
 
-## Implementation Order
+## #11. Plan Mode / Pre-Execution Planning
 
-| # | Feature | Effort | Dependencies | Status |
-|---|---------|--------|-------------|--------|
-| **9** | Multi-Model Cost Routing | 1 day | None | Pending |
-| **7** | Sub-Agent Delegation | 4 days | Benefits from #6 (context protection, done in Tier 2) | Pending |
+**Ticket**: [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002b7fd0a320)
+**Effort**: ~3 days | **Impact**: Users approve changes before code is modified
+**Engine**: ALL
 
-Total: ~5 days (2 features)
+### Problem
 
-## Files Summary
+CHAPO's `chapo_plan_set` tool exists but is cosmetic — it sets a plan string shown in the UI but doesn't gate execution. The agent can start editing files before the user has reviewed the plan.
 
-| File | Change Type | Feature |
-|------|------------|---------|
-| `apps/api/src/agents/chapo-loop.ts` | Modify | #9 (model tier selection) |
-| `apps/api/src/agents/types.ts` | Modify | #9 (fastModel in ModelSelection) |
-| `apps/api/src/llm/modelSelector.ts` | Modify | #9 (pass fastModel through) |
-| `apps/api/src/agents/sub-agent.ts` | **NEW** | #7 |
-| `apps/api/src/tools/definitions/delegateTools.ts` | **NEW** | #7 |
-| `apps/api/src/tools/registry.ts` | Modify | #7 (register delegate tools) |
-| `apps/api/src/agents/router/agentAccess.ts` | Modify | #7 (CHAPO tool access) |
-| `apps/api/src/tools/toolFilter.ts` | Modify | #7 (delegation category) |
+### Design
+
+Add a `planMode` flag that forces CHAPO to:
+1. Produce a plan first
+2. Wait for user approval
+3. Only then execute file-modifying tools
+
+### Files to Create/Modify
+
+| File | Change Type |
+|------|------------|
+| `apps/api/src/agents/chapo-loop/planGate.ts` | **NEW** |
+| `apps/api/src/agents/chapo-loop/toolExecutor.ts` | Modify |
+| `apps/api/src/tools/definitions/chapoControlTools.ts` | Modify |
+
+---
+
+## #12. Sandboxed Execution Environment
+
+**Ticket**: [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002dd36ce60b)
+**Effort**: ~5 days | **Impact**: Safety net for bash execution
+**Engine**: ALL (critical for `/engine glm`)
+
+### Problem
+
+`bash_execute` runs commands directly on the host with only pattern blocking and path restrictions.
+
+### Design: OverlayFS + Namespaces (No Docker)
+
+```
+OverlayFS:
+  lower = /opt/Klyde/projects/X   ← Read-only real filesystem
+  upper = /tmp/devai-sandbox-XXX  ← Writes go here
+  merged = /sandbox/workspace     ← Agent sees this
+```
+
+### Files to Create
+
+| File | Change Type |
+|------|------------|
+| `apps/api/src/sandbox/overlay.ts` | **NEW** |
+| `apps/api/src/sandbox/sandboxedBash.ts` | **NEW** |
+| `apps/api/src/tools/bash.ts` | Modify |
+
+---
+
+## #15. Episodic Memory (Cross-Session Learning)
+
+**Ticket**: [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002d0982d6dd)
+**Effort**: ~7 days | **Impact**: Agent remembers what happened, learns from past sessions
+**Engine**: ALL
+
+### Problem
+
+DevAI's memory system is passive — memories are only extracted at session-end or when explicitly requested. No automatic learning from:
+- Successful debugging patterns
+- User preferences observed over time
+- Project-specific knowledge
+
+### Design
+
+3 extraction triggers:
+| Trigger | When | What's Extracted |
+|---------|------|-----------------|
+| **Real-time** | After each tool execution | Patterns, file modifications |
+| **Turn-end** | After CHAPO answers | Episodic summary |
+| **Session-end** | WebSocket disconnect | Full session learnings |
+
+### Files to Create/Modify
+
+| File | Change Type |
+|------|------------|
+| `apps/api/src/db/migrations/004_episodic_metadata.sql` | **NEW** |
+| `apps/api/src/memory/episodicExtractor.ts` | **NEW** |
+| `apps/api/src/memory/turnSummary.ts` | **NEW** |
+| `apps/api/src/memory/service.ts` | Modify |
+
+---
+
+## #16. Real-Time Streaming with Progressive UI
+
+**Ticket**: [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002e7ba930f9)
+**Effort**: ~5 days total (3 phases) | **Impact**: Users see what the agent is doing live
+**Engine**: ALL
+
+### Problem
+
+User experience gaps:
+1. Tool arguments are opaque until execution completes
+2. No live diffs for file edits
+3. No cancel mechanism for individual tools
+4. No token/cost visibility
+
+### Phase 1: Token/Cost Live Display (2 days)
+
+Stream token usage after each LLM call. Frontend shows live counter.
+
+### Phase 2: Progressive Tool Results (2 days)
+
+For long-running tools (bash, web_fetch), stream output chunks as they arrive.
+
+### Phase 3: Cancel Individual Tools (1 day)
+
+Allow canceling individual tool executions from frontend.
+
+### Files to Create/Modify
+
+| File | Change Type |
+|------|------------|
+| `apps/web/src/components/ChatUI/TokenCounter.tsx` | **NEW** |
+| `apps/api/src/tools/bash.ts` | Modify (streaming) |
+| `apps/api/src/websocket/routes.ts` | Modify (cancel_tool) |
+
+---
+
+## Summary: All Unfinished Features
+
+| # | Feature | Tier (Original) | Effort | Ticket |
+|---|---------|-----------------|--------|--------|
+| **9** | Multi-Model Cost Routing | Tier 2 | 1 day | [TaskFlow:69a13a0](https://taskforge.klyde.tech/task/69a13a070037625d2d5f) |
+| **10** | Architect/Editor Split | Tier 3 | 5 days | [TaskFlow:69a13a3](https://taskforge.klyde.tech/task/69a13a3c002e700ec953) |
+| **7** | Sub-Agent Delegation | Tier 2 | 4 days | [TaskFlow:69a13a6](https://taskforge.klyde.tech/task/69a13a630033f7b01816) |
+| **11** | Plan Mode | Tier 3 | 3 days | [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002b7fd0a320) |
+| **12** | Sandboxed Execution | Tier 3 | 5 days | [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002dd36ce60b) |
+| **15** | Episodic Memory | Tier 4 | 7 days | [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002d0982d6dd) |
+| **16** | Real-Time Streaming | Tier 4 | 5 days | [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002e7ba930f9) |
+
+**Total remaining effort**: ~30 days

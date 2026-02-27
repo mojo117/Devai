@@ -9,7 +9,7 @@ export interface ToolEvent {
   arguments?: unknown;
   result?: unknown;
   completed?: boolean;
-  agent?: AgentName;
+  agent?: AgentName | string;
 }
 
 export interface ChatSessionState {
@@ -36,7 +36,7 @@ export interface ToolEventUpdate {
   result?: unknown;
   completed?: boolean;
   chunk?: string;
-  agent?: AgentName;
+  agent?: AgentName | string;
 }
 
 export interface ChatUIProps {

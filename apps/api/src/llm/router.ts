@@ -7,12 +7,12 @@ import { MoonshotProvider } from './providers/moonshot.js';
 import { logUsage } from './usage-logger.js';
 import { circuitBreaker } from './circuitBreaker.js';
 
-// Default fallback chain
-const DEFAULT_FALLBACK_CHAIN: LLMProvider[] = ['zai', 'anthropic', 'openai', 'gemini', 'moonshot'];
+// Default fallback chain (removed anthropic/openai/gemini — use kimi as primary fallback)
+const DEFAULT_FALLBACK_CHAIN: LLMProvider[] = ['zai', 'moonshot'];
 
 // Default models per provider (used when falling back to a different provider)
 const DEFAULT_MODELS: Record<LLMProvider, string> = {
-  zai: 'glm-5',
+  zai: 'glm-4.7',
   anthropic: 'claude-sonnet-4-20250514',
   openai: 'gpt-4o',
   gemini: 'gemini-3.1-pro-preview',

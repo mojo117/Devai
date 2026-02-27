@@ -11,8 +11,8 @@ import type { QueueQuestionOptions } from './gateManager.js';
 import {
   setChapoPlan,
 } from './chapoControlTools.js';
-import { getUserfileById, listUserfiles } from '../../db/userfileQueries.js';
-import { createUserfileSignedUrl } from '../../services/userfileService.js';
+import { getUserfileById } from '../../db/userfileQueries.js';
+import { createUserfileSignedUrl, searchUserfiles } from '../../services/userfileService.js';
 import { runHooks } from '../../hooks/hookRunner.js';
 
 interface ToolCallLike {
@@ -138,44 +138,14 @@ export class ChapoToolExecutor {
 
     // ACTION: SEARCH FILES — list/search uploaded userfiles
     if (toolCall.name === 'search_files') {
-      const query = (toolCall.arguments.query as string)?.trim().toLowerCase() || '';
-      try {
-        const allFiles = await listUserfiles();
-        const filtered = query
-          ? allFiles.filter((f) => f.original_name.toLowerCase().includes(query))
-          : allFiles.slice(0, 20);
-
-        if (filtered.length === 0) {
-          return {
-            toolResult: {
-              toolUseId: toolCall.id,
-              result: query
-                ? `Keine Dateien gefunden für "${query}".`
-                : 'Keine hochgeladenen Dateien vorhanden.',
-              isError: false,
-            },
-          };
-        }
-
-        const lines = filtered.map((f) =>
-          `- **${f.original_name}** | ID: \`${f.id}\` | ${f.mime_type} | ${Math.round(f.size_bytes / 1024)}KB | ${new Date(f.uploaded_at).toLocaleDateString('de-DE')}`
-        );
-        return {
-          toolResult: {
-            toolUseId: toolCall.id,
-            result: `${filtered.length} Datei(en) gefunden:\n${lines.join('\n')}`,
-            isError: false,
-          },
-        };
-      } catch (err) {
-        return {
-          toolResult: {
-            toolUseId: toolCall.id,
-            result: `Error: ${err instanceof Error ? err.message : String(err)}`,
-            isError: true,
-          },
-        };
-      }
+      const searchResult = await searchUserfiles(toolCall.arguments.query as string | undefined);
+      return {
+        toolResult: {
+          toolUseId: toolCall.id,
+          result: searchResult.result,
+          isError: !searchResult.success,
+        },
+      };
     }
 
     // ACTION: TODO — update self-managed todo list

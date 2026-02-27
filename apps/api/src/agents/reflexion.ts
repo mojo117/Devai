@@ -8,9 +8,14 @@
 import { llmRouter } from '../llm/router.js';
 import type { LLMProvider } from '../llm/types.js';
 
+export interface ReflexionIssue {
+  description: string;
+}
+
 export interface ReflexionResult {
   approved: boolean;
   feedback?: string;
+  issues?: ReflexionIssue[];
 }
 
 const REFLEXION_PROMPT = `You are a quality reviewer. The user asked a question and an AI assistant generated an answer.
@@ -22,9 +27,15 @@ Evaluate the answer on these criteria:
 4. Is the answer coherent and well-structured?
 
 If the answer is acceptable, respond with exactly: APPROVED
-If there are issues, respond with: ISSUES: <brief description of what's wrong>
 
-Be strict but fair. Minor style issues are not worth flagging.`;
+If there are issues, respond in this format:
+ISSUES:
+- <specific problem 1>
+- <specific problem 2>
+- <specific problem 3>
+
+Be strict but fair. Minor style issues are not worth flagging.
+Respond in the same language as the user's question (German or English).`;
 
 /**
  * Quick self-review of an answer before delivering to the user.
@@ -41,7 +52,7 @@ export async function reviewAnswer(
     return { approved: true };
   }
 
-  const model = fastModel || 'glm-4.7-flash';
+  const model = fastModel || 'kimi-k2.5';
 
   try {
     const response = await llmRouter.generateWithFallback(provider, {
@@ -62,10 +73,27 @@ export async function reviewAnswer(
       return { approved: true };
     }
 
-    // Extract feedback after "ISSUES:"
-    const issueMatch = text.match(/ISSUES:\s*(.*)/s);
-    if (issueMatch) {
-      return { approved: false, feedback: issueMatch[1].trim() };
+    // Extract bullet points after "ISSUES:"
+    const issuesMatch = text.match(/ISSUES:\s*\n([\s\S]*)/i);
+    if (issuesMatch) {
+      const issuesText = issuesMatch[1];
+      // Parse bullet points (- item or * item)
+      const bulletPoints = issuesText
+        .split(/\n/)
+        .map(line => line.trim())
+        .filter(line => line.startsWith('-') || line.startsWith('*'))
+        .map(line => line.replace(/^[-*]\s*/, '').trim())
+        .filter(line => line.length > 0);
+
+      if (bulletPoints.length > 0) {
+        const issues: ReflexionIssue[] = bulletPoints.map(desc => ({ description: desc }));
+        const feedback = `Issues to fix:\n${bulletPoints.map(b => `- ${b}`).join('\n')}`;
+        console.log(`[reflexion] Found ${issues.length} issues: ${bulletPoints.join(', ')}`);
+        return { approved: false, feedback, issues };
+      }
+
+      // Fallback: use the raw text as feedback
+      return { approved: false, feedback: issuesText.trim() };
     }
 
     // Ambiguous response -> approve (don't block on parsing issues)

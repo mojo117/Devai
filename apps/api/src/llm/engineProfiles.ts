@@ -26,16 +26,16 @@ export type EngineProfile = Partial<Record<AgentName, AgentModelOverride>>;
  */
 export const ENGINE_PROFILES: Record<EngineName, EngineProfile> = {
   glm: {
-    chapo: { model: 'glm-5', fastModel: 'glm-4.7-flash', fallbackModel: 'claude-opus-4-5-20251101', sameProviderFallback: 'glm-4.7' },
+    chapo: { model: 'glm-5', fastModel: 'kimi-k2.5', fallbackModel: 'kimi-k2.5', sameProviderFallback: 'glm-4.7' },
   },
   gemini: {
-    chapo: { model: 'gemini-3.1-pro-preview', fastModel: 'glm-4.7-flash', fallbackModel: 'glm-5' },
+    chapo: { model: 'gemini-3.1-pro-preview', fastModel: 'kimi-k2.5', fallbackModel: 'kimi-k2.5' },
   },
   claude: {
-    chapo: { model: 'claude-opus-4-5-20251101', fastModel: 'glm-4.7-flash', fallbackModel: 'glm-5' },
+    chapo: { model: 'claude-opus-4-5-20251101', fastModel: 'kimi-k2.5', fallbackModel: 'kimi-k2.5' },
   },
   kimi: {
-    chapo: { model: 'kimi-k2.5', fastModel: 'glm-4.7-flash', fallbackModel: 'glm-5', sameProviderFallback: 'glm-4.7' },
+    chapo: { model: 'kimi-k2.5', fastModel: 'kimi-k2.5', fallbackModel: 'glm-4.7', sameProviderFallback: 'glm-4.7' },
   },
 };
 

@@ -14,6 +14,7 @@ import { getSupabase } from '../db/index.js';
 import {
   generateUserfileId,
   insertUserfile,
+  listUserfiles,
   type UserfileRow,
 } from '../db/userfileQueries.js';
 import { parseFileContent } from './fileParser.js';
@@ -218,4 +219,54 @@ export async function deleteUserfileStorage(storagePath: string): Promise<boolea
   }
 
   return true
+}
+
+export interface SearchUserfilesResult {
+  success: boolean;
+  result: string;
+  error?: string;
+  fileCount: number;
+}
+
+/**
+ * Search uploaded userfiles by query string.
+ * Returns formatted markdown list of matching files.
+ * If query is empty, returns the 20 most recent files.
+ */
+export async function searchUserfiles(query?: string): Promise<SearchUserfilesResult> {
+  try {
+    const searchQuery = query?.trim().toLowerCase() || '';
+    const allFiles = await listUserfiles();
+    const filtered = searchQuery
+      ? allFiles.filter((f) => f.original_name.toLowerCase().includes(searchQuery))
+      : allFiles.slice(0, 20);
+
+    if (filtered.length === 0) {
+      return {
+        success: true,
+        result: searchQuery
+          ? `Keine Dateien gefunden für "${searchQuery}".`
+          : 'Keine hochgeladenen Dateien vorhanden.',
+        fileCount: 0,
+      };
+    }
+
+    const lines = filtered.map(
+      (f) =>
+        `- **${f.original_name}** | ID: \`${f.id}\` | ${f.mime_type} | ${Math.round(f.size_bytes / 1024)}KB | ${new Date(f.uploaded_at).toLocaleDateString('de-DE')}`
+    );
+
+    return {
+      success: true,
+      result: `${filtered.length} Datei(en) gefunden:\n${lines.join('\n')}`,
+      fileCount: filtered.length,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      result: '',
+      error: err instanceof Error ? err.message : String(err),
+      fileCount: 0,
+    };
+  }
 }

@@ -55,14 +55,19 @@ All 4 items implemented and compiled cleanly.
 
 ---
 
-## Tier 5: Deferred — Safety & Control — [Detailed Plan](./tier5-deferred-plan.md)
+## Tier 5: Backlog — All Unfinished Features — [Detailed Plan](./tier5-detailed-plan.md)
 
-> Moved from Tier 3. Lower priority than code quality improvements (#10).
+> Consolidated 2026-02-27. All features from Tiers 2-4 not yet implemented.
 
-| # | Feature | Engine | Effort | Status |
-|---|---------|--------|--------|--------|
-| 11 | Plan Mode / Pre-Execution Planning | ALL | ~3 days | Deferred |
-| 12 | Sandboxed Execution Environment | ALL | ~5 days | Deferred |
+| # | Feature | Engine | Effort | TaskForge |
+|---|---------|--------|--------|-----------|
+| 9 | Multi-Model Cost Routing | ALL | ~1 day | [Ticket](https://taskforge.klyde.tech/task/69a13a070037625d2d5f) |
+| 10 | Architect/Editor Split Pattern | ALL | ~5 days | [Ticket](https://taskforge.klyde.tech/task/69a13a3c002e700ec953) |
+| 7 | Specialized Sub-Agent Delegation | ALL | ~4 days | [Ticket](https://taskforge.klyde.tech/task/69a13a630033f7b01816) |
+| 11 | Plan Mode / Pre-Execution Planning | ALL | ~3 days | [Ticket](https://taskforge.klyde.tech/task/69a13ac3002b7fd0a320) |
+| 12 | Sandboxed Execution Environment | ALL | ~5 days | [Ticket](https://taskforge.klyde.tech/task/69a13ac3002dd36ce60b) |
+| 15 | Episodic Memory (cross-session learning) | ALL | ~7 days | [Ticket](https://taskforge.klyde.tech/task/69a13ac3002d0982d6dd) |
+| 16 | Real-Time Streaming with Progressive UI | ALL | ~5 days | [Ticket](https://taskforge.klyde.tech/task/69a13ac3002e7ba930f9) |
 
 ---
 
@@ -71,7 +76,7 @@ All 4 items implemented and compiled cleanly.
 | Tier | Items | Total Effort | Impact |
 |------|-------|-------------|--------|
 | **Tier 1** | 4 items | ~3 days | **DONE** |
-| **Tier 2** | 5 items (#5-#9) | ~12 days | High |
-| **Tier 3** | 3 items (#10, #13, #14) | ~11 days | Transformative (2 done) |
-| **Tier 4** | 2 items (#15-#16) | ~12 days | Long-term |
-| **Tier 5** | 2 items (#11-#12) | ~8 days | Deferred |
+| **Tier 2** | 3/5 items | ~7 days | High (2 moved to Tier 5) |
+| **Tier 3** | 2/3 items | ~6 days | Transformative (1 moved to Tier 5) |
+| **Tier 4** | 0/2 items | — | Long-term (both moved to Tier 5) |
+| **Tier 5** | 7 items | ~30 days | Backlog |

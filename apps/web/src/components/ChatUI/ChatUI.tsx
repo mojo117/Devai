@@ -47,11 +47,12 @@ export function ChatUI({
   // Core state shared across sub-components
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
-  const [isLoadingInternal, setIsLoadingInternal] = useState(false);
-  const setIsLoading = (loading: boolean) => {
-    setIsLoadingInternal(loading);
-    onLoadingChange?.(loading);
-  };
+  const [isLoadingInternal, setIsLoading] = useState(false);
+  
+  // Sync loading state to parent via effect instead of wrapper function
+  useEffect(() => {
+    onLoadingChange?.(isLoadingInternal);
+  }, [isLoadingInternal, onLoadingChange]);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const [messageToolEvents, setMessageToolEvents] = useState<Record<string, ToolEvent[]>>({});
@@ -78,8 +79,11 @@ export function ChatUI({
   const [isDragOver, setIsDragOver] = useState(false);
   const dragCounterRef = useRef(0);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const debug = import.meta.env.DEV && Boolean((window as any).__DEVAI_DEBUG);
+  // Debug flag - use type-safe window access
+  const debug = import.meta.env.DEV && 
+    typeof window !== 'undefined' && 
+    '__DEVAI_DEBUG' in window && 
+    Boolean((window as Window & { __DEVAI_DEBUG?: boolean }).__DEVAI_DEBUG);
 
   // --- Hooks ---
 
@@ -157,10 +161,25 @@ export function ChatUI({
     }
   }, [session.sessionId]);
 
-  // --- Auto-scroll ---
-
+  // --- Auto-scroll with debounce to prevent performance issues ---
+  const scrollTimeoutRef = useRef<number | null>(null);
+  
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Clear any pending scroll
+    if (scrollTimeoutRef.current) {
+      window.clearTimeout(scrollTimeoutRef.current);
+    }
+    // Debounce scroll to prevent excessive calls during rapid updates
+    scrollTimeoutRef.current = window.setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      scrollTimeoutRef.current = null;
+    }, 50);
+    
+    return () => {
+      if (scrollTimeoutRef.current) {
+        window.clearTimeout(scrollTimeoutRef.current);
+      }
+    };
   }, [messages, toolEvents]);
 
   // --- Artifact detection ---
@@ -226,50 +245,39 @@ export function ChatUI({
 
   const handleStreamEvent = (event: ChatStreamEvent) => {
     handleAgentEvent(event);
-    const eventAgent = (event.agent as AgentName | undefined) || activeAgent || undefined;
-    const type = String(event.type || '');
+    const eventAgent = event.agent || activeAgent || undefined;
 
-    switch (type) {
+    switch (event.type) {
       case 'status': {
         setToolEvents((prev) => [
           ...prev,
-          { id: uuid(), type: 'status', result: (event as Record<string, unknown>).status, agent: eventAgent },
+          { id: uuid(), type: 'status', result: event.status, agent: eventAgent },
         ]);
         break;
       }
       case 'tool_call': {
-        const ev = event as Record<string, unknown>;
-        const id = String(ev.id || uuid());
-        const name = (ev.toolName as string | undefined) || (ev.name as string | undefined);
-        const args = ev.args ?? ev.arguments;
-        upsertToolEvent(setToolEvents, id, { type: 'tool_call', name, arguments: args, agent: eventAgent });
+        const id = event.id || uuid();
+        upsertToolEvent(setToolEvents, String(id), { type: 'tool_call', name: event.toolName, arguments: event.args ?? event.arguments, agent: eventAgent });
         break;
       }
       case 'tool_result_chunk': {
-        const ev = event as Record<string, unknown>;
-        const id = String(ev.id || uuid());
-        const name = (ev.toolName as string | undefined) || (ev.name as string | undefined);
-        const chunk = typeof ev.chunk === 'string' ? ev.chunk : '';
-        upsertToolEvent(setToolEvents, id, { type: 'tool_result', name, chunk, agent: eventAgent });
+        const id = event.id || uuid();
+        upsertToolEvent(setToolEvents, String(id), { type: 'tool_result', name: event.toolName, chunk: event.chunk || '', agent: eventAgent });
         break;
       }
       case 'tool_result': {
-        const ev = event as Record<string, unknown>;
-        const id = String(ev.id || uuid());
-        const name = (ev.toolName as string | undefined) || (ev.name as string | undefined);
-        const result = ev.result ?? { result: ev.result, success: ev.success };
-        upsertToolEvent(setToolEvents, id, { type: 'tool_result', name, result, completed: Boolean(ev.completed), agent: eventAgent });
+        const id = event.id || uuid();
+        upsertToolEvent(setToolEvents, String(id), { type: 'tool_result', name: event.toolName, result: event.result, completed: event.completed, agent: eventAgent });
         break;
       }
       case 'action_pending': {
         if (debug) console.log('[ChatUI] Stream action_pending event:', event);
-        const ev = event as Record<string, unknown>;
         const pendingAction: PendingAction = {
-          actionId: ev.actionId as string,
-          toolName: ev.toolName as string,
-          toolArgs: ev.toolArgs as Record<string, unknown>,
-          description: ev.description as string,
-          preview: ev.preview as PendingAction['preview'],
+          actionId: event.actionId,
+          toolName: event.toolName,
+          toolArgs: event.toolArgs,
+          description: event.description,
+          preview: event.preview as PendingAction['preview'],
         };
         actions.setPendingActions((prev) => {
           if (prev.some((a) => a.actionId === pendingAction.actionId)) return prev;
@@ -278,9 +286,8 @@ export function ChatUI({
         break;
       }
       case 'context_stats': {
-        if (onContextUpdate) {
-          const stats = (event as Record<string, unknown>).stats as Parameters<NonNullable<typeof onContextUpdate>>[0] | undefined;
-          if (stats) onContextUpdate(stats);
+        if (onContextUpdate && event.stats) {
+          onContextUpdate(event.stats);
         }
         break;
       }
@@ -313,14 +320,13 @@ export function ChatUI({
         break;
       }
       case 'loop_started': {
-        const ev = event as unknown as { turnId: string; taskLabel: string };
         setToolEvents((prev) => [
           ...prev,
           {
-            id: ev.turnId || uuid(),
+            id: event.turnId || uuid(),
             type: 'status',
             name: 'parallel_loop',
-            result: `Parallel Loop gestartet: ${ev.taskLabel}`,
+            result: `Parallel Loop gestartet: ${event.taskLabel}`,
             completed: false,
             agent: 'chapo' as AgentName,
           },
@@ -328,14 +334,13 @@ export function ChatUI({
         break;
       }
       case 'loop_completed': {
-        const ev = event as unknown as { turnId: string; taskLabel: string };
         setToolEvents((prev) => [
           ...prev,
           {
-            id: ev.turnId || uuid(),
+            id: event.turnId || uuid(),
             type: 'status',
             name: 'parallel_loop',
-            result: `Loop fertig: ${ev.taskLabel}`,
+            result: `Loop fertig: ${event.taskLabel}`,
             completed: true,
             agent: 'chapo' as AgentName,
           },
@@ -343,14 +348,13 @@ export function ChatUI({
         break;
       }
       case 'mode_changed': {
-        const ev = event as unknown as { mode: string };
         setToolEvents((prev) => [
           ...prev,
           {
             id: uuid(),
             type: 'status',
             name: 'mode',
-            result: ev.mode === 'parallel' ? 'Parallel Mode aktiviert' : 'Serial Mode aktiviert',
+            result: event.mode === 'parallel' ? 'Parallel Mode aktiviert' : 'Serial Mode aktiviert',
             completed: true,
             agent: 'chapo' as AgentName,
           },
@@ -361,7 +365,7 @@ export function ChatUI({
         const partialMessage: ChatMessage = {
           id: uuid(),
           role: 'assistant',
-          content: String((event as Record<string, unknown>).message || ''),
+          content: event.message || '',
           timestamp: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, partialMessage]);
@@ -372,21 +376,24 @@ export function ChatUI({
       case 'response': {
         // Terminal response from a parallel loop arriving via session listener.
         // The original request was resolved with queued:true, so this is the actual answer.
-        const ev = event as Record<string, unknown>;
-        const resp = ev.response as Record<string, unknown> | undefined;
-        if (resp?.message) {
-          const msg = resp.message as ChatMessage;
+        const msg = event.response?.message;
+        if (msg) {
+          const chatMsg: ChatMessage = {
+            id: msg.id,
+            role: msg.role as ChatMessage['role'],
+            content: msg.content,
+            timestamp: msg.timestamp,
+          };
           setMessages((prev) => {
-            if (prev.some((m) => m.id === msg.id)) return prev;
-            return [...prev, msg];
+            if (prev.some((m) => m.id === chatMsg.id)) return prev;
+            return [...prev, chatMsg];
           });
-          freezeToolEvents(msg.id);
+          freezeToolEvents(chatMsg.id);
         }
         break;
       }
       case 'todo_updated': {
-        const ev = event as unknown as { todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }> };
-        setCurrentTodos(ev.todos || []);
+        setCurrentTodos(event.todos || []);
         break;
       }
     }

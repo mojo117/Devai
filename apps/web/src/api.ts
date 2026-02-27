@@ -325,10 +325,139 @@ export async function fetchHealth(): Promise<HealthResponse> {
   return fetchJson<HealthResponse>(`${API_BASE}/health`);
 }
 
-export interface ChatStreamEvent {
-  type: string
-  [key: string]: unknown
+// Base interface for common fields - not part of the union directly
+interface BaseEvent {
+  id?: string
+  timestamp?: string
+  agent?: string
 }
+
+export interface AgentStartEvent extends BaseEvent {
+  type: 'agent_start'
+  agent: string
+  phase: string
+}
+
+export interface AgentThinkingEvent extends BaseEvent {
+  type: 'agent_thinking'
+  agent: string
+  status: string
+}
+
+export interface AgentCompleteEvent extends BaseEvent {
+  type: 'agent_complete'
+  agent: string
+}
+
+export interface ToolCallEvent extends BaseEvent {
+  type: 'tool_call'
+  toolName: string
+  toolId?: string
+  args?: Record<string, unknown>
+  arguments?: Record<string, unknown>
+}
+
+export interface ToolResultEvent extends BaseEvent {
+  type: 'tool_result'
+  toolName?: string
+  name?: string
+  result?: unknown
+  success?: boolean
+  completed?: boolean
+}
+
+export interface ToolResultChunkEvent extends BaseEvent {
+  type: 'tool_result_chunk'
+  toolName?: string
+  name?: string
+  chunk?: string
+}
+
+export interface ActionPendingEvent extends BaseEvent {
+  type: 'action_pending'
+  actionId: string
+  toolName: string
+  toolArgs: Record<string, unknown>
+  description: string
+  preview?: { kind: string; path: string; diff?: string; summary?: string }
+}
+
+export interface ContextStatsEvent extends BaseEvent {
+  type: 'context_stats'
+  stats: {
+    tokensUsed: number
+    tokenBudget: number
+    note?: string
+  }
+}
+
+export interface MessageQueuedEvent extends BaseEvent {
+  type: 'message_queued'
+  messageId?: string
+  preview?: string
+}
+
+export interface InboxProcessingEvent extends BaseEvent {
+  type: 'inbox_processing'
+  count: number
+}
+
+export interface LoopStartedEvent extends BaseEvent {
+  type: 'loop_started'
+  turnId: string
+  taskLabel: string
+}
+
+export interface LoopCompletedEvent extends BaseEvent {
+  type: 'loop_completed'
+  turnId: string
+  taskLabel: string
+}
+
+export interface ModeChangedEvent extends BaseEvent {
+  type: 'mode_changed'
+  mode: string
+}
+
+export interface PartialResponseEvent extends BaseEvent {
+  type: 'partial_response'
+  message: string
+  inReplyTo?: string
+}
+
+export interface ResponseEvent extends BaseEvent {
+  type: 'response'
+  response: { message?: { id: string; role: string; content: string; timestamp: string } }
+}
+
+export interface TodoUpdatedEvent extends BaseEvent {
+  type: 'todo_updated'
+  todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }>
+}
+
+export interface StatusEvent extends BaseEvent {
+  type: 'status'
+  status?: string
+}
+
+export type ChatStreamEvent =
+  | AgentStartEvent
+  | AgentThinkingEvent
+  | AgentCompleteEvent
+  | ToolCallEvent
+  | ToolResultEvent
+  | ToolResultChunkEvent
+  | ActionPendingEvent
+  | ContextStatsEvent
+  | MessageQueuedEvent
+  | InboxProcessingEvent
+  | LoopStartedEvent
+  | LoopCompletedEvent
+  | ModeChangedEvent
+  | PartialResponseEvent
+  | ResponseEvent
+  | TodoUpdatedEvent
+  | StatusEvent
 
 interface WebSocketMessage {
   type?: string

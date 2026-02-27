@@ -104,7 +104,14 @@ function App() {
     lastSubmittedArtifactKeyRef.current = artifactKey;
 
     let cancelled = false;
-    let pollHandle: number | null = null;
+    const pollHandles = new Set<number>();
+    
+    const clearAllPollHandles = () => {
+      for (const handle of pollHandles) {
+        window.clearTimeout(handle);
+      }
+      pollHandles.clear();
+    };
 
     const attachRemote = (remote: {
       id: string;
@@ -115,6 +122,7 @@ function App() {
       mimeType?: string | null;
       type?: Artifact['type'];
     }) => {
+      if (cancelled) return;
       setCurrentArtifact((prev) => {
         const base = prev && prev.id === detectedArtifact.id ? prev : detectedArtifact;
         return { ...base, remote };
@@ -138,9 +146,11 @@ function App() {
       attachRemote(nextRemote);
 
       if (res.artifact.status === 'ready' || res.artifact.status === 'failed') return;
-      pollHandle = window.setTimeout(() => {
+      const handle = window.setTimeout(() => {
+        pollHandles.delete(handle);
         void pollArtifact(artifactId, remaining - 1);
       }, 1000);
+      pollHandles.add(handle);
     };
 
     const create = async () => {
@@ -187,7 +197,7 @@ function App() {
 
     return () => {
       cancelled = true;
-      if (pollHandle) window.clearTimeout(pollHandle);
+      clearAllPollHandles();
     };
   }, [detectedArtifact, chatSessionState?.sessionId, previewEnabled]);
 
