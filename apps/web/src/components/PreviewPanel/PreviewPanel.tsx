@@ -96,7 +96,13 @@ export function PreviewPanel({
       <div className="flex-1 min-h-0 overflow-hidden">
         {artifact ? (
           <div className="h-full relative">
-            {hasRemoteUrl ? (
+            {artifact.type === 'markdown' && artifact.content ? (
+              <MarkdownRenderer content={artifact.content} />
+            ) : artifact.type === 'markdown' && hasRemoteUrl ? (
+              <div className="h-full flex items-center justify-center p-6">
+                <p className="text-devai-text-muted text-sm">Markdown content could not be loaded.</p>
+              </div>
+            ) : hasRemoteUrl ? (
               (remote?.type || artifact.type) === 'pdf' ? (
                 <PdfRenderer url={remote!.signedUrl!} />
               ) : remote?.mimeType?.startsWith('image/') ? (
@@ -112,8 +118,6 @@ export function PreviewPanel({
               <div className="h-full flex items-center justify-center p-6">
                 <p className="text-devai-text-muted text-sm">PDF preview is waiting for artifact build.</p>
               </div>
-            ) : artifact.type === 'markdown' && artifact.content ? (
-              <MarkdownRenderer content={artifact.content} />
             ) : artifact.content ? (
               <HtmlRenderer content={artifact.content} />
             ) : (

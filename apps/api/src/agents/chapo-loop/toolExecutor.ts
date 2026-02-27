@@ -18,7 +18,7 @@ import {
   setChapoPlan,
 } from './chapoControlTools.js';
 import { getUserfileById } from '../../db/userfileQueries.js';
-import { createUserfileSignedUrl, searchUserfiles } from '../../services/userfileService.js';
+import { createUserfileSignedUrl, downloadUserfile, searchUserfiles } from '../../services/userfileService.js';
 import { runHooks } from '../../hooks/hookRunner.js';
 
 interface ToolCallLike {
@@ -110,8 +110,19 @@ export class ChapoToolExecutor {
 
       try {
         const signed = await createUserfileSignedUrl(file.storage_path);
+        const isTextFile = file.mime_type === 'text/markdown' || 
+          file.mime_type === 'text/plain' ||
+          file.original_name.endsWith('.md') ||
+          file.original_name.endsWith('.txt');
+        
+        let content: string | undefined;
+        if (isTextFile) {
+          const downloaded = await downloadUserfile(file.storage_path);
+          if (downloaded) {
+            content = downloaded.buffer.toString('utf-8');
+          }
+        }
 
-        // Emit tool_call event with preview metadata so frontend artifact detection picks it up
         this.deps.sendEvent({
           type: 'tool_call',
           agent: 'chapo',
@@ -121,6 +132,7 @@ export class ChapoToolExecutor {
             filename: file.original_name,
             mimeType: file.mime_type,
             userfileId,
+            content,
           },
         });
 

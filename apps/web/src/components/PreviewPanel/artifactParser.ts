@@ -128,7 +128,8 @@ export function parseToolEventArtifacts(events: ToolEventLike[]): Artifact[] {
       const filename = args.filename as string | undefined;
       const mimeType = args.mimeType as string | undefined;
       const userfileId = args.userfileId as string | undefined;
-      if (!signedUrl) continue;
+      const inlineContent = args.content as string | undefined;
+      if (!signedUrl && !inlineContent) continue;
 
       // Resolve artifact type from mime type
       let artifactType: Artifact['type'] = 'html';
@@ -140,20 +141,25 @@ export function parseToolEventArtifacts(events: ToolEventLike[]): Artifact[] {
           }
         }
       }
+      // Also check filename for markdown
+      if (filename && (filename.endsWith('.md') || filename.endsWith('.markdown'))) {
+        artifactType = 'markdown';
+      }
 
       artifacts.push({
-        id: djb2Hash(userfileId || signedUrl),
+        id: djb2Hash(userfileId || signedUrl || inlineContent || ''),
         type: artifactType,
         language: artifactType,
         title: filename || 'Preview',
         sourceKind: 'tool_event',
-        remote: {
+        content: inlineContent,
+        remote: signedUrl ? {
           id: userfileId || djb2Hash(signedUrl),
           status: 'ready',
           signedUrl,
           mimeType,
           type: artifactType,
-        },
+        } : undefined,
       });
       continue;
     }
