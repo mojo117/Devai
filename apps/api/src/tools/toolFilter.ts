@@ -57,7 +57,7 @@ const TOOL_CATEGORIES: Record<string, string[]> = {
 const CATEGORY_TRIGGERS: Record<string, RegExp> = {
   filesystem: /\b(file|read|write|edit|create|delet|director|folder|list|find|grep|search.{0,10}code|code.{0,10}search|path|inhalt|datei|ordner|lesen|schreiben)\b/i,
   git: /\b(git|commit|push|pull|branch|diff|status|pr|pull.?request|merge|github|workflow|deploy|version)\b/i,
-  devops: /\b(bash|ssh|server|pm2|process|restart|npm|install|run|build|execut|command|terminal|shell|clawd|klyde|log|staging|port)\b/i,
+  devops: /\b(bash|ssh|server|pm2|process|restart|npm|npx|install|run|build|execut|command|terminal|shell|clawd|klyde|log|staging|port|ts-node|node|python|script|ausführ|starte|führe)\b/i,
   web: /\b(search|web|url|fetch|crawl|scrap|brows|internet|google|documentation|docs|research|website|http|api|suche|recherche)\b/i,
   context: /\b(document|workspace|context|project.{0,5}file|kontext|dokument)\b/i,
   memory: /\b(remember|memory|recall|forget|history|session|previous|earlier|last.{0,5}time|erinner|merke|vergessen|verlauf)\b/i,
@@ -96,6 +96,11 @@ export function filterToolsForQuery(
   // Filesystem is almost always needed
   for (const name of TOOL_CATEGORIES.filesystem) selectedNames.add(name);
 
+  // Code blocks (backticks) imply bash/devops execution
+  if (/`[^`]*\b(cd|npm|npx|node|python|sh|bash|curl|grep|cat|ls)\b[^`]*`/.test(text)) {
+    for (const name of TOOL_CATEGORIES.devops) selectedNames.add(name)
+  }
+
   // Match categories based on message content
   let matchedCategories = 0;
   for (const [category, trigger] of Object.entries(CATEGORY_TRIGGERS)) {
@@ -115,9 +120,9 @@ export function filterToolsForQuery(
 
   const filtered = allTools.filter((t) => selectedNames.has(t.name));
 
-  // Safety: if filtering removed too many tools (< 15), return all
+  // Safety: if filtering removed too many tools (< 25), return all
   // This protects against edge cases where the heuristic is too aggressive
-  if (filtered.length < 15 && allTools.length > 15) {
+  if (filtered.length < 25 && allTools.length > 25) {
     return allTools;
   }
 
