@@ -75,3 +75,19 @@ export async function getDefaultEngine(): Promise<EngineName> {
 export async function setDefaultEngine(engine: EngineName): Promise<void> {
   await setSetting('defaultEngine', engine);
 }
+
+/**
+ * Get the global default session mode (serial/parallel)
+ */
+export async function getDefaultMode(): Promise<'serial' | 'parallel'> {
+  const value = await getSetting('defaultMode');
+  if (value === 'parallel') return 'parallel';
+  return 'serial';
+}
+
+/**
+ * Set the global default session mode
+ */
+export async function setDefaultMode(mode: 'serial' | 'parallel'): Promise<void> {
+  await setSetting('defaultMode', mode);
+}

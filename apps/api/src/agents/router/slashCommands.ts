@@ -6,7 +6,7 @@
  */
 
 import { isValidEngine, formatEngineStatus, type EngineName } from '../../llm/engineProfiles.js';
-import { setDefaultEngine } from '../../db/queries.js';
+import { setDefaultEngine, setDefaultMode } from '../../db/queries.js';
 import {
   getState,
   setGatheredInfo,
@@ -19,6 +19,7 @@ import {
 import type { SessionMode } from '../stateManager.js';
 import { clearInbox } from '../inbox.js';
 import { abortLoopInstances } from '../chapo-loop.js';
+import { emitChatEvent } from '../../websocket/chatGateway.js';
 
 // Rate limiting for destructive commands: sessionId -> { count, resetAt }
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
@@ -126,6 +127,8 @@ export async function tryHandleSlashCommand(
     const next: SessionMode = current === 'serial' ? 'parallel' : 'serial';
     setSessionMode(sessionId, next);
     await flushState(sessionId);
+    await setDefaultMode(next);
+    emitChatEvent(sessionId, { type: 'mode_changed', mode: next });
     return next === 'parallel'
       ? '**Parallel Mode** — Neue Nachrichten starten sofort einen eigenen Loop.'
       : '**Serial Mode** — Nachrichten werden nacheinander verarbeitet.';
