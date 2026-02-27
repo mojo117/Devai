@@ -1,8 +1,8 @@
 /**
  * Agent Soul — personality/identity loading.
  *
- * With single-agent mode, sub-agent souls (DEVO/SCOUT/CAIO) are no longer loaded.
- * This module is retained for API compatibility but returns empty results.
+ * With single-agent mode (CHAPO only), this module is retained for API
+ * compatibility but returns empty results.
  */
 
 export type AgentSoulName = 'chapo';

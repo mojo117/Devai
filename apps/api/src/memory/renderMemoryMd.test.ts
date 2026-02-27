@@ -233,7 +233,7 @@ describe('renderMemoryMd', () => {
     mockSupabaseData.rows = [
       makeRow('1', 'Jörn, Deutsch, CET/CEST', { namespace: 'devai/user', strength: 1 }),
       makeRow('2', 'DevAI hat 41 Tasks', { namespace: 'devai/project/devai', strength: 0.9 }),
-      makeRow('3', 'Scheduler: IMMER an CAIO delegieren', {
+      makeRow('3', 'Scheduler: IMMER vor Senden pruefen', {
         namespace: 'devai/global',
         memory_type: 'procedural',
         strength: 0.8,
@@ -256,7 +256,7 @@ describe('renderMemoryMd', () => {
     expect(written).toContain('## Projekte');
     expect(written).toContain('- DevAI hat 41 Tasks');
     expect(written).toContain('## Workflows');
-    expect(written).toContain('- Scheduler: IMMER an CAIO delegieren');
+    expect(written).toContain('- Scheduler: IMMER vor Senden pruefen');
     expect(written).toContain('## Erkenntnisse');
     expect(written).toContain('- taskforge_list_tasks war truncated');
   });

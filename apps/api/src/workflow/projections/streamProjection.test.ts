@@ -57,7 +57,7 @@ describe('StreamProjection', () => {
   it('maps AGENT_SWITCHED to agent_switch WS event', () => {
     const event = createEvent(makeCtx(), AGENT_SWITCHED, {
       from: 'chapo',
-      to: 'devo',
+      to: 'chapo-sub',
       reason: 'delegation',
     });
 
@@ -66,14 +66,14 @@ describe('StreamProjection', () => {
     expect(emitChatEvent).toHaveBeenCalledWith('sess-1', expect.objectContaining({
       type: 'agent_switch',
       from: 'chapo',
-      to: 'devo',
+      to: 'chapo-sub',
     }));
   });
 
   it('maps AGENT_DELEGATED with delegation contract metadata', () => {
     const event = createEvent(makeCtx(), AGENT_DELEGATED, {
       from: 'chapo',
-      to: 'caio',
+      to: 'chapo-sub',
       task: 'Sende Update an den Kunden',
       domain: 'communication',
       objective: 'Kundenstatus-Update senden',
@@ -86,7 +86,7 @@ describe('StreamProjection', () => {
     expect(emitChatEvent).toHaveBeenCalledWith('sess-1', expect.objectContaining({
       type: 'delegation',
       from: 'chapo',
-      to: 'caio',
+      to: 'chapo-sub',
       task: 'Sende Update an den Kunden',
       domain: 'communication',
       objective: 'Kundenstatus-Update senden',
@@ -98,7 +98,7 @@ describe('StreamProjection', () => {
 
   it('maps TOOL_CALL_STARTED to tool_call WS event', () => {
     const event = createEvent(makeCtx(), TOOL_CALL_STARTED, {
-      agent: 'devo',
+      agent: 'chapo',
       toolName: 'fs_readFile',
       args: { path: '/test.ts' },
     });
@@ -107,7 +107,7 @@ describe('StreamProjection', () => {
 
     expect(emitChatEvent).toHaveBeenCalledWith('sess-1', expect.objectContaining({
       type: 'tool_call',
-      agent: 'devo',
+      agent: 'chapo',
       toolName: 'fs_readFile',
     }));
   });

@@ -63,19 +63,19 @@ describe('StateProjection', () => {
   it('sets active agent on AGENT_SWITCHED', async () => {
     const event = createEvent(makeCtx(), AGENT_SWITCHED, {
       from: 'chapo',
-      to: 'devo',
+      to: 'chapo-sub',
       reason: 'delegation',
     });
 
     await projection.handle(event);
 
-    expect(stateManager.setActiveAgent).toHaveBeenCalledWith('sess-1', 'devo');
+    expect(stateManager.setActiveAgent).toHaveBeenCalledWith('sess-1', 'chapo-sub');
   });
 
   it('stores delegation metadata on AGENT_DELEGATED', async () => {
     const event = createEvent(makeCtx(), AGENT_DELEGATED, {
       from: 'chapo',
-      to: 'caio',
+      to: 'chapo-sub',
       task: 'Sende Kundenmail',
       domain: 'communication',
       objective: 'Kunden ueber Status informieren',
@@ -90,7 +90,7 @@ describe('StateProjection', () => {
       'lastDelegation',
       expect.objectContaining({
         from: 'chapo',
-        to: 'caio',
+        to: 'chapo-sub',
         domain: 'communication',
         objective: 'Kunden ueber Status informieren',
       }),

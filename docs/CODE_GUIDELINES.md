@@ -277,16 +277,15 @@ const pdfFiles = failedFiles.data?.filter(f => f.mime_type === 'application/pdf'
 
 ```typescript
 // Schlecht
-const icon = agent === 'chapo' ? '🎯' : agent === 'devo' ? '🔧' : agent === 'scout' ? '🔍' : '🤖';
+const label = status === 'active' ? 'Running' : status === 'idle' ? 'Waiting' : status === 'error' ? 'Failed' : 'Unknown';
 
 // Gut
-const AGENT_ICONS: Record<AgentName, string> = {
-  chapo: '🎯',
-  devo: '🔧',
-  scout: '🔍',
-  caio: '📋',
+const STATUS_LABELS: Record<string, string> = {
+  active: 'Running',
+  idle: 'Waiting',
+  error: 'Failed',
 };
-const icon = AGENT_ICONS[agent] ?? '🤖';
+const label = STATUS_LABELS[status] ?? 'Unknown';
 ```
 
 ### Vermeide

@@ -1,6 +1,5 @@
 /**
  * Perplexity API Client for web search
- * Used by Scout agent for real-time web information
  */
 
 export type PerplexityModel = 'sonar' | 'sonar-pro' | 'sonar-reasoning';

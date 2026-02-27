@@ -2,6 +2,8 @@
 
 **Last Updated**: 2026-01-24
 
+> **OUTDATED (2026-02-27):** This document references the legacy multi-agent architecture (CHAPO, KODA, DEVO). DevAI now uses a **single-agent architecture** with CHAPO only. Plan mode perspectives from multiple agents no longer apply.
+
 ## Overview
 
 Plan Mode is a multi-perspective planning system that leverages the three-agent architecture (CHAPO, KODA, DEVO) to create comprehensive execution plans for complex tasks. Instead of immediately executing tasks, the system first gathers perspectives from all relevant agents, synthesizes them into a plan with concrete tasks, and waits for user approval before execution.
