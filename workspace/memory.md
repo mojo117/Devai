@@ -14,8 +14,8 @@
 ## Projekte
 - The StockPulse scanner utilizes Firecrawl Agents to extract Price-to-Earnings (KGV) and Price-to-Book (KUV) ratios from boerse.de.
 - Master stock list (data/master/stocks.csv) contains 469 companies and is updated daily with new rows for each scan run.
-- A reminder is scheduled for Sunday (01.03.) to revisit and improve the master list update logic and data storage format.
 - StockPulse project structure refactored into a 'One Source of Truth' model with code in src/, data in data/, and web content in web/.
+- A reminder is scheduled for Sunday (01.03.) to revisit and improve the master list update logic and data storage format.
 - Aktuelle Aufgaben in der Task-Liste beinhalten die Recherche nach Google MCP, die Einrichtung von Trello für DevAI sowie die Evaluation von Snov Clinic Software.
 - Supabase table for artifact storage follows the schema: artifact_storage(user_id, artifact_id, key, value, shared, updated_at).
 - The Artifact table schema for persistence is artifacts(id, conversation_id, user_id, type, code, title, created_at).
@@ -28,8 +28,8 @@
 - Die Master-Liste soll zukünftig durch neue Zeilen pro Scan-Datum anstatt durch neue Spalten aktualisiert werden.
 - Die StockPulse-Doppelstruktur wurde bereinigt, indem der Ordner unter Invest/ entfernt wurde.
 - Ein Health-Check-Job wurde eingerichtet, der um 09:00 Uhr läuft und Telegram-Verbesserungsvorschläge bei Problemen sendet.
-- Die Projektstruktur wurde auf die 'One Source of Truth' Architektur umgestellt (Code in src/, Daten in data/, Web in web/).
 - The Python script located in /root/home/projects/Invest/stocks/ (stockpulse-daily.ts) is the active scanner currently in Round 1, managing 469 stocks.
+- Die Projektstruktur wurde auf die 'One Source of Truth' Architektur umgestellt (Code in src/, Daten in data/, Web in web/).
 - Bei der Erstellung von City-Shows (z.B. Darmstadt, Frankfurt) werden standardisierte Muster verwendet: Lokale Highlights integrieren und ein konsistentes Theme setzen (z.B. Dunkel/Red für Darmstadt, …
 - Eine 'Hello Frankfurt' Webseite wurde erstellt mit einem Finanz-Thema (Gold/Dunkelblau) und lokalen Sehenswürdigkeiten wie Main Tower, Römer, Städel Museum und Goethe.
 - The core crawler uses the Firecrawl REST API directly at the /v2/agent endpoint with polling logic.
@@ -37,7 +37,7 @@
 - Duplicate StockPulse folders under /root/home/projects/ were successfully merged into a single main project structure.
 - The stock scanning logic rotates through 469 stocks, scanning 10 companies per day starting at Round 1, Index 2.
 - Das Tool show_in_preview benötigt die userfileId aus dem Dateikopf, um Dokumente anzuzeigen; fehlende IDs verhindern die Anzeige und können durch erneutes Hochladen der Datei gelöst werden.
-- Der 'firecrawl-browser' Skill wurde erfolgreich erstellt; der API-Key ist bereits auf dem Server hinterlegt und von CHAPO verwendet.
+- Der 'firecrawl-browser' Skill wurde erfolgreich erstellt; der API-Key ist bereits auf dem Server hinterlegt und von Caio verwendet.
 - Zusammenfassende Notizen zum SchuWa IT-Support wurden unter '/root/home/orga/notiz/rt/support/laptop/arbeit.md' archiviert.
 - Das Design der hello-frankfurt.html Datei erfordert einen weißen Hintergrund und dunkle Texte für eine verbesserte Lesbarkeit.
 - Die Nutzung des Tools 'show_in_preview' erfordert die Eingabe der exakten 'userfileId' (z.B. 'VpHaU2_av8Z-fheCdTL8z') aus der Dateikopfzeile, nicht nur den Dateinamen, um die Datei im UI anzuzeigen.
@@ -45,7 +45,7 @@
 - Um Dateien im Preview-Tool anzuzeigen, ist die Angabe der spezifischen 'userfileId' (z. B. uf_abc123) aus dem Datei-Header erforderlich, nicht nur der Dateiname.
 - StockPulse generates HTML reports using Tailwind CSS, stored in the data/reports/ directory.
 - Es wurde ein 'Hello Frankfurt' HTML-Dokument erstellt, das auf einem dunklen Blau-Gold-Design (Finanzmetropole-Vibe) basiert und lokale Highlights wie den Main Tower und den Römer darstellt.
-- Für Scheduler/Reminder/Cronjobs IMMER scheduler_list nutzen, NICHT System-Cron. DevAI nutzt internen croner-Scheduler.
+- Für Scheduler/Reminder/Cronjobs IMMER an CAIO delegieren (scheduler_list), NICHT System-Cron. DevAI nutzt internen croner-Scheduler, CAIO verwaltet alle scheduled jobs.
 - StockPulse Projektordner müssen zusammengeführt werden.
 - Eine 'Hello Darmstadt' Webseite wurde erstellt, die lokale Highlights wie Schloss, TU Darmstadt, Mathildenhöhe, ESA, Herrngarten, Staatstheater und Jazz-Institut darstellt.
 - The user creates city landing pages (e.g., hello-darmstadt.html, hello-frankfurt.html) using dark themes with specific local landmarks (TU Darmstadt, Skyline, Schloss) and specific color accents, whi…
@@ -55,13 +55,13 @@
 ## Termine & Events
 - [2026-02-27T06:09] "Führe den StockPulse Daily Scan aus: `cd /root/home/projects/Invest/stocks && npx ts-node stockpulse-daily.ts --daily`. " -> Der StockPulse Daily Scan wurde erfolgreich abgeschlos…
 - [2026-02-27T06:00] "Führe den StockPulse Daily Scan aus: `cd /root/home/projects/Invest/stocks && npx ts-node stockpulse-daily.ts --daily`. " -> Ich sehe gerade, dass ich kein Tool für direkte Bash-A…
-- [2026-02-27] Wiederkehrendes Thema: "reports" - 1x bearbeitet in 2 Sessions (Dateien: poc-1772017796037.json)
 - [2026-02-27] Wiederkehrendes Thema: "heartbeat" - 2x bearbeitet in 3 Sessions (Dateien: TODO.md)
-- [2026-02-27] Wiederkehrendes Thema: "syncthing" - 2x bearbeitet in 3 Sessions
 - [2026-02-27] Wiederkehrendes Thema: "general" - 5x bearbeitet in 6 Sessions
 - [2026-02-27T05:29] "Read the file /opt/Devai/apps/api/src/memory/episodicExtraction.ts and tell me how many exported functions it has." -> Die Datei enthält **4 exportierte Funktionen**:
 
 1. **`extra…
+- [2026-02-27] Wiederkehrendes Thema: "reports" - 1x bearbeitet in 2 Sessions (Dateien: poc-1772017796037.json)
+- [2026-02-27] Wiederkehrendes Thema: "syncthing" - 2x bearbeitet in 3 Sessions
 ## Erkenntnisse
 - Es existiert eine Master-Aktienliste mit 469 Aktien in /root/home/projects/Invest/stocks/stockpulse-master.csv.
 - The StockPulse scanner script (stockpulse-daily.ts) is configured to scan 10 stocks per day from the master list, currently in Round 1 (Index 2).
@@ -69,28 +69,28 @@
 - Eine Erinnerung wurde für Sonntag festgelegt, um später die Master-Liste-Logik zu überarbeiten.
 - Der Plan beinhaltet die Nutzung von Firecrawl Agents zur Abfrage von boerse.de für KGV und KUV Daten.
 - To-Do-Liste aktualisiert: 'Entscheidung KIMI vs. GLM vs. Gemini' hinzugefügt, 'Google 3.1 ausprobieren' gelöscht.
-- Im Organisationsordner sind administrative Aufgaben strukturiert, inklusive To-Do-Listen, Cronjob-Dokumentationen und Watchlisten für Medien.
 - Der User hat heute einen festen Termin um 11:00 Uhr und muss Serverlogs prüfen.
+- Im Organisationsordner sind administrative Aufgaben strukturiert, inklusive To-Do-Listen, Cronjob-Dokumentationen und Watchlisten für Medien.
 - Die Python-Scripts im Research/crawler/ Ordner sind Legacy-Code und werden vom aktuellen Scanner nicht verwendet.
 - Der TypeScript-Scanner (daily.ts) nutzt aktuell nur 5 Test-Aktien und ist nicht mit der bestehenden Master-Liste verknüpft.
 - Es gibt ein aktives Projekt namens FoundersForge (README vorhanden).
 - Der Nutzer verwaltet ein Investment-Projekt mit umfassender Dokumentation, darunter Investment-Ideen, Business-Ideen, aktuelle Holdings, Master-Listen und Status-Updates.
 - Current scanning state is Round 1, Index 2, having scanned 3 stocks so far.
-- Der Nutzer hat ein City-Shows Projekt erstellt, das HTML-Web-Shows für verschiedene Städte (z. B. Darmstadt, Frankfurt) umfasst.
 - The duplicate StockPulse folder structure has been merged into a single main project directory.
 - Für das Dynared Website Projekt existieren fertige Production Builds in einer dist-Verzeichnisstruktur mit Dokumentation (Impressum, Datenschutz).
 - A master stock list exists at /root/home/projects/Invest/stocks/stockpulse-master.csv containing 469 stocks.
 - The StockPulse scanner utilizes the Firecrawl Agent API (REST, polling) to extract PE ratios (0-200) and PS ratios (0-50) from boerse.de and onvista.de.
+- Der Nutzer hat ein City-Shows Projekt erstellt, das HTML-Web-Shows für verschiedene Städte (z. B. Darmstadt, Frankfurt) umfasst.
 - StockPulse master lists and daily scan data already exist in CSV format within the Invest directory.
 - The TypeScript StockPulse project is currently disconnected from the existing CSV data files in the Invest folder, which are managed by Python scripts.
-- Der firecrawl-browser Skill wurde erfolgreich erstellt und über Bash-Zugriff die Skill-Struktur analysiert (Status: Einsatzbereit).
+- DEVO hat den firecrawl-browser Skill erfolgreich erstellt und über Bash-Zugriff die Skill-Struktur analysiert (Status: Einsatzbereit).
 - Die Existenz eines Workspace-Memories und der Zugriff auf vergangene Sessions verhindert, dass jedes Gespräch von vorn beginnt; Kontinuität und Lernen über den aktuellen Chat hinaus sind möglich.
 - Key upcoming tasks include setting up a DevAI postbox, researching the Google MCP, defining design principles, and automating the privacy policy check.
 - Der Nutzer hat eine tägliche Gewohnheit, Tagalog (15 Min, 12:30 CET) zu lernen.
 - The StockPulse TypeScript project (/root/home/projects/StockPulse/) is currently disconnected from the existing CSV data sources.
-- Die HTML-Dateien (hello-*.html) sind lose City-Show-Daten.
-- Der Invest-Ordner ist stark verschachtelt und umfasst Asset-Management, Research und stocks.
 - Ein neuer Fritz!Box Router muss am 27.2. in Betrieb genommen werden.
+- Der Invest-Ordner ist stark verschachtelt und umfasst Asset-Management, Research und stocks.
+- Die HTML-Dateien (hello-*.html) sind lose City-Show-Daten.
 - The user reviews To-Dos daily in the morning and reviews financial data (Stock Crawler) daily at 10:00 CET.
 - The file hi-gross-umstadt.html is located at /root/home/projects/.
 - PDF-Textextraktion funktioniert oft nicht; als Alternative kann der Firecrawl Browser genutzt oder Dateien als Bild hochgeladen werden.
