@@ -46,12 +46,10 @@ export interface GenerateRequest {
   toolsEnabled?: boolean;
   tools?: ToolDefinition[];
   maxTokens?: number;
-  /** Models to try on the same provider before falling back cross-provider. */
   sameProviderFallbacks?: string[];
-  /** Enable extended thinking/reasoning for this request (GLM-5, Kimi K2.5). */
   thinkingEnabled?: boolean;
-  /** Enable Kimi's built-in web search for research tasks (Kimi K2.5 only). */
   kimiSearchEnabled?: boolean;
+  webSearchEnabled?: boolean;
 }
 
 export interface ToolCall {

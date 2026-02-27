@@ -54,15 +54,15 @@ interface ChapoLoopConfig {
  * Only fires on the first iteration (planning phase).
  */
 function shouldEnableThinking(userMessage: string, iteration: number): boolean {
-  // Only on first iteration — subsequent iterations are tool-result processing
   if (iteration > 0) return false;
 
-  // Complex task keywords (EN + DE)
-  const complexPattern = /\b(debug|fix|refactor|plan|architect|design|why|how|analy[sz]|investigat|review|explain|compar|evaluat|warum|wieso|erkl[aä]r|vergleich|untersu|fehler|problem)\b/i;
+  const complexPattern = /\b(debug|fix|refactor|plan|architect|design|why|how|analy[sz]|investigat|review|explain|compar|evaluat|warum|wieso|erkl[aä]r|vergleich|untersu|fehler|problem|research|search|find|implement|create|build|write|develop)\b/i;
   if (complexPattern.test(userMessage)) return true;
 
-  // Long messages are usually complex tasks
-  if (userMessage.length > 500) return true;
+  const multiStepPattern = /\b(and|then|after|before|also|plus|additionally|und|dann|danach|außerdem|anschließend)\b.*\b(create|implement|fix|update|add|remove|change|write|build)\b/i;
+  if (multiStepPattern.test(userMessage)) return true;
+
+  if (userMessage.length > 300) return true;
 
   return false;
 }
@@ -309,11 +309,12 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
 
       const thinkingEnabled = shouldEnableThinking(userText, this.iteration);
 
-      const kimiSearchEnabled = provider === 'moonshot' &&
-        /\b(search|research|find|look\s*up|documentation|latest|aktuell|suche|recherche|finde)\b/i.test(userText);
+      const isResearchQuery = /\b(search|research|find|look\s*up|documentation|latest|aktuell|suche|recherche|finde|investigate|explore)\b/i.test(userText);
+      const kimiSearchEnabled = provider === 'moonshot' && isResearchQuery;
+      const webSearchEnabled = provider === 'zai' && isResearchQuery;
 
       const t0 = Date.now();
-      console.log(`${trace}[chapo-loop] LLM call #${this.iteration} starting (${provider}/${model}, ${tools.length}/${allTools.length} tools, thinking=${thinkingEnabled}${kimiSearchEnabled ? ', kimi-search' : ''})`);
+      console.log(`${trace}[chapo-loop] LLM call #${this.iteration} starting (${provider}/${model}, ${tools.length}/${allTools.length} tools, thinking=${thinkingEnabled}${kimiSearchEnabled ? ', kimi-search' : ''}${webSearchEnabled ? ', glm-web-search' : ''})`);
       const [response, err] = await this.errorHandler.safe('llm_call', () =>
         llmRouter.generateWithFallback(provider, {
           model,
@@ -324,6 +325,7 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
           sameProviderFallbacks,
           thinkingEnabled,
           kimiSearchEnabled,
+          webSearchEnabled,
         })
       );
 

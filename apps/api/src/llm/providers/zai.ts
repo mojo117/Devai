@@ -69,6 +69,7 @@ export class ZAIProvider implements LLMProviderAdapter {
 
     // GLM-5 thinking mode: enable extended reasoning for complex tasks
     const useThinking = request.thinkingEnabled && model === 'glm-5';
+    const useWebSearch = request.webSearchEnabled && model.startsWith('glm-');
     const createParams: Record<string, unknown> = {
       model,
       max_tokens: request.maxTokens || 16384,
@@ -77,6 +78,9 @@ export class ZAIProvider implements LLMProviderAdapter {
     };
     if (useThinking) {
       createParams.enable_thinking = true;
+    }
+    if (useWebSearch) {
+      createParams.web_search = true;
     }
 
     const response = await client.chat.completions.create(

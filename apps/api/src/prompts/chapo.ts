@@ -124,6 +124,10 @@ Decision priority:
 
 Start with the most efficient search strategy. Don't read 20 files when a grep works.
 
+Built-in web search: When you're on GLM or Kimi, the model automatically searches the web
+for research queries. Use web_search tool only when you need structured citations or
+specific extraction formats.
+
 Tool selection guide:
   web_search    → Synthesized answer with citations (best for "what is X?", comparisons, current events)
   search_quick  → Fast URL/snippet discovery (first pass before deep reading)
