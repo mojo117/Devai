@@ -24,7 +24,7 @@ DevAI runs a single-agent system with the **CHAPO Decision Loop**:
               |  3 Actions:              |
               |  ANSWER | ASK | TOOL     |
               |                          |
-              |  83+ tools available     |
+              |  76+ tools available     |
               +--------------------------+
 ```
 
@@ -67,23 +67,22 @@ Identity is defined in `workspace/SOUL.md` and loaded via the workspace context 
 - **Skills**: Create, update, delete, reload custom skills
 - **Coordination**: Todo tracking, execution planning, user questions, approval requests
 
-### Tools (83 native + MCP)
+### Tools (76 native + MCP)
 
-| Category | Tools |
-|----------|-------|
-| **Filesystem** | `fs_listFiles`, `fs_readFile`, `fs_writeFile`, `fs_edit`, `fs_mkdir`, `fs_move`, `fs_delete`, `fs_glob`, `fs_grep` |
-| **Git** | `git_status`, `git_diff`, `git_commit`, `git_push`, `git_pull`, `git_add` |
-| **GitHub** | `github_triggerWorkflow`, `github_createPR`, `github_getWorkflowRunStatus` |
-| **DevOps** | `bash_execute`, `devo_exec_session_start/write/poll`, `ssh_execute`, `pm2_status/restart/stop/start/logs/reloadAll/save`, `npm_install`, `npm_run` |
-| **Web** | `web_search`, `web_fetch`, `scout_search_fast/deep`, `scout_site_map`, `scout_crawl_focused`, `scout_extract_schema`, `scout_research_bundle` |
-| **Context** | `context_listDocuments`, `context_readDocument`, `context_searchDocuments` |
-| **Memory** | `memory_remember`, `memory_search`, `memory_readToday` |
-| **History** | `history_search`, `history_listSessions` |
-| **Scheduler** | `scheduler_create/list/update/delete`, `reminder_create`, `notify_user` |
-| **TaskForge** | `taskforge_list_tasks/get_task/create_task/move_task/add_comment/search` |
-| **Communication** | `send_email`, `telegram_send_document`, `deliver_document` |
-| **Logs** | `logs_getStagingLogs` |
-| **Skills** | `skill_create/update/delete/reload/list` |
+| Category | # | Tools |
+|----------|---|-------|
+| **Filesystem** | 9 | `fs_listFiles`, `fs_readFile`, `fs_writeFile`, `fs_edit`, `fs_mkdir`, `fs_move`, `fs_delete`, `fs_glob`, `fs_grep` |
+| **Git** | 6 | `git_status`, `git_diff`, `git_commit`, `git_push`, `git_pull`, `git_add` |
+| **GitHub** | 3 | `github_triggerWorkflow`, `github_createPR`, `github_getWorkflowRunStatus` |
+| **DevOps** | 15 | `bash_execute`, `ssh_execute`, `devo_exec_session_start`, `devo_exec_session_write`, `devo_exec_session_poll`, `pm2_status`, `pm2_restart`, `pm2_stop`, `pm2_start`, `pm2_logs`, `pm2_reloadAll`, `pm2_save`, `npm_install`, `npm_run`, `logs_getStagingLogs` |
+| **Web** | 8 | `web_search`, `web_fetch`, `scout_search_fast`, `scout_search_deep`, `scout_site_map`, `scout_crawl_focused`, `scout_extract_schema`, `scout_research_bundle` |
+| **Context** | 3 | `context_listDocuments`, `context_readDocument`, `context_searchDocuments` |
+| **Memory** | 3 | `memory_remember`, `memory_search`, `memory_readToday` |
+| **History** | 2 | `history_search`, `history_listSessions` |
+| **Scheduler** | 6 | `scheduler_create`, `scheduler_list`, `scheduler_update`, `scheduler_delete`, `reminder_create`, `notify_user` |
+| **TaskForge** | 6 | `taskforge_list_tasks`, `taskforge_get_task`, `taskforge_create_task`, `taskforge_move_task`, `taskforge_add_comment`, `taskforge_search` |
+| **Communication** | 3 | `send_email`, `telegram_send_document`, `deliver_document` |
+| **Skills** | 5 | `skill_create`, `skill_update`, `skill_delete`, `skill_reload`, `skill_list` |
 
 Web tooling notes:
 - `web_search` uses Perplexity (`PERPLEXITY_API_KEY`)
@@ -98,6 +97,8 @@ Web tooling notes:
 | `askUser` | Pause loop and ask user a question (supports blocking + non-blocking) |
 | `requestApproval` | Request user approval for risky actions (low/medium/high risk) |
 | `respondToUser` | Send intermediate user-visible response while loop continues |
+| `show_in_preview` | Render HTML/content in the frontend preview panel |
+| `search_files` | Search for files by name pattern in the workspace |
 
 ---
 

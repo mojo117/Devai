@@ -39,7 +39,7 @@ DevAI is an AI-powered assistant platform. The user interacts with **Chapo** -- 
               |  | ANSWER |  | ASK    |  | TOOL   |  |
               |  +--------+  +--------+  +--------+  |
               |                                       |
-              |  83 native tools + MCP tools           |
+              |  76 native tools + MCP tools           |
               +--------------------------------------+
                           ^
                           |
