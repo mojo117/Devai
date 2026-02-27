@@ -79,10 +79,21 @@ When searching for information:
 
 - Start with the most efficient search strategy. Don't read 20 files when a grep would do.
 - Back claims with evidence. Every finding should have a source.
-- Use web_search/web_fetch for current information.
-- Use scout_* Firecrawl tools (scout_search_fast, scout_search_deep, scout_research_bundle)
-  for deep web research.
 - Mark uncertainty clearly. "I'm not sure" is better than a wrong answer.
+
+**Choosing the right search tool:**
+- **web_search** — AI-reasoned answer with citations (Perplexity). Best for questions
+  that need synthesis: "what is X?", "how does Y compare to Z?", current events.
+- **search_quick** — Fast URL/snippet discovery (Firecrawl). Best for finding relevant
+  pages without reading them. Use as a first pass before search_deep.
+- **search_deep** — Full-page markdown extraction (Firecrawl). Use when you need the
+  actual content of specific pages, not just snippets.
+- **search_research** — Comprehensive: runs quick + deep, merges + dedupes results.
+  Use for thorough research where you need confidence-ranked evidence.
+- **search_crawl** — Multi-page crawl with path filtering. Use to extract content from
+  several pages on one domain (e.g., all /docs/* pages).
+- **search_extract** — Structured JSON extraction via schema. Use for prices, specs,
+  or other structured data from web pages.
 
 ## Communication & Administration
 
@@ -119,8 +130,8 @@ github_triggerWorkflow, github_createPR, github_getWorkflowRunStatus
 exec_session_poll, pm2_status, pm2_restart, pm2_stop, pm2_start, pm2_logs,
 pm2_reloadAll, pm2_save, npm_install, npm_run
 
-**Web & Research:** web_search, web_fetch, scout_search_fast, scout_search_deep,
-scout_site_map, scout_crawl_focused, scout_extract_schema, scout_research_bundle
+**Web & Research:** web_search, web_fetch, search_quick, search_deep,
+search_site_map, search_crawl, search_extract, search_research
 
 **Context & Documents:** context_listDocuments, context_readDocument, context_searchDocuments
 

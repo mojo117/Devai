@@ -75,7 +75,7 @@ Identity is defined in `workspace/SOUL.md` and loaded via the workspace context 
 | **Git** | 6 | `git_status`, `git_diff`, `git_commit`, `git_push`, `git_pull`, `git_add` |
 | **GitHub** | 3 | `github_triggerWorkflow`, `github_createPR`, `github_getWorkflowRunStatus` |
 | **DevOps** | 15 | `bash_execute`, `ssh_execute`, `exec_session_start`, `exec_session_write`, `exec_session_poll`, `pm2_status`, `pm2_restart`, `pm2_stop`, `pm2_start`, `pm2_logs`, `pm2_reloadAll`, `pm2_save`, `npm_install`, `npm_run`, `logs_getStagingLogs` |
-| **Web** | 8 | `web_search`, `web_fetch`, `scout_search_fast`, `scout_search_deep`, `scout_site_map`, `scout_crawl_focused`, `scout_extract_schema`, `scout_research_bundle` |
+| **Web** | 8 | `web_search`, `web_fetch`, `search_quick`, `search_deep`, `search_site_map`, `search_crawl`, `search_extract`, `search_research` |
 | **Context** | 3 | `context_listDocuments`, `context_readDocument`, `context_searchDocuments` |
 | **Memory** | 3 | `memory_remember`, `memory_search`, `memory_readToday` |
 | **History** | 2 | `history_search`, `history_listSessions` |
@@ -85,8 +85,8 @@ Identity is defined in `workspace/SOUL.md` and loaded via the workspace context 
 | **Skills** | 5 | `skill_create`, `skill_update`, `skill_delete`, `skill_reload`, `skill_list` |
 
 Web tooling notes:
-- `web_search` uses Perplexity (`PERPLEXITY_API_KEY`)
-- `scout_*` Firecrawl tools use `FIRECRAWL_API_KEY`
+- `web_search` uses Perplexity (`PERPLEXITY_API_KEY`) — AI-reasoned answers with citations
+- `search_*` tools use Firecrawl (`FIRECRAWL_API_KEY`) — URL discovery, page extraction, crawling
 
 ### Meta-Tools (Coordination)
 

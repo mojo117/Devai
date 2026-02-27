@@ -625,7 +625,7 @@ Tools are defined in `apps/api/src/tools/registry.ts` via a unified registry. Al
 | **Git** | `git_status`, `git_diff`, `git_commit`, `git_push`, `git_pull`, `git_add` |
 | **GitHub** | `github_triggerWorkflow`, `github_createPR`, `github_getWorkflowRunStatus` |
 | **DevOps** | `bash_execute`, `exec_session_start`, `exec_session_write`, `exec_session_poll`, `ssh_execute`, `pm2_status`, `pm2_restart`, `pm2_stop`, `pm2_start`, `pm2_logs`, `pm2_reloadAll`, `pm2_save`, `npm_install`, `npm_run` |
-| **Web** | `web_search`, `web_fetch`, `scout_search_fast`, `scout_search_deep`, `scout_site_map`, `scout_crawl_focused`, `scout_extract_schema`, `scout_research_bundle` |
+| **Web** | `web_search`, `web_fetch`, `search_quick`, `search_deep`, `search_site_map`, `search_crawl`, `search_extract`, `search_research` |
 | **Context** | `context_listDocuments`, `context_readDocument`, `context_searchDocuments` |
 | **Memory** | `memory_remember`, `memory_search`, `memory_readToday` |
 | **History** | `history_search`, `history_listSessions` |
@@ -637,7 +637,7 @@ Tools are defined in `apps/api/src/tools/registry.ts` via a unified registry. Al
 
 Web tooling notes:
 - `web_search` uses Perplexity (`PERPLEXITY_API_KEY`).
-- `scout_*` Firecrawl tools use `FIRECRAWL_API_KEY`.
+- `search_*` Firecrawl tools use `FIRECRAWL_API_KEY`.
 
 ### Meta-Tools (Coordination)
 

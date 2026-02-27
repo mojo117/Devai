@@ -44,12 +44,12 @@ export type ToolName =
   // Web & Research Tools
   | 'web_search'
   | 'web_fetch'
-  | 'scout_search_fast'
-  | 'scout_search_deep'
-  | 'scout_site_map'
-  | 'scout_crawl_focused'
-  | 'scout_extract_schema'
-  | 'scout_research_bundle'
+  | 'search_quick'
+  | 'search_deep'
+  | 'search_site_map'
+  | 'search_crawl'
+  | 'search_extract'
+  | 'search_research'
   // Context Tools (read-only document access)
   | 'context_listDocuments'
   | 'context_readDocument'
