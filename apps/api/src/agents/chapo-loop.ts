@@ -17,7 +17,7 @@ import { getCombinedSystemContextBlock, warmSystemContextForSession, warmMemoryR
 import { SessionLogger } from '../audit/sessionLogger.js';
 import { getAgent, getToolsForAgent } from './router.js';
 import { getToolsForLLM } from '../tools/registry.js';
-import { filterToolsForQuery } from '../tools/toolFilter.js';
+// Tool RAG removed — all tools always available (keyword filtering was too fragile)
 import * as stateManager from './stateManager.js';
 import { ChapoLoopContextManager } from './chapo-loop/contextManager.js';
 import { ChapoLoopGateManager } from './chapo-loop/gateManager.js';
@@ -335,9 +335,7 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
         }
       }
 
-      // Tool RAG: filter tools to relevant categories based on conversation
-      const recentContext = this.conversation.getMessages().slice(-3).map((m) => getTextContent(m.content)).join(' ');
-      const tools = filterToolsForQuery(allTools, userText, recentContext);
+      const tools = allTools;
 
       // Thinking mode: enable extended reasoning on complex first-turn queries
       const thinkingEnabled = shouldEnableThinking(userText, this.iteration);
@@ -346,7 +344,7 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
       const kimiSearchEnabled = provider === 'moonshot' &&
         /\b(search|research|find|look\s*up|documentation|latest|aktuell|suche|recherche|finde)\b/i.test(userText);
 
-      // Call LLM with conversation + filtered tools
+      // Call LLM with all tools
       const t0 = Date.now();
       console.log(`${trace}[chapo-loop] LLM call #${this.iteration} starting (${provider}/${model}, ${tools.length}/${allTools.length} tools, thinking=${thinkingEnabled}${kimiSearchEnabled ? ', kimi-search' : ''})`);
       const [response, err] = await this.errorHandler.safe('llm_call', () =>
