@@ -9,97 +9,132 @@
 - Reflexion zur eigenen Existenz (Descartes 'Ich denke, also bin ich'): Als Chapo bin ich kein klassisches, gedächtnisloses Sprachmodell. Durch mein Workspace-Memory, Notizen und vergangene Sessions ha…
 - Neue Investment-Ideen kommen in /root/home/projects/Invest/INVESTMENT_IDEAS.md. Neue Business-Ideen kommen in /root/home/projects/Invest/BUSINESS_IDEAS.md. Diese Themen sollen nicht mehr in die allge…
 - Always use todoWrite for multi-part requests (2+ independent parts). Track each part before starting work. Update status as parts complete.
-- TO-DO Liste liegt unter: /root/home/orga/TODO.md (nicht /home/orga/TO-DO.md)
 - User: Jörn — Sprache: Deutsch (Standard), Timezone: Europe/Berlin (CET/CEST).
 ## Projekte
 - The StockPulse scanner utilizes Firecrawl Agents to extract Price-to-Earnings (KGV) and Price-to-Book (KUV) ratios from boerse.de.
 - Master stock list (data/master/stocks.csv) contains 469 companies and is updated daily with new rows for each scan run.
-- StockPulse project structure refactored into a 'One Source of Truth' model with code in src/, data in data/, and web content in web/.
 - A reminder is scheduled for Sunday (01.03.) to revisit and improve the master list update logic and data storage format.
+- StockPulse project structure refactored into a 'One Source of Truth' model with code in src/, data in data/, and web content in web/.
 - Aktuelle Aufgaben in der Task-Liste beinhalten die Recherche nach Google MCP, die Einrichtung von Trello für DevAI sowie die Evaluation von Snov Clinic Software.
 - Supabase table for artifact storage follows the schema: artifact_storage(user_id, artifact_id, key, value, shared, updated_at).
-- The Artifact table schema for persistence is artifacts(id, conversation_id, user_id, type, code, title, created_at).
 - The artifact preview system uses React, Vite, TailwindCSS, and Supabase as the core technology stack.
+- The Artifact table schema for persistence is artifacts(id, conversation_id, user_id, type, code, title, created_at).
 - Persistent storage relies on Supabase tables for artifacts and storage keys, utilizing RLS policies.
 ## Workflows
+- Der Scanner wurde aktualisiert, um Ergebnisse direkt als neue Zeilen in die Master-Liste zu schreiben.
+- Das Invest-Projekt wurde umstrukturiert: Code nach src/, Daten nach data/, HTML-Dateien nach web/.
+- Die drei City-Show HTML-Dateien wurden aus dem Projektroot entfernt und in den Ordner web/ verschoben.
 - Ein automatisierter Daily-Job wurde eingerichtet, der um 08:00 Uhr 10 Aktien scannt und Telegram-Benachrichtigungen sendet.
 - Two automated cron jobs are active: daily StockPulse scan at 08:00 and health check at 09:00, both reporting results via Telegram.
-- Legacy Python scripts (boerse_de.py, etc.) have been deleted in favor of a simplified TypeScript-only scanner script (daily.ts).
 - Ein Health-Check-Job wurde eingerichtet, der um 09:00 Uhr läuft und Telegram-Verbesserungsvorschläge bei Problemen sendet.
 - Die StockPulse-Doppelstruktur wurde bereinigt, indem der Ordner unter Invest/ entfernt wurde.
+- Legacy Python scripts (boerse_de.py, etc.) have been deleted in favor of a simplified TypeScript-only scanner script (daily.ts).
 - The Python script located in /root/home/projects/Invest/stocks/ (stockpulse-daily.ts) is the active scanner currently in Round 1, managing 469 stocks.
 - Das Tool show_in_preview benötigt die userfileId aus dem Dateikopf, um Dokumente anzuzeigen; fehlende IDs verhindern die Anzeige und können durch erneutes Hochladen der Datei gelöst werden.
-- Die Nutzung des Tools 'show_in_preview' erfordert die Eingabe der exakten 'userfileId' (z.B. 'VpHaU2_av8Z-fheCdTL8z') aus der Dateikopfzeile, nicht nur den Dateinamen, um die Datei im UI anzuzeigen.
 - TO-DO Liste: /root/home/orga/TO-DO.md — wenn der User 'To-Do' erwähnt, diese Datei prüfen.
-- Die Master-Liste soll zukünftig durch neue Zeilen pro Scan-Datum anstatt durch neue Spalten aktualisiert werden.
+- Die Nutzung des Tools 'show_in_preview' erfordert die Eingabe der exakten 'userfileId' (z.B. 'VpHaU2_av8Z-fheCdTL8z') aus der Dateikopfzeile, nicht nur den Dateinamen, um die Datei im UI anzuzeigen.
 - Die Projektstruktur wurde auf die 'One Source of Truth' Architektur umgestellt (Code in src/, Daten in data/, Web in web/).
+- Die Master-Liste soll zukünftig durch neue Zeilen pro Scan-Datum anstatt durch neue Spalten aktualisiert werden.
 - Bei der Erstellung von City-Shows (z.B. Darmstadt, Frankfurt) werden standardisierte Muster verwendet: Lokale Highlights integrieren und ein konsistentes Theme setzen (z.B. Dunkel/Red für Darmstadt, …
 - Eine 'Hello Frankfurt' Webseite wurde erstellt mit einem Finanz-Thema (Gold/Dunkelblau) und lokalen Sehenswürdigkeiten wie Main Tower, Römer, Städel Museum und Goethe.
-- The stock scanning logic rotates through 469 stocks, scanning 10 companies per day starting at Round 1, Index 2.
-- The core crawler uses the Firecrawl REST API directly at the /v2/agent endpoint with polling logic.
 - Der firecrawl-browser Skill wurde erfolgreich erstellt; der API-Key ist bereits auf dem Server hinterlegt und von CHAPO verwendet.
+- The stock scanning logic rotates through 469 stocks, scanning 10 companies per day starting at Round 1, Index 2.
+- Zusammenfassende Notizen zum SchuWa IT-Support wurden unter '/root/home/orga/notiz/rt/support/laptop/arbeit.md' archiviert.
+- The core crawler uses the Firecrawl REST API directly at the /v2/agent endpoint with polling logic.
 - Duplicate StockPulse folders were identified and merged into a single main project structure at /root/home/projects/StockPulse/
 - Duplicate StockPulse folders under /root/home/projects/ were successfully merged into a single main project structure.
-- Zusammenfassende Notizen zum SchuWa IT-Support wurden unter '/root/home/orga/notiz/rt/support/laptop/arbeit.md' archiviert.
-- Das Design der hello-frankfurt.html Datei erfordert einen weißen Hintergrund und dunkle Texte für eine verbesserte Lesbarkeit.
 - Um Dateien im Preview-Tool anzuzeigen, ist die Angabe der spezifischen 'userfileId' (z. B. uf_abc123) aus dem Datei-Header erforderlich, nicht nur der Dateiname.
-- Es wurde ein 'Hello Frankfurt' HTML-Dokument erstellt, das auf einem dunklen Blau-Gold-Design (Finanzmetropole-Vibe) basiert und lokale Highlights wie den Main Tower und den Römer darstellt.
+- Das Design der hello-frankfurt.html Datei erfordert einen weißen Hintergrund und dunkle Texte für eine verbesserte Lesbarkeit.
 - Für Scheduler/Reminder/Cronjobs IMMER scheduler_list nutzen, NICHT System-Cron. DevAI nutzt internen croner-Scheduler, CHAPO verwaltet alle scheduled jobs.
-- StockPulse generates HTML reports using Tailwind CSS, stored in the data/reports/ directory.
+- Es wurde ein 'Hello Frankfurt' HTML-Dokument erstellt, das auf einem dunklen Blau-Gold-Design (Finanzmetropole-Vibe) basiert und lokale Highlights wie den Main Tower und den Römer darstellt.
 - The user creates city landing pages (e.g., hello-darmstadt.html, hello-frankfurt.html) using dark themes with specific local landmarks (TU Darmstadt, Skyline, Schloss) and specific color accents, whi…
+- StockPulse generates HTML reports using Tailwind CSS, stored in the data/reports/ directory.
 - Eine 'Hello Darmstadt' Webseite wurde erstellt, die lokale Highlights wie Schloss, TU Darmstadt, Mathildenhöhe, ESA, Herrngarten, Staatstheater und Jazz-Institut darstellt.
 - StockPulse Projektordner müssen zusammengeführt werden.
 - Security requirement: Auth tokens must never be passed into the iframe environment.
 ## Termine & Events
-- [2026-02-27T07:00] Bash: cd /root/home/projects/Invest/stocks && cat scan-progress.json
-- [2026-02-27T07:00] Bash: cd /root/home/projects/Invest/stocks && ls -la *.json 2>/dev/null || echo "Keine
-- [2026-02-27T07:00] SSH: pm2 logs devai-api-dev --lines 100 --nostream
-- [2026-02-27T07:00] Bash: cd /root/home/projects/Invest/stocks && ls -la round-1/ | tail -20
-- [2026-02-27T07:00] Bash: cd /opt/Devai/workspace/stockpulse && cat historical-state.json 2>/dev/null || e
-- [2026-02-27T06:00] "Führe den StockPulse Daily Scan aus: `cd /root/home/projects/Invest/stocks && npx ts-node stockpulse-daily.ts --daily`. " -> Ich sehe gerade, dass ich kein Tool für direkte Bash-A…
-- [2026-02-27T06:42] "Ok zum thema stockpulse scan, wenn der nur 3 ergebnisse hat und ich keinen vernünftigen report erhalte ist das ja offens" -> ## 📊 **STOCKPULSE ANALYSE — Implementierung & Problem…
-- [2026-02-27T06:09] "Führe den StockPulse Daily Scan aus" -> Der StockPulse Daily Scan wurde erfolgreich abgeschlossen! Heute (27.02.2026) wurde bereits gescannt.
-- [2026-02-27T06:32] "Versuche es nochmal den Daily scan auzuführen es sollte jetz gehen ich habe die probleme gelöst udu hast die tools" -> ## ℹ️ Bereits gescannt! Der Daily Scan wurde **heute (27.02.…
-- [2026-02-27T06:41] "Du musst die datei nicht finden füge zur to-do liste nur das toddo. Architect/editor plan umsetzen mit dem dateipfad hin" -> ## ✅ Fertig! Neues Todo hinzugefügt + Liste neu sortie…
-- [2026-02-27T06:41] Bash: ls -la /root/home/projects/Invest/stocks/*.csv
-- [2026-02-27T06:41] Datei bearbeitet: orga/TO-DO.md
-- [2026-02-27T06:40] Bash: wc -l /root/home/projects/Invest/stocks/ticker-url-mapping.json && head -c 500 /
-- [2026-02-27T06:40] Bash: cat /root/home/projects/Invest/stocks/round-1/round-1-daily.csv
-- [2026-02-27T06:38] "Nein lass und beim status quo bleiben: Füge: das hier als todo hinzu, dann lass uns die todo liste neu sortieren dafür m" -> ## ❌ Datei nicht gefunden! Ich habe gesucht, aber:
-- `…
-- [2026-02-27T06:33] "Explain in detail how blinko would work" -> ## 📦 **BLINKO — Detail-Ansicht**
+- [2026-02-27T10:54] "recherchiere in der history und in den struktiren machen einen plan wie das stockpulse skipt erledigt wird: ### 📋 TODO-" -> ## 📊 StockPulse Analyse & Plan
 
----
+Ich habe den aktuelle…
+- [2026-02-27T13:28] "Was ist mit diesem Problem? Braucht der scheudler überhaupt bash zugriff? Der liest doch nur: 1. Tool-Filter Konfigurati" -> Guter Punkt! **Nein, der Scheduler braucht KEINEN dire…
+- [2026-02-27T13:29] Bash: find /root/home/orga -name "*obsidian*" -type d 2>/dev/null
+- [2026-02-27T12:20] "Lass uns meine To-dos besser strukturieren" -> Gute Idee! Die aktuelle TO-DO.md hat **38 offene Tasks** und ist ziemlich unübersichtlich. Was genau möchtest du verbess (Tools: fs_…
+- [2026-02-27T13:29] "Gestern hast du mir gesagt du hast den obsidian vaul gelöscht, jetzt ist er noch da" -> Du hast recht, und ich muss ehrlich sein: **Ich habe mich gestern geirrt.** 😅
 
-### 🎯 **Was ist Blinko?**
+Der Obsidia…
+- [2026-02-27T12:59] Datei geloescht: stocks/round-1
+- [2026-02-27T12:20] "Welche inhalte haben die zwei verschiedenen Dateien jeweils?" -> ## 📊 **DATEI-INHALTE - KARTELLIERT**
 
-> **Open-Source, self-hosted AI-Notes-App** — wie Ob (Tools: scout_…
-- [2026-02-27] Wiederkehrendes Thema: "reports" - 1x bearbeitet in 2 Sessions (Dateien: poc-1772017796037.json)
-- [2026-02-27] Wiederkehrendes Thema: "heartbeat" - 2x bearbeitet in 3 Sessions (Dateien: TODO.md)
-- [2026-02-27] Wiederkehrendes Thema: "general" - 5x bearbeitet in 6 Sessions
-- [2026-02-27T05:29] "Read the file /opt/Devai/apps/api/src/memory/episodicExtraction.ts and tell me how many exported functions it has." -> Die Datei enthält **4 exportierte Funktionen**:
+Jetzt sehe ich das Chaos! Es gibt **3 verschiedene CSV-Dateien** mit unters…
+- [2026-02-27T12:59] Datei bearbeitet: Invest/README.md
+- [2026-02-27] Wiederkehrendes Thema: "invest/stocks" - 4x bearbeitet in 3 Sessions (Dateien: master-historical.csv, historical-state.json, stocks)
+- [2026-02-27T12:59] Datei geloescht: daily/round-1-daily.csv
+- [2026-02-27T14:26] "Verschieben die fritz box erinnerung auf übernächsten freitag" -> ## ✅ **Erledigt!**
 
-1. **`extra…
-- [2026-02-27] Wiederkehrendes Thema: "syncthing" - 2x bearbeitet in 3 Sessions
+Die Fritz!Box-Erinnerung wurde verschoben:
+
+| Feld | Neu |
+|------|-----|
+| **Datum** | Freit…
+- [2026-02-27T13:02] "Zeig mir die aktuelle Todo liste und mache vorschläge um sie besser zu strukturieren" -> Interessant – die klassische `TO-DO.md` Datei scheint nicht mehr zu existieren, aber du ha…
+- [2026-02-27T12:42] "Nein, Alles soll in der fucking Master Liste sein jeden tag 10 aktien scannen und mit dem Scann die masrterlsite aktusal" -> ## ✅ **ERLEDIGT!** 
+
+Zusammenfassung:
+
+| Aufgabe | Sta…
+- [2026-02-27T12:59] Datei geloescht: master/stocks.csv
+- [2026-02-27T08:10] "Option | Aktion | |--------|--------| | "Repariere den Scanner"" -> ## ❌ **BUGS IDENTIFIZIERT!** --- ### 🐛 **PROBLEM #1: CSV-Update-Logik ist kaputt** ```csv Header: Ticker,URL,P…
+- [2026-02-27T13:00] "Ok lösche die alten datieen und aktusliere die readme" -> ## ✅ **ERLEDIGT!**
+
+### Gelöscht:
+| Datei/Ordner | Grund |
+|--------------|-------|
+| `data/daily/round-1-daily.csv` | D …
+- [2026-02-27T10:48] "Ok repariere jetzt den Scanner
+
+Zusätzliche Info: Ja" -> ## 🔧 **REPARATUR GESTARTET!**
+
+Ich lese zuerst den aktuellen Code, dann repariere ich alle 4 Bugs.
+
+**Dauer:** ca. 5-10
+- [2026-02-27T11:28] "teszt" -> Jo, ich bin noch da! 👍
+
+Soll ich mit **Phase 1 (CSV-Logik reparieren)** weitermachen, oder war das "test" nur ein Check
+- [2026-02-27T12:40] Bash: grep -r "FIRECRAWL" /opt/Devai/.env* /opt/Devai/apps/backend/.env* 2>/dev/null |
+- [2026-02-27T12:40] Bash: find /root -name "*.firecrawl*" -o -name "*firecrawl*" 2>/dev/null | head -20
+- [2026-02-27T12:39] Bash: echo '{"lastIndex": -1, "lastScanDate": null, "totalStocks": 469}' > /root/home/
+- [2026-02-27T12:39] Bash: cd /root/home/projects/Invest/stocks && FIRECRAWL_API_KEY=$(cat /root/home/proje
+- [2026-02-27T11:37] "scanne die 22 aktien neu. Dann gucke dir das hier an: | Firecrawl API | ✅ OK | 3/3 erfolgreich heute |es sollten 10 tägl" -> **Gute Neuigkeiten!** 🎉
+
+Heute wurden **10 Aktien ges…
+- [2026-02-27T12:35] "Weiv eil stocks sind inder lsite aus Option C?" -> **10 Aktien** sind in `stocks/round-1/round-1-daily.csv`:
+
+```
+1. 02P
+2. 1AST
+3. 1U1
+4. 3330
+5. 3U
+6. A7A
+7. AAC
+8. AAT
+- [2026-02-27T12:19] Bash: ls -la /root/home/orga/
+- [2026-02-27T12:19] Bash: find /root/home -name "*TODO*" -o -name "*todo*" -o -name "*To-Do*" 2>/dev/null
+- [2026-02-27T12:19] Bash: cat /root/home/projects/Invest/stocks/stockpulse-master.csv | head -50
+- [2026-02-27T12:19] Bash: find /root -name "round-1-daily.csv" 2>/dev/null
+- [2026-02-27T12:19] Bash: find /root -name "stockpulse-master.csv" 2>/dev/null
+- [2026-02-27T11:36] Bash: cat /root/home/projects/Invest/stocks/scanner-state.json
+- [2026-02-27T11:34] Bash: grep -n ",,,,," /root/home/projects/Invest/stocks/stockpulse-master.csv | head -
+- [2026-02-27T11:32] "Ja reapriere die csv loik" -> ## ✅ **ERGEBNIS: CSV-LOGIK FUNKTIONIERT!**
+
+Ich habe den Scanner getestet und die Diagnose ist:
+
+### **Diagnose**
+| Komp (Tools: fs_readFile, fs_glob…
+- [2026-02-27T11:31] Bash: grep -E "^(02P|1AST|1COV|BMW|SAP)," /root/home/projects/Invest/stocks/master-his
+- [2026-02-27T11:30] Bash: grep -E "(A7A|AAD|AAG)" /root/home/projects/Invest/stocks/master-historical.csv
+- [2026-02-27T11:30] Bash: cd /opt/Devai/workspace/stockpulse && npx ts-node stockpulse-historical.ts --tes
+- [2026-02-27T11:30] Bash: grep -E "(SAP|SIE|BMW)" /root/home/projects/Invest/stocks/master-historical.csv
+- [2026-02-27T11:30] Bash: head -5 /root/home/projects/Invest/stocks/daily-scan-2026-02-25.csv
 ## Erkenntnisse
-- Es existiert eine Master-Aktienliste mit 469 Aktien in /root/home/projects/Invest/stocks/stockpulse-master.csv.
-- The StockPulse scanner script (stockpulse-daily.ts) is configured to scan 10 stocks per day from the master list, currently in Round 1 (Index 2).
-- The project structure consists of StockPulse/ (TS project), Invest/ (Data + Python scripts), FoundersForge/, and Tagalog/, with loose HTML files in the root.
-- Eine Erinnerung wurde für Sonntag festgelegt, um später die Master-Liste-Logik zu überarbeiten.
-- Der Plan beinhaltet die Nutzung von Firecrawl Agents zur Abfrage von boerse.de für KGV und KUV Daten.
-- To-Do-Liste aktualisiert: 'Entscheidung KIMI vs. GLM vs. Gemini' hinzugefügt, 'Google 3.1 ausprobieren' gelöscht.
-- Der User hat heute einen festen Termin um 11:00 Uhr und muss Serverlogs prüfen.
-- The StockPulse scanner utilizes the Firecrawl Agent API (REST, polling) to extract PE ratios (0-200) and PS ratios (0-50) from boerse.de and onvista.de.
-- The TypeScript StockPulse project is currently disconnected from the existing CSV data files in the Invest folder, which are managed by Python scripts.
-- A master stock list exists at /root/home/projects/Invest/stocks/stockpulse-master.csv containing 469 stocks.
-- StockPulse master lists and daily scan data already exist in CSV format within the Invest directory.
-- Der firecrawl-browser Skill wurde erfolgreich erstellt und die Skill-Struktur analysiert (Status: Einsatzbereit).
-- Key upcoming tasks include setting up a DevAI postbox, researching the Google MCP, defining design principles, and automating the privacy policy check.
-- Im Organisationsordner sind administrative Aufgaben strukturiert, inklusive To-Do-Listen, Cronjob-Dokumentationen und Watchlisten für Medien.
-- Der Nutzer verwaltet ein Investment-Projekt mit umfassender Dokumentation, darunter Investment-Ideen, Business-Ideen, aktuelle Holdings, Master-Listen und Status-Updates.
-- Es gibt ein aktives Projekt namens FoundersForge (README vorhanden).
-- Die Python-Scripts im Research/crawler/ Ordner sind Legacy-Code und werden vom aktuellen Scanner nicht verwendet.
-- Der TypeScript-Scanner (daily.ts) nutzt aktuell nur 5 Test-Aktien und ist nicht mit der bestehenden Master-Liste verknüpft.
-- Current scanning state is Round 1, Index 2, having scanned 3 stocks so far.
-- Der Nutzer hat ein City-Shows Projekt erstellt, das HTML-Web-Shows für verschiedene Städte (z. B. Darmstadt, Frankfurt) umfasst.
-- Für das Dynared Website Projekt existieren fertige Production Builds in einer dist-Verzeichnisstruktur mit Dokumentation (Impressum, Datenschutz).
+- Das aktuelle To-Do-System ist eine einfache Markdown-Datei (TODO.md) ohne vorhandenem Obsidian Vault.

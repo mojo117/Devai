@@ -24,6 +24,7 @@
 | # | Feature | Effort | Impact | Ticket |
 |---|---------|--------|--------|--------|
 | **9** | Multi-Model Cost Routing | 1 day | High | [TaskFlow:69a13a0](https://taskforge.klyde.tech/task/69a13a070037625d2d5f) |
+| **17** | User-in-the-Loop | 2 days | High | Planned |
 | **10** | Architect/Editor Split | 5 days | High | [TaskFlow:69a13a3](https://taskforge.klyde.tech/task/69a13a3c002e700ec953) |
 | **16a** | Token/Cost Live Display | 2 days | Medium | [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002e7ba930f9) |
 | **7** | Sub-Agent Delegation | 4 days | High | [TaskFlow:69a13a6](https://taskforge.klyde.tech/task/69a13a630033f7b01816) |
@@ -32,7 +33,7 @@
 | **15** | Episodic Memory | 7 days | High | [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002d0982d6dd) |
 | **16b-c** | Progressive UI + Cancel | 3 days | Low | [TaskFlow:69a13ac](https://taskforge.klyde.tech/task/69a13ac3002e7ba930f9) |
 
-**Recommended order**: #9 → #16a → #10 → #7 → #11 → #12 → #15 → #16b-c
+**Recommended order**: #9 → #17 → #10 → #7 → #11 → #12 → #15 → #16b-c
 
 ---
 
@@ -67,6 +68,59 @@ Extend the existing `shouldEnableThinking()` heuristic into a model tier selecto
 
 1. Start session with `/engine glm`, send a multi-step task
 2. Check logs: iterations 0-1 should show `glm-5`, iteration 2+ should show `glm-4.7-flash [fast]`
+
+---
+
+## #17. User-in-the-Loop (Self-Check + Clarifying Questions)
+
+**Plan**: [user-in-the-loop-plan.md](./user-in-the-loop-plan.md)
+**Effort**: ~2 days | **Impact**: Reduces wrong answers, improves trust
+**Engine**: ALL
+
+### Problem
+
+CHAPO sometimes produces answers that:
+1. Address the wrong interpretation of an ambiguous request
+2. Make assumptions the user didn't intend
+3. Miss critical context that the user could easily provide
+
+### Design
+
+Hybrid self-check + conditional user ask:
+
+1. Model includes self-check block in every answer with confidence score
+2. High confidence (≥0.8): Return answer directly
+3. Medium confidence (0.5-0.8): Return answer + uncertainty note
+4. Low confidence (<0.5): Return clarifying question instead
+
+### Decision Framework
+
+**Ask user when:**
+- Multiple valid interpretations exist AND no clear winner
+- Missing critical info that can't be obtained with tools
+- High risk of wrong action
+- Model confidence < 0.5
+
+**Don't ask when:**
+- One interpretation is likely (>80%) — use it, note assumption
+- Info can be obtained with tools — get it yourself
+- Request is simple/unambiguous
+
+### Files to Create/Modify
+
+| File | Change Type |
+|------|------------|
+| `apps/api/src/agents/selfCheck.ts` | **NEW** — Parser and formatter |
+| `apps/api/src/agents/chapo-loop.ts` | Modify — Parse self-check, handle clarification |
+| `apps/api/src/agents/types.ts` | Modify — Add selfCheck to result |
+| CHAPO system prompt | Modify — Add self-check protocol |
+
+### Verification
+
+1. "Fix the bug" in multi-bug codebase → asks "which bug?"
+2. "Fix null pointer in auth.ts:45" → fixes directly, high confidence
+3. "Delete all test files" → asks for confirmation
+4. "What is 2+2?" → answers directly, no self-check
 
 ---
 
