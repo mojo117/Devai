@@ -430,15 +430,8 @@ function InlineSystemEvent({
 
   const getInlineDetail = (): string => {
     if (decision) {
-      const confidence = typeof decision.confidence === 'number'
-        ? `confidence ${(decision.confidence * 100).toFixed(0)}%`
-        : 'confidence n/a';
       const reason = decision.reason || 'no explicit reason';
-      const assumptions = Array.isArray(decision.unresolvedAssumptions) && decision.unresolvedAssumptions.length > 0
-        ? `assumptions: ${decision.unresolvedAssumptions.join(' | ')}`
-        : 'assumptions: none';
-      const text = `${confidence} _ ${reason} _ ${assumptions}`;
-      return text.length > 220 ? `${text.slice(0, 220)}...` : text;
+      return reason.length > 220 ? `${reason.slice(0, 220)}...` : reason;
     }
     const payload = event.type === 'tool_call' ? event.arguments : event.result;
     if (!payload) return '';
