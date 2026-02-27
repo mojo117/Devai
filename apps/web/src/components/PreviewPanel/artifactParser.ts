@@ -131,19 +131,20 @@ export function parseToolEventArtifacts(events: ToolEventLike[]): Artifact[] {
       const inlineContent = args.content as string | undefined;
       if (!signedUrl && !inlineContent) continue;
 
-      // Resolve artifact type from mime type
+      // Check filename first for markdown (most reliable)
+      const isMarkdown = filename && (filename.endsWith('.md') || filename.endsWith('.markdown'));
+      
+      // Resolve artifact type
       let artifactType: Artifact['type'] = 'html';
-      if (mimeType) {
+      if (isMarkdown) {
+        artifactType = 'markdown';
+      } else if (mimeType) {
         for (const [prefix, type] of MIME_TYPE_MAP) {
           if (mimeType === prefix || mimeType.startsWith(prefix)) {
             artifactType = type;
             break;
           }
         }
-      }
-      // Also check filename for markdown
-      if (filename && (filename.endsWith('.md') || filename.endsWith('.markdown'))) {
-        artifactType = 'markdown';
       }
 
       artifacts.push({

@@ -110,9 +110,11 @@ export class ChapoToolExecutor {
 
       try {
         const signed = await createUserfileSignedUrl(file.storage_path);
-        const isTextFile = file.mime_type === 'text/markdown' || 
+        const isMarkdown = file.original_name.endsWith('.md') || 
+          file.original_name.endsWith('.markdown') ||
+          file.mime_type === 'text/markdown';
+        const isTextFile = isMarkdown ||
           file.mime_type === 'text/plain' ||
-          file.original_name.endsWith('.md') ||
           file.original_name.endsWith('.txt');
         
         let content: string | undefined;
@@ -120,6 +122,9 @@ export class ChapoToolExecutor {
           const downloaded = await downloadUserfile(file.storage_path);
           if (downloaded) {
             content = downloaded.buffer.toString('utf-8');
+            console.log(`[show_in_preview] Downloaded ${content.length} chars for ${file.original_name}`);
+          } else {
+            console.warn(`[show_in_preview] Failed to download ${file.original_name}`);
           }
         }
 

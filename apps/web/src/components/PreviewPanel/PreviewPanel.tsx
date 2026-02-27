@@ -98,10 +98,6 @@ export function PreviewPanel({
           <div className="h-full relative">
             {artifact.type === 'markdown' && artifact.content ? (
               <MarkdownRenderer content={artifact.content} />
-            ) : artifact.type === 'markdown' && hasRemoteUrl ? (
-              <div className="h-full flex items-center justify-center p-6">
-                <p className="text-devai-text-muted text-sm">Markdown content could not be loaded.</p>
-              </div>
             ) : hasRemoteUrl ? (
               (remote?.type || artifact.type) === 'pdf' ? (
                 <PdfRenderer url={remote!.signedUrl!} />
@@ -111,6 +107,20 @@ export function PreviewPanel({
                   alt={artifact.title || 'Preview'}
                   className="w-full h-full object-contain bg-black/20"
                 />
+              ) : (remote?.type || artifact.type) === 'markdown' ? (
+                <div className="h-full flex items-center justify-center p-6">
+                  <div className="text-center space-y-2">
+                    <p className="text-devai-text-muted text-sm">Markdown preview requires file content.</p>
+                    <a 
+                      href={remote!.signedUrl!} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-devai-accent hover:underline text-sm"
+                    >
+                      Open {artifact.title || 'file'} in new tab
+                    </a>
+                  </div>
+                </div>
               ) : (
                 <UrlRenderer url={remote!.signedUrl!} title={artifact.title || 'Artifact preview'} />
               )
