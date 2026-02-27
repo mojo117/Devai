@@ -37,7 +37,7 @@
 - Duplicate StockPulse folders under /root/home/projects/ were successfully merged into a single main project structure.
 - The stock scanning logic rotates through 469 stocks, scanning 10 companies per day starting at Round 1, Index 2.
 - Das Tool show_in_preview benötigt die userfileId aus dem Dateikopf, um Dokumente anzuzeigen; fehlende IDs verhindern die Anzeige und können durch erneutes Hochladen der Datei gelöst werden.
-- Der 'firecrawl-browser' Skill wurde erfolgreich erstellt; der API-Key ist bereits auf dem Server hinterlegt und von Caio verwendet.
+- Der firecrawl-browser Skill wurde erfolgreich erstellt; der API-Key ist bereits auf dem Server hinterlegt und von CHAPO verwendet.
 - Zusammenfassende Notizen zum SchuWa IT-Support wurden unter '/root/home/orga/notiz/rt/support/laptop/arbeit.md' archiviert.
 - Das Design der hello-frankfurt.html Datei erfordert einen weißen Hintergrund und dunkle Texte für eine verbesserte Lesbarkeit.
 - Die Nutzung des Tools 'show_in_preview' erfordert die Eingabe der exakten 'userfileId' (z.B. 'VpHaU2_av8Z-fheCdTL8z') aus der Dateikopfzeile, nicht nur den Dateinamen, um die Datei im UI anzuzeigen.
@@ -45,7 +45,7 @@
 - Um Dateien im Preview-Tool anzuzeigen, ist die Angabe der spezifischen 'userfileId' (z. B. uf_abc123) aus dem Datei-Header erforderlich, nicht nur der Dateiname.
 - StockPulse generates HTML reports using Tailwind CSS, stored in the data/reports/ directory.
 - Es wurde ein 'Hello Frankfurt' HTML-Dokument erstellt, das auf einem dunklen Blau-Gold-Design (Finanzmetropole-Vibe) basiert und lokale Highlights wie den Main Tower und den Römer darstellt.
-- Für Scheduler/Reminder/Cronjobs IMMER an CAIO delegieren (scheduler_list), NICHT System-Cron. DevAI nutzt internen croner-Scheduler, CAIO verwaltet alle scheduled jobs.
+- Für Scheduler/Reminder/Cronjobs IMMER scheduler_list nutzen, NICHT System-Cron. DevAI nutzt internen croner-Scheduler, CHAPO verwaltet alle scheduled jobs.
 - StockPulse Projektordner müssen zusammengeführt werden.
 - Eine 'Hello Darmstadt' Webseite wurde erstellt, die lokale Highlights wie Schloss, TU Darmstadt, Mathildenhöhe, ESA, Herrngarten, Staatstheater und Jazz-Institut darstellt.
 - The user creates city landing pages (e.g., hello-darmstadt.html, hello-frankfurt.html) using dark themes with specific local landmarks (TU Darmstadt, Skyline, Schloss) and specific color accents, whi…
@@ -83,7 +83,7 @@
 - Der Nutzer hat ein City-Shows Projekt erstellt, das HTML-Web-Shows für verschiedene Städte (z. B. Darmstadt, Frankfurt) umfasst.
 - StockPulse master lists and daily scan data already exist in CSV format within the Invest directory.
 - The TypeScript StockPulse project is currently disconnected from the existing CSV data files in the Invest folder, which are managed by Python scripts.
-- DEVO hat den firecrawl-browser Skill erfolgreich erstellt und über Bash-Zugriff die Skill-Struktur analysiert (Status: Einsatzbereit).
+- Der firecrawl-browser Skill wurde erfolgreich erstellt und die Skill-Struktur analysiert (Status: Einsatzbereit).
 - Die Existenz eines Workspace-Memories und der Zugriff auf vergangene Sessions verhindert, dass jedes Gespräch von vorn beginnt; Kontinuität und Lernen über den aktuellen Chat hinaus sind möglich.
 - Key upcoming tasks include setting up a DevAI postbox, researching the Google MCP, defining design principles, and automating the privacy policy check.
 - Der Nutzer hat eine tägliche Gewohnheit, Tagalog (15 Min, 12:30 CET) zu lernen.
