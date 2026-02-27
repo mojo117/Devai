@@ -144,6 +144,16 @@ describe('mapNamespaceToCategory', () => {
     expect(mapNamespaceToCategory('DevAI/Global', 'semantic')).toBe('Projekte');
   });
 
+  it('maps devai/episodic/* with episodic type to Termine & Events', () => {
+    expect(mapNamespaceToCategory('devai/episodic', 'episodic')).toBe('Termine & Events');
+    expect(mapNamespaceToCategory('devai/episodic/meetings', 'episodic')).toBe('Termine & Events');
+    expect(mapNamespaceToCategory('devai/episodic/deadlines', 'episodic')).toBe('Termine & Events');
+    expect(mapNamespaceToCategory('DEVAI/EPISODIC/Events', 'episodic')).toBe('Termine & Events');
+    expect(mapNamespaceToCategory('/devai//episodic/', 'episodic')).toBe('Termine & Events');
+    // Non-episodic type in devai/episodic namespace falls through to Erkenntnisse
+    expect(mapNamespaceToCategory('devai/episodic', 'semantic')).toBe('Erkenntnisse');
+  });
+
   it('maps everything else to Erkenntnisse', () => {
     expect(mapNamespaceToCategory('devai/random', 'semantic')).toBe('Erkenntnisse');
     expect(mapNamespaceToCategory('unknown', 'semantic')).toBe('Erkenntnisse');
@@ -314,6 +324,29 @@ describe('renderMemoryMd', () => {
 
     const written = mockWriteFile.mock.calls[0][1] as string;
     expect(written.length).toBeLessThanOrEqual(MAX_TOTAL_CHARS + 10); // small margin for trailing newline
+  });
+
+  it('renders episodic memories under Termine & Events', async () => {
+    mockSupabaseData.rows = [
+      makeRow('1', 'User info', { namespace: 'devai/user', strength: 1 }),
+      makeRow('2', 'Meeting mit Jörn am Freitag', {
+        namespace: 'devai/episodic/meetings',
+        memory_type: 'episodic',
+        strength: 0.9,
+      }),
+      makeRow('3', 'Deadline: DevAI v2 bis März', {
+        namespace: 'devai/episodic/deadlines',
+        memory_type: 'episodic',
+        strength: 0.8,
+      }),
+    ];
+
+    await renderMemoryMd('/mock/workspace');
+
+    const written = mockWriteFile.mock.calls[0][1] as string;
+    expect(written).toContain('## Termine & Events');
+    expect(written).toContain('- Meeting mit Jörn am Freitag');
+    expect(written).toContain('- Deadline: DevAI v2 bis März');
   });
 
   it('renders categories in CATEGORY_ORDER', async () => {
