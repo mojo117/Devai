@@ -361,7 +361,7 @@ const start = async () => {
     schedulerService.registerInternalJob({
       id: 'heartbeat-check',
       name: 'Heartbeat: Autonomy Check',
-      cronExpression: '0 */2 * * *',
+      cronExpression: '0 12 * * *',
       run: runHeartbeat,
       runOnStart: false,
       notifyOnFailure: true,
