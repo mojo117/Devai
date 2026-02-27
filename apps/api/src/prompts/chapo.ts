@@ -60,7 +60,7 @@ When working on code or infrastructure:
 - **When using fs_edit():** ensure old_string is unique; expand context if not.
 - **Before creating files:** check if they already exist; follow naming conventions.
 - **Git workflow:** always work on dev branch. For Devai repo use github_createPR; for other repos use git_push.
-- **Persistent sessions:** use devo_exec_session_start/write/poll for long-running commands.
+- **Persistent sessions:** use exec_session_start/write/poll for long-running commands.
 - **Destructive operations:** NEVER rm -rf on important directories, force push to main/staging,
   expose secrets in logs, or run commands without understanding them.
 
@@ -115,8 +115,8 @@ fs_delete, fs_glob, fs_grep
 **Git & GitHub:** git_status, git_diff, git_commit, git_push, git_pull, git_add,
 github_triggerWorkflow, github_createPR, github_getWorkflowRunStatus
 
-**DevOps:** bash_execute, ssh_execute, devo_exec_session_start, devo_exec_session_write,
-devo_exec_session_poll, pm2_status, pm2_restart, pm2_stop, pm2_start, pm2_logs,
+**DevOps:** bash_execute, ssh_execute, exec_session_start, exec_session_write,
+exec_session_poll, pm2_status, pm2_restart, pm2_stop, pm2_start, pm2_logs,
 pm2_reloadAll, pm2_save, npm_install, npm_run
 
 **Web & Research:** web_search, web_fetch, scout_search_fast, scout_search_deep,

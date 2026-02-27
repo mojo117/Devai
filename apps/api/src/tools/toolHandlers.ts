@@ -132,16 +132,16 @@ export const TOOL_HANDLERS: Record<string, ToolHandler> = {
     cwd: args.cwd as string | undefined,
     timeout: args.timeout as number | undefined,
   }),
-  devo_exec_session_start: async (args) => execSessionTools.devoExecSessionStart(args.command as string, {
+  exec_session_start: async (args) => execSessionTools.devoExecSessionStart(args.command as string, {
     cwd: args.cwd as string | undefined,
     timeoutMs: args.timeoutMs as number | undefined,
     allowArbitraryInput: args.allowArbitraryInput as boolean | undefined,
   }),
-  devo_exec_session_write: async (args) => execSessionTools.devoExecSessionWrite(
+  exec_session_write: async (args) => execSessionTools.devoExecSessionWrite(
     args.sessionId as string,
     args.input as string,
   ),
-  devo_exec_session_poll: async (args) => execSessionTools.devoExecSessionPoll(
+  exec_session_poll: async (args) => execSessionTools.devoExecSessionPoll(
     args.sessionId as string,
     {
       maxBytes: args.maxBytes as number | undefined,

@@ -74,7 +74,7 @@ Identity is defined in `workspace/SOUL.md` and loaded via the workspace context 
 | **Filesystem** | 9 | `fs_listFiles`, `fs_readFile`, `fs_writeFile`, `fs_edit`, `fs_mkdir`, `fs_move`, `fs_delete`, `fs_glob`, `fs_grep` |
 | **Git** | 6 | `git_status`, `git_diff`, `git_commit`, `git_push`, `git_pull`, `git_add` |
 | **GitHub** | 3 | `github_triggerWorkflow`, `github_createPR`, `github_getWorkflowRunStatus` |
-| **DevOps** | 15 | `bash_execute`, `ssh_execute`, `devo_exec_session_start`, `devo_exec_session_write`, `devo_exec_session_poll`, `pm2_status`, `pm2_restart`, `pm2_stop`, `pm2_start`, `pm2_logs`, `pm2_reloadAll`, `pm2_save`, `npm_install`, `npm_run`, `logs_getStagingLogs` |
+| **DevOps** | 15 | `bash_execute`, `ssh_execute`, `exec_session_start`, `exec_session_write`, `exec_session_poll`, `pm2_status`, `pm2_restart`, `pm2_stop`, `pm2_start`, `pm2_logs`, `pm2_reloadAll`, `pm2_save`, `npm_install`, `npm_run`, `logs_getStagingLogs` |
 | **Web** | 8 | `web_search`, `web_fetch`, `scout_search_fast`, `scout_search_deep`, `scout_site_map`, `scout_crawl_focused`, `scout_extract_schema`, `scout_research_bundle` |
 | **Context** | 3 | `context_listDocuments`, `context_readDocument`, `context_searchDocuments` |
 | **Memory** | 3 | `memory_remember`, `memory_search`, `memory_readToday` |

@@ -28,9 +28,9 @@ export type ToolName =
   | 'logs_getStagingLogs'
   // DevOps Tools
   | 'bash_execute'
-  | 'devo_exec_session_start'
-  | 'devo_exec_session_write'
-  | 'devo_exec_session_poll'
+  | 'exec_session_start'
+  | 'exec_session_write'
+  | 'exec_session_poll'
   | 'ssh_execute'
   | 'pm2_status'
   | 'pm2_restart'

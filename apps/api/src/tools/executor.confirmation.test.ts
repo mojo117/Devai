@@ -22,8 +22,8 @@ describe('executeTool confirmation gate', () => {
     expect(result.error).toContain('requires user confirmation before execution');
   });
 
-  it('blocks devo_exec_session_start without explicit bypass', async () => {
-    const result = await executeTool('devo_exec_session_start', {
+  it('blocks exec_session_start without explicit bypass', async () => {
+    const result = await executeTool('exec_session_start', {
       command: 'npm test',
     });
 

@@ -105,7 +105,7 @@ export const devopsTools: ToolDefinition[] = [
     requiresConfirmation: true,
   },
   {
-    name: 'devo_exec_session_start',
+    name: 'exec_session_start',
     description: 'Start a persistent execution session for long-running command output and incremental polling. This action requires user confirmation.',
     parameters: {
       type: 'object',
@@ -124,7 +124,7 @@ export const devopsTools: ToolDefinition[] = [
         },
         allowArbitraryInput: {
           type: 'boolean',
-          description: 'If true, devo_exec_session_write accepts arbitrary text input; otherwise only control/whitespace input is allowed.',
+          description: 'If true, exec_session_write accepts arbitrary text input; otherwise only control/whitespace input is allowed.',
         },
       },
       required: ['command'],
@@ -132,14 +132,14 @@ export const devopsTools: ToolDefinition[] = [
     requiresConfirmation: true,
   },
   {
-    name: 'devo_exec_session_write',
+    name: 'exec_session_write',
     description: 'Write to a running execution session stdin (e.g. control sequences or interactive replies).',
     parameters: {
       type: 'object',
       properties: {
         sessionId: {
           type: 'string',
-          description: 'Session ID returned by devo_exec_session_start',
+          description: 'Session ID returned by exec_session_start',
         },
         input: {
           type: 'string',
@@ -151,14 +151,14 @@ export const devopsTools: ToolDefinition[] = [
     requiresConfirmation: false,
   },
   {
-    name: 'devo_exec_session_poll',
+    name: 'exec_session_poll',
     description: 'Poll output/status from a running or completed execution session.',
     parameters: {
       type: 'object',
       properties: {
         sessionId: {
           type: 'string',
-          description: 'Session ID returned by devo_exec_session_start',
+          description: 'Session ID returned by exec_session_start',
         },
         maxBytes: {
           type: 'number',

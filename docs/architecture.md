@@ -624,7 +624,7 @@ Tools are defined in `apps/api/src/tools/registry.ts` via a unified registry. Al
 | **Filesystem** | `fs_listFiles`, `fs_readFile`, `fs_writeFile`, `fs_glob`, `fs_grep`, `fs_edit`, `fs_mkdir`, `fs_move`, `fs_delete` |
 | **Git** | `git_status`, `git_diff`, `git_commit`, `git_push`, `git_pull`, `git_add` |
 | **GitHub** | `github_triggerWorkflow`, `github_createPR`, `github_getWorkflowRunStatus` |
-| **DevOps** | `bash_execute`, `devo_exec_session_start`, `devo_exec_session_write`, `devo_exec_session_poll`, `ssh_execute`, `pm2_status`, `pm2_restart`, `pm2_stop`, `pm2_start`, `pm2_logs`, `pm2_reloadAll`, `pm2_save`, `npm_install`, `npm_run` |
+| **DevOps** | `bash_execute`, `exec_session_start`, `exec_session_write`, `exec_session_poll`, `ssh_execute`, `pm2_status`, `pm2_restart`, `pm2_stop`, `pm2_start`, `pm2_logs`, `pm2_reloadAll`, `pm2_save`, `npm_install`, `npm_run` |
 | **Web** | `web_search`, `web_fetch`, `scout_search_fast`, `scout_search_deep`, `scout_site_map`, `scout_crawl_focused`, `scout_extract_schema`, `scout_research_bundle` |
 | **Context** | `context_listDocuments`, `context_readDocument`, `context_searchDocuments` |
 | **Memory** | `memory_remember`, `memory_search`, `memory_readToday` |
