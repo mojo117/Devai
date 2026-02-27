@@ -5,7 +5,7 @@ import { GeminiProvider } from './providers/gemini.js';
 import { ZAIProvider } from './providers/zai.js';
 import { MoonshotProvider } from './providers/moonshot.js';
 import { logUsage } from './usage-logger.js';
-import { circuitBreaker } from './circuitBreaker.js';
+import { errorTracker } from './circuitBreaker.js';
 
 // Default fallback chain (removed anthropic/openai/gemini — use kimi as primary fallback)
 const DEFAULT_FALLBACK_CHAIN: LLMProvider[] = ['zai', 'moonshot'];
@@ -176,9 +176,9 @@ export class LLMRouter {
         continue;
       }
 
-      if (!circuitBreaker.isAvailable(providerName)) {
-        console.info(`[llm] Skipping ${providerName} — circuit breaker open`);
-        errors.push({ provider: providerName, error: 'circuit breaker open' });
+      if (!errorTracker.isAvailable(providerName)) {
+        console.info(`[llm] Skipping ${providerName} — too many recent errors`);
+        errors.push({ provider: providerName, error: 'error tracker blocked' });
         continue;
       }
 
@@ -196,7 +196,7 @@ export class LLMRouter {
 
       try {
         const response = await this.generateWithRetry(providerName, adjustedRequest);
-        circuitBreaker.recordSuccess(providerName);
+        errorTracker.recordSuccess(providerName);
         return { ...response, usedProvider: providerName };
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -212,7 +212,7 @@ export class LLMRouter {
           try {
             console.info(`[llm] Trying same-provider fallback ${altModel} on ${providerName}`);
             const response = await this.generateWithRetry(providerName, { ...request, model: altModel });
-            circuitBreaker.recordSuccess(providerName);
+            errorTracker.recordSuccess(providerName);
             recovered = true;
             return { ...response, usedProvider: providerName };
           } catch (fallbackErr) {
@@ -222,34 +222,8 @@ export class LLMRouter {
         }
 
         if (!recovered) {
-          circuitBreaker.recordError(providerName, errorMsg);
+          errorTracker.recordError(providerName, errorMsg);
           console.warn(`[llm] Provider ${providerName} exhausted, trying next...`);
-        }
-      }
-    }
-
-    // All providers failed — check if any were only blocked by circuit breaker.
-    // If so, wait for the shortest cooldown and retry once instead of giving up.
-    const breakerBlocked = errors.filter(e => e.error === 'circuit breaker open');
-    if (breakerBlocked.length > 0) {
-      const waits = breakerBlocked
-        .map(e => ({ provider: e.provider as LLMProvider, waitMs: circuitBreaker.getTimeUntilAvailable(e.provider) }))
-        .sort((a, b) => a.waitMs - b.waitMs);
-      const best = waits[0];
-      if (best.waitMs <= 35_000) {
-        if (best.waitMs > 0) {
-          console.info(`[llm] All providers exhausted, waiting ${best.waitMs}ms for ${best.provider} cooldown`);
-          await sleep(best.waitMs);
-        }
-        try {
-          const fallbackModel = DEFAULT_MODELS[best.provider];
-          const retryRequest = { ...request, model: fallbackModel, thinkingEnabled: false };
-          const response = await this.generateWithRetry(best.provider, retryRequest);
-          circuitBreaker.recordSuccess(best.provider);
-          return { ...response, usedProvider: best.provider };
-        } catch (retryErr) {
-          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-          errors.push({ provider: best.provider, error: `post-cooldown: ${retryMsg}` });
         }
       }
     }
@@ -267,4 +241,4 @@ export class LLMRouter {
 // Singleton instance
 export const llmRouter = new LLMRouter();
 
-export { circuitBreaker } from './circuitBreaker.js';
+export { errorTracker } from './circuitBreaker.js';

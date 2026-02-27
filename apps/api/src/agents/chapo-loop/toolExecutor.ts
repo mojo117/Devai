@@ -1,13 +1,19 @@
 import { executeToolWithApprovalBridge } from '../../actions/approvalBridge.js';
 import * as stateManager from '../stateManager.js';
 import type { AgentErrorHandler } from '../error-handler.js';
-import type { DecisionPathInsights } from '../answer-validator.js';
 import type {
   AgentStreamEvent,
   ChapoLoopResult,
   RiskLevel,
 } from '../types.js';
 import type { QueueQuestionOptions } from './gateManager.js';
+
+interface DecisionPathInsights {
+  path: 'answer' | 'tool';
+  reason: string;
+  confidence: number;
+  unresolvedAssumptions: string[];
+}
 import {
   setChapoPlan,
 } from './chapoControlTools.js';
