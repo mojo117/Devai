@@ -84,6 +84,14 @@ class CircuitBreaker {
     }
   }
 
+  /** Returns ms until this provider's cooldown expires (0 if already available). */
+  getTimeUntilAvailable(provider: string): number {
+    const health = this.getHealth(provider);
+    if (health.state !== 'open' || !health.openedAt) return 0;
+    const remaining = COOLDOWN_MS - (Date.now() - health.openedAt);
+    return Math.max(0, remaining);
+  }
+
   getStatus(provider: string): { state: string; errorCount: number; lastError: string | null } {
     const health = this.getHealth(provider);
     return {

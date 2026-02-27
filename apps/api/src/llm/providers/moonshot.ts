@@ -64,7 +64,7 @@ export class MoonshotProvider implements LLMProviderAdapter {
 
     const createParams: Record<string, unknown> = {
       model,
-      max_tokens: request.maxTokens || 4096,
+      max_tokens: request.maxTokens || 16384,
       messages,
       tools,
     };

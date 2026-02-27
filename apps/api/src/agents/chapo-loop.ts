@@ -84,6 +84,7 @@ export class ChapoLoop {
   private iteration = 0;
   private reflexionUsed = false;
   private totalTokensUsed = 0;
+  private lastContent = '';
   private contextManager: ChapoLoopContextManager;
   private gateManager: ChapoLoopGateManager;
   private traceId = '';
@@ -409,6 +410,9 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
         continue;
       }
 
+      // Track last text content for loop exhaustion fallback
+      if (response.content) this.lastContent = response.content;
+
       // No tool calls → ACTION: ANSWER
       if (!response.toolCalls || response.toolCalls.length === 0) {
         const answer = response.content || '';
@@ -573,16 +577,13 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
       }
     }
 
-    // Loop exhaustion — ask user if they want to continue
-    return this.queueQuestion(
-      'This request needed more steps than allowed. Should I continue?',
-      this.iteration,
-      {
-        kind: 'continue',
-        turnId: this.getActiveTurnId() || undefined,
-        fingerprint: `limit:plain:${this.getActiveTurnId() || 'none'}`,
-      },
-    );
+    // Loop exhaustion — deliver whatever we have so far
+    console.warn(`${trace}[chapo-loop] Loop exhausted after ${this.iteration} iterations, delivering last answer`);
+    return {
+      answer: this.lastContent || 'Maximale Iterationen erreicht. Bitte erneut versuchen oder die Aufgabe aufteilen.',
+      status: 'completed' as const,
+      totalIterations: this.iteration,
+    };
   }
 
   private extractFilePathsFromToolCalls(toolCalls: Array<{ name: string; arguments: Record<string, unknown> }>): string[] {

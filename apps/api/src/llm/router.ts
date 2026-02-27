@@ -228,7 +228,32 @@ export class LLMRouter {
       }
     }
 
-    // All providers failed
+    // All providers failed — check if any were only blocked by circuit breaker.
+    // If so, wait for the shortest cooldown and retry once instead of giving up.
+    const breakerBlocked = errors.filter(e => e.error === 'circuit breaker open');
+    if (breakerBlocked.length > 0) {
+      const waits = breakerBlocked
+        .map(e => ({ provider: e.provider as LLMProvider, waitMs: circuitBreaker.getTimeUntilAvailable(e.provider) }))
+        .sort((a, b) => a.waitMs - b.waitMs);
+      const best = waits[0];
+      if (best.waitMs <= 35_000) {
+        if (best.waitMs > 0) {
+          console.info(`[llm] All providers exhausted, waiting ${best.waitMs}ms for ${best.provider} cooldown`);
+          await sleep(best.waitMs);
+        }
+        try {
+          const fallbackModel = DEFAULT_MODELS[best.provider];
+          const retryRequest = { ...request, model: fallbackModel, thinkingEnabled: false };
+          const response = await this.generateWithRetry(best.provider, retryRequest);
+          circuitBreaker.recordSuccess(best.provider);
+          return { ...response, usedProvider: best.provider };
+        } catch (retryErr) {
+          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          errors.push({ provider: best.provider, error: `post-cooldown: ${retryMsg}` });
+        }
+      }
+    }
+
     const errorSummary = errors.map(e => `${e.provider}: ${e.error}`).join('; ');
     throw new Error(`All LLM providers failed. Errors: ${errorSummary}`);
   }
