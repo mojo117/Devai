@@ -35,7 +35,8 @@ import type {
 } from './types.js';
 import type { LLMProvider, ContentBlock } from '../llm/types.js';
 import { getTextContent } from '../llm/types.js';
-import { tagCurrentWork } from '../memory/topicTagger.js';
+import { tagCurrentWork } from '../memory/topicTagger.js'
+import { extractTurnEpisode, extractToolEpisode } from '../memory/episodicExtraction.js'
 import type { QueueQuestionOptions } from './chapo-loop/gateManager.js';
 
 export type SendEventFn = (event: AgentStreamEvent) => void;
@@ -435,6 +436,14 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
           }
         }
 
+        // Fire-and-forget: extract episodic turn summary
+        extractTurnEpisode(this.sessionId, {
+          userMessage: userTextForReview.slice(0, 500),
+          assistantAnswer: answer.slice(0, 500),
+          toolsUsed: this.toolCallLog.map((t) => t.name),
+          iteration: this.iteration,
+        }).catch((err) => console.error(`${trace}[chapo-loop] episodic turn extraction failed:`, err))
+
         return this.answerValidator.validateAndNormalize(userTextForReview, answer, this.iteration, this.emitDecisionPath.bind(this));
       }
 
@@ -483,6 +492,14 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
                 tool: toolCall.name,
                 summary: buildActionSummary(toolCall.name, toolCall.arguments, outcome.toolResult),
               });
+            }
+            // Fire-and-forget: episodic extraction for significant tool results
+            if (!outcome.toolResult.isError) {
+              extractToolEpisode(this.sessionId, {
+                toolName: toolCall.name,
+                toolArgs: toolCall.arguments,
+                toolResult: outcome.toolResult.result,
+              }).catch((err) => console.error(`${trace}[chapo-loop] episodic tool extraction failed:`, err))
             }
             // Structured reflection: inject thinking after tool failures
             if (outcome.toolResult.isError) {
