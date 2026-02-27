@@ -134,6 +134,13 @@ export function parseToolEventArtifacts(events: ToolEventLike[]): Artifact[] {
       // Check filename first for markdown (most reliable)
       const isMarkdown = filename && (filename.endsWith('.md') || filename.endsWith('.markdown'));
       
+      // For markdown files, require inline content - skip if missing
+      // This allows code block parsing to pick up the content instead
+      if (isMarkdown && !inlineContent) {
+        console.log(`[artifactParser] Skipping show_in_preview for ${filename} - no inline content, code block parser will handle it`);
+        continue;
+      }
+
       // Resolve artifact type
       let artifactType: Artifact['type'] = 'html';
       if (isMarkdown) {
