@@ -5,10 +5,9 @@
 import { isValidEngine, formatEngineStatus, type EngineName } from '../../llm/engineProfiles.js';
 import { setDefaultEngine, setDefaultMode } from '../../db/queries.js';
 import {
-  getState,
+  ensureStateLoaded,
   setGatheredInfo,
   flushState,
-  getSessionMode,
   setSessionMode,
   abortAllLoops,
   getActiveLoopCount,
@@ -27,9 +26,10 @@ export async function tryHandleSlashCommand(
   const engineMatch = trimmed.match(/^\/engine(?:\s+(.*))?$/i);
   if (engineMatch) {
     const arg = engineMatch[1]?.trim().toLowerCase();
+    const state = await ensureStateLoaded(sessionId);
+    
     if (!arg) {
-      const currentEngine = (getState(sessionId)
-        ?.taskContext.gatheredInfo.engineProfile as string) || 'glm';
+      const currentEngine = (state.taskContext.gatheredInfo.engineProfile as string) || 'glm';
       return formatEngineStatus(currentEngine as EngineName);
     }
     if (isValidEngine(arg)) {
@@ -71,7 +71,8 @@ export async function tryHandleSlashCommand(
   }
 
   if (trimmed === '/mode') {
-    const current = getSessionMode(sessionId);
+    const state = await ensureStateLoaded(sessionId);
+    const current: SessionMode = (state.taskContext.gatheredInfo.loopMode as SessionMode) || 'serial';
     const next: SessionMode = current === 'serial' ? 'parallel' : 'serial';
     setSessionMode(sessionId, next);
     await flushState(sessionId);
