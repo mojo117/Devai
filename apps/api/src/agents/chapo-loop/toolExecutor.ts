@@ -119,12 +119,16 @@ export class ChapoToolExecutor {
         
         let content: string | undefined;
         if (isTextFile) {
-          const downloaded = await downloadUserfile(file.storage_path);
-          if (downloaded) {
-            content = downloaded.buffer.toString('utf-8');
-            console.log(`[show_in_preview] Downloaded ${content.length} chars for ${file.original_name}`);
-          } else {
-            console.warn(`[show_in_preview] Failed to download ${file.original_name}`);
+          try {
+            const downloaded = await downloadUserfile(file.storage_path);
+            if (downloaded) {
+              content = downloaded.buffer.toString('utf-8');
+              console.log(`[show_in_preview] Downloaded ${content.length} chars for ${file.original_name}`);
+            } else {
+              console.warn(`[show_in_preview] downloadUserfile returned null for ${file.storage_path}`);
+            }
+          } catch (downloadErr) {
+            console.error(`[show_in_preview] Download error:`, downloadErr);
           }
         }
 
