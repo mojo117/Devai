@@ -19,7 +19,6 @@ export class ZAIProvider implements LLMProviderAdapter {
       this.client = new OpenAI({
         apiKey: config.zaiApiKey,
         baseURL: 'https://api.z.ai/api/coding/paas/v4',
-        timeout: 120_000, // 120s request timeout (GLM-5 reasoning is slow with tools)
       });
     }
     return this.client;
@@ -47,9 +46,10 @@ export class ZAIProvider implements LLMProviderAdapter {
     }
 
     // Add conversation messages
+    const thinkingActive = !!(request.thinkingEnabled && (request.model || 'glm-5') === 'glm-5');
     for (const m of request.messages) {
       if (m.role === 'system') continue; // Already handled above
-      this.convertMessage(m, messages, toolNameToAlias);
+      this.convertMessage(m, messages, toolNameToAlias, thinkingActive);
     }
 
     const tools = request.toolsEnabled && request.tools
@@ -189,7 +189,8 @@ export class ZAIProvider implements LLMProviderAdapter {
   private convertMessage(
     message: LLMMessage,
     messages: OpenAI.ChatCompletionMessageParam[],
-    toolNameToAlias: Map<string, string>
+    toolNameToAlias: Map<string, string>,
+    thinkingActive: boolean
   ): void {
     // Assistant message with tool calls
     if (message.role === 'assistant' && message.toolCalls?.length) {
@@ -201,15 +202,19 @@ export class ZAIProvider implements LLMProviderAdapter {
           arguments: JSON.stringify(tc.arguments),
         },
       }));
-      // GLM-5 thinking mode: re-inject reasoning_content for context continuity
-      const reasoningContent = message.toolCalls[0]?.providerMetadata?.reasoning_content as string | undefined;
       const assistantMsg: Record<string, unknown> = {
         role: 'assistant',
         content: getTextContent(message.content) || null,
         tool_calls: toolCalls,
       };
-      if (reasoningContent) {
-        assistantMsg.reasoning_content = reasoningContent;
+      // Only inject reasoning_content when thinking is active for this request.
+      // Cross-provider fallback disables thinking, so stale reasoning_content
+      // from a different provider won't leak into the message history.
+      if (thinkingActive) {
+        const reasoningContent = message.toolCalls[0]?.providerMetadata?.reasoning_content as string | undefined;
+        if (reasoningContent) {
+          assistantMsg.reasoning_content = reasoningContent;
+        }
       }
       messages.push(assistantMsg as unknown as OpenAI.ChatCompletionMessageParam);
       return;

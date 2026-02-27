@@ -21,7 +21,6 @@ export class MoonshotProvider implements LLMProviderAdapter {
       this.client = new OpenAI({
         apiKey: config.moonshotApiKey,
         baseURL: 'https://api.moonshot.ai/v1',
-        timeout: 120_000,
       });
     }
     return this.client;
@@ -48,9 +47,10 @@ export class MoonshotProvider implements LLMProviderAdapter {
       messages.push({ role: 'system', content: request.systemPrompt });
     }
 
+    const thinkingActive = !!(request.thinkingEnabled && (request.model || 'kimi-k2.5').startsWith('kimi-'));
     for (const m of request.messages) {
       if (m.role === 'system') continue;
-      this.convertMessage(m, messages, toolNameToAlias);
+      this.convertMessage(m, messages, toolNameToAlias, thinkingActive);
     }
 
     const tools = request.toolsEnabled && request.tools
@@ -174,7 +174,8 @@ export class MoonshotProvider implements LLMProviderAdapter {
   private convertMessage(
     message: LLMMessage,
     messages: OpenAI.ChatCompletionMessageParam[],
-    toolNameToAlias: Map<string, string>
+    toolNameToAlias: Map<string, string>,
+    thinkingActive: boolean
   ): void {
     if (message.role === 'assistant' && message.toolCalls?.length) {
       const toolCalls: OpenAI.ChatCompletionMessageToolCall[] = message.toolCalls.map((tc, idx) => {
@@ -189,16 +190,16 @@ export class MoonshotProvider implements LLMProviderAdapter {
           },
         };
       });
-      // Kimi requires reasoning_content on assistant tool-call messages when thinking is enabled.
-      // Retrieve it from providerMetadata where we stored it during generate().
-      const reasoningContent = message.toolCalls[0]?.providerMetadata?.reasoning_content as string | undefined;
       const assistantMsg: Record<string, unknown> = {
         role: 'assistant',
         content: getTextContent(message.content) || null,
         tool_calls: toolCalls,
       };
-      if (reasoningContent) {
-        assistantMsg.reasoning_content = reasoningContent;
+      // Kimi requires reasoning_content on ALL assistant tool-call messages when
+      // thinking is enabled — must be consistent. When thinking is off, never inject it.
+      if (thinkingActive) {
+        const reasoningContent = message.toolCalls[0]?.providerMetadata?.reasoning_content as string | undefined;
+        assistantMsg.reasoning_content = reasoningContent || '';
       }
       messages.push(assistantMsg as unknown as OpenAI.ChatCompletionMessageParam);
       return;

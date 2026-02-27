@@ -187,7 +187,11 @@ export class LLMRouter {
       if (originalModel && !isModelForProvider(originalModel, providerName)) {
         const fallbackModel = DEFAULT_MODELS[providerName];
         console.info(`[llm] Adjusting model from ${originalModel} to ${fallbackModel} for provider ${providerName}`);
-        adjustedRequest = { ...request, model: fallbackModel };
+        // Disable thinking on cross-provider fallback: reasoning_content from the
+        // original provider's history is incompatible with the fallback provider's
+        // format requirements (e.g. Kimi requires it on ALL assistant messages when
+        // thinking is enabled, but ZAI only adds it on thinking-enabled iterations).
+        adjustedRequest = { ...request, model: fallbackModel, thinkingEnabled: false };
       }
 
       try {
