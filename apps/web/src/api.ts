@@ -56,9 +56,11 @@ async function readApiError(res: Response): Promise<string> {
   }
 }
 
-// Auth token is now managed via httpOnly cookie set by the server.
-// These functions are kept for backward compatibility but no longer store/read the JWT.
-let _authTokenMemory: string | null = null;
+// Auth is managed entirely via httpOnly cookie set by the server.
+// The JWT is never stored in JavaScript memory to prevent XSS token theft.
+// setAuthToken/clearAuthToken toggle a boolean flag used only for UI guards
+// (e.g. "is the user logged in?").  The actual auth credential is the cookie.
+let _authenticated = false;
 let _unauthorizedHandler: (() => void) | null = null;
 let _unauthorizedNotified = false;
 let _tokenRefreshPromise: Promise<boolean> | null = null;
@@ -69,16 +71,19 @@ interface AuthStatusResponse {
   expiresAt?: string;
 }
 
+/** Returns a truthy sentinel when the user is authenticated, null otherwise.
+ *  Does NOT return the actual JWT — auth goes through httpOnly cookies. */
 export function getAuthToken(): string | null {
-  return _authTokenMemory;
+  return _authenticated ? 'cookie-auth' : null;
 }
 
-export function setAuthToken(token: string): void {
-  _authTokenMemory = token;
+/** Mark the user as authenticated.  The actual JWT is in the httpOnly cookie. */
+export function setAuthToken(_token: string): void {
+  _authenticated = true;
 }
 
 export function clearAuthToken(): void {
-  _authTokenMemory = null;
+  _authenticated = false;
 }
 
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
@@ -98,22 +103,14 @@ function notifyUnauthorized(): void {
   }
 }
 
+/** Pass-through helper kept for minimal diff.
+ *  Auth is handled by httpOnly cookie — no Authorization header needed. */
 function withAuthHeaders(headers: Record<string, string> = {}): Record<string, string> {
-  const token = getAuthToken();
-  if (!token) return headers;
-  return { ...headers, Authorization: `Bearer ${token}` };
+  return headers;
 }
 
 function isAuthEndpoint(url: string): boolean {
   return /\/api\/auth\/(login|verify|logout|refresh)$/.test(url);
-}
-
-function setAuthorizationHeader(init?: RequestInit): RequestInit | undefined {
-  const token = getAuthToken();
-  if (!token) return init;
-  const headers = new Headers(init?.headers || undefined);
-  headers.set('Authorization', `Bearer ${token}`);
-  return { ...init, headers };
 }
 
 async function rawFetch(url: string, init?: RequestInit): Promise<Response> {
@@ -159,7 +156,10 @@ async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
 
   const refreshed = await requestTokenRefresh();
   if (refreshed) {
-    res = await rawFetch(url, setAuthorizationHeader(init));
+    // The refresh endpoint set a new httpOnly cookie; retry with
+    // the same init — rawFetch uses credentials:'include' so the
+    // browser sends the fresh cookie automatically.
+    res = await rawFetch(url, init);
   }
   if (res.status === 401) {
     notifyUnauthorized();
@@ -465,10 +465,12 @@ export async function updateSessionTitle(sessionId: string, title: string): Prom
 }
 
 export async function deleteSession(sessionId: string): Promise<{ success: boolean }> {
-  return fetchJson<{ success: boolean }>(`${API_BASE}/sessions/${sessionId}`, {
+  const result = await fetchJson<{ success: boolean }>(`${API_BASE}/sessions/${sessionId}`, {
     method: 'DELETE',
     headers: withAuthHeaders(),
   });
+  cleanupSessionData(sessionId);
+  return result;
 }
 
 export async function saveSessionMessage(
@@ -739,8 +741,17 @@ function loadLastSeq(sessionId: string): number {
   }
 }
 
+const MAX_TRACKED_SESSIONS = 50;
+
 function storeLastSeq(sessionId: string, seq: number): void {
   lastSeqBySession.set(sessionId, seq);
+  // Evict oldest entries if we're tracking too many sessions
+  if (lastSeqBySession.size > MAX_TRACKED_SESSIONS) {
+    const oldest = lastSeqBySession.keys().next().value;
+    if (oldest && oldest !== sessionId) {
+      lastSeqBySession.delete(oldest);
+    }
+  }
   try {
     localStorage.setItem(getSeqStorageKey(sessionId), String(seq));
   } catch {
@@ -758,6 +769,15 @@ function addSessionListener(sessionId: string, fn: (event: ChatStreamEvent) => v
     cur.delete(fn);
     if (cur.size === 0) sessionListeners.delete(sessionId);
   };
+}
+
+/** Remove all in-memory and localStorage state for a deleted session. */
+export function cleanupSessionData(sessionId: string): void {
+  sessionListeners.delete(sessionId);
+  lastSeqBySession.delete(sessionId);
+  try {
+    localStorage.removeItem(getSeqStorageKey(sessionId));
+  } catch { /* ignore */ }
 }
 
 function getChatWsUrl(): string {
