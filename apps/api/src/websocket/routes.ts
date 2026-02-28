@@ -16,6 +16,18 @@ const WS_RATE_LIMIT_WINDOW_MS = 60_000;
 const WS_HEARTBEAT_INTERVAL_MS = 30_000;
 const WS_HEARTBEAT_TIMEOUT_MS = 95_000;
 
+/** Send a message only if the socket is still open.  Returns false on failure. */
+function safeSend(socket: WebSocket, data: unknown): boolean {
+  if (socket.readyState !== 1 /* WebSocket.OPEN */) return false;
+  try {
+    socket.send(JSON.stringify(data));
+    return true;
+  } catch (err) {
+    console.warn('[ws] safeSend failed:', err instanceof Error ? err.message : err);
+    return false;
+  }
+}
+
 interface WsConnectionGuards {
   allowMessage: () => boolean;
   cleanup: () => void;
@@ -35,11 +47,7 @@ function createWsConnectionGuards(socket: WebSocket): WsConnectionGuards {
 
   const closeWithError = (error: string, code: number) => {
     cleanup();
-    try {
-      socket.send(JSON.stringify({ type: 'error', error }));
-    } catch (err) {
-      console.warn('[ws] Send failed while closing:', err instanceof Error ? err.message : err);
-    }
+    safeSend(socket, { type: 'error', error });
     try {
       socket.close(code, error.slice(0, 120));
     } catch (err) {
@@ -53,11 +61,7 @@ function createWsConnectionGuards(socket: WebSocket): WsConnectionGuards {
       closeWithError('WebSocket heartbeat timeout. Please reconnect.', 4000);
       return;
     }
-    try {
-      socket.send(JSON.stringify({ type: 'ping', timestamp: new Date().toISOString() }));
-    } catch (err) {
-      console.warn('[ws] Heartbeat ping send failed:', err instanceof Error ? err.message : err);
-    }
+    safeSend(socket, { type: 'ping', timestamp: new Date().toISOString() });
   }, WS_HEARTBEAT_INTERVAL_MS);
 
   return {
@@ -87,9 +91,7 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
     // Auth: require valid JWT token (query param or httpOnly cookie)
     const token = request.cookies?.devai_token || url.searchParams.get('token') || '';
     if (!verifyToken(token)) {
-      try {
-        socket.send(JSON.stringify({ type: 'error', error: 'Invalid or expired token' }));
-      } catch (err) { console.warn('[ws] Failed to send auth error:', err instanceof Error ? err.message : err); }
+      safeSend(socket, { type: 'error', error: 'Invalid or expired token' });
       socket.close();
       return;
     }
@@ -105,11 +107,11 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
       try {
         const pendingActions = await getPendingActions();
         if (pendingActions.length > 0) {
-          socket.send(JSON.stringify({
+          safeSend(socket, {
             type: 'initial_sync',
             actions: pendingActions,
             timestamp: new Date().toISOString(),
-          }));
+          });
         }
       } catch (err) {
         console.error('[WS] Failed to send initial pending actions:', err);
@@ -123,7 +125,7 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
         const message = JSON.parse(data.toString());
 
         if (message.type === 'ping') {
-          socket.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
+          safeSend(socket, { type: 'pong', timestamp: new Date().toISOString() });
           return;
         }
 
@@ -157,9 +159,7 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
     const url = new URL(request.url || '', `http://${request.headers.host}`);
     const token = request.cookies?.devai_token || url.searchParams.get('token') || '';
     if (!verifyToken(token)) {
-      try {
-        socket.send(JSON.stringify({ type: 'error', error: 'Invalid or expired token' }));
-      } catch (err) { console.warn('[ws] Failed to send auth error (chat):', err instanceof Error ? err.message : err); }
+      safeSend(socket, { type: 'error', error: 'Invalid or expired token' });
       socket.close();
       return;
     }
@@ -188,11 +188,11 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
     (async () => {
       try {
         const pendingActions = await getPendingActions();
-        socket.send(JSON.stringify({
+        safeSend(socket, {
           type: 'initial_sync',
           actions: pendingActions,
           timestamp: new Date().toISOString(),
-        }));
+        });
       } catch (err) {
         console.error('[WS] Failed to send initial pending actions (chat ws):', err);
       }
@@ -209,7 +209,7 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
       }
 
       if (msg?.type === 'ping') {
-        socket.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
+        safeSend(socket, { type: 'pong', timestamp: new Date().toISOString() });
         return;
       }
 
@@ -222,7 +222,7 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
         const sinceSeq = typeof msg.sinceSeq === 'number' ? msg.sinceSeq : 0;
         const replay = getEventsSince(id, sinceSeq);
         for (const ev of replay) {
-          socket.send(JSON.stringify(ev));
+          if (!safeSend(socket, ev)) break; // stop replay if socket closed mid-loop
         }
 
         // Send a lightweight resync snapshot as well (pending gates + pending actions).
@@ -230,7 +230,7 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
           await ensureStateLoaded(id);
           const state = getState(id);
           const pendingActions = await getPendingActions();
-          socket.send(JSON.stringify({
+          safeSend(socket, {
             type: 'hello_ack',
             sessionId: id,
             currentSeq: getCurrentSeq(id),
@@ -238,9 +238,9 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
             pendingQuestions: state?.pendingQuestions ?? [],
             pendingActions,
             timestamp: new Date().toISOString(),
-          }));
+          });
         } catch (err) {
-          socket.send(JSON.stringify({
+          safeSend(socket, {
             type: 'hello_ack',
             sessionId: id,
             currentSeq: getCurrentSeq(id),
@@ -249,7 +249,7 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
             pendingActions: [],
             error: err instanceof Error ? err.message : 'resync failed',
             timestamp: new Date().toISOString(),
-          }));
+          });
         }
         return;
       }
@@ -264,25 +264,22 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
       if (command) {
         // Validate required fields per command type
         if (command.type === 'user_request' && !command.message.trim()) {
-          socket.send(JSON.stringify({ type: 'error', requestId, error: 'Missing message' }));
+          safeSend(socket, { type: 'error', requestId, error: 'Missing message' });
           return;
         }
         if (command.type === 'user_approval_decided' && (!command.sessionId || !command.approvalId)) {
-          socket.send(JSON.stringify({ type: 'error', requestId, error: 'Missing sessionId or approvalId' }));
+          safeSend(socket, { type: 'error', requestId, error: 'Missing sessionId or approvalId' });
           return;
         }
         if (command.type === 'user_question_answered' && (!command.sessionId || !command.questionId)) {
-          socket.send(JSON.stringify({ type: 'error', requestId, error: 'Missing sessionId or questionId' }));
+          safeSend(socket, { type: 'error', requestId, error: 'Missing sessionId or questionId' });
           return;
         }
 
         try {
           const result = await commandDispatcher.dispatch(command, { joinSession });
           if (result.type === 'queued') {
-            // Resolve request immediately so UI doesn't wait for a terminal response
-            // while the active loop continues with queued follow-up messages.
-            // Do not inject a synthetic assistant text message for queued requests.
-            socket.send(JSON.stringify({
+            safeSend(socket, {
               type: 'response',
               requestId,
               response: {
@@ -291,15 +288,15 @@ export const websocketRoutes: FastifyPluginAsync = async (app) => {
                 sessionId: result.sessionId,
                 agentHistory: getState(result.sessionId)?.agentHistory || [],
               },
-            }));
+            });
           }
         } catch (err) {
           console.error('[WS] Command dispatch error:', err);
-          socket.send(JSON.stringify({
+          safeSend(socket, {
             type: 'error',
             requestId,
             error: err instanceof Error ? err.message : 'Command dispatch failed',
-          }));
+          });
         }
         return;
       }
