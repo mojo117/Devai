@@ -623,6 +623,106 @@ const lastSeqBySession = new Map<string, number>();
 const sessionListeners = new Map<string, Set<(event: ChatStreamEvent) => void>>();
 const actionListeners = new Set<(event: ChatStreamEvent) => void>();
 
+// --- Visibility-aware WS recovery for mobile ---
+let pageHidden = typeof document !== 'undefined' && document.hidden;
+let wsClosedWhileHidden = false;
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      pageHidden = true;
+      // Pause all pending request timeouts — they shouldn't fire while the
+      // user isn't looking at the screen.
+      for (const req of pendingWsRequests.values()) {
+        window.clearTimeout(req.timeoutId);
+        req.timeoutId = 0;
+      }
+    } else {
+      pageHidden = false;
+      if (wsClosedWhileHidden || (chatWs && chatWs.readyState !== WebSocket.OPEN)) {
+        wsClosedWhileHidden = false;
+        recoverAfterVisibilityResume();
+      } else {
+        // WS survived — just restart the paused timeouts
+        resumePendingTimeouts();
+      }
+    }
+  });
+}
+
+function resumePendingTimeouts(): void {
+  for (const [id, req] of pendingWsRequests) {
+    if (req.timeoutId === 0) {
+      req.timeoutId = window.setTimeout(() => {
+        const p = pendingWsRequests.get(id);
+        if (p) {
+          pendingWsRequests.delete(id);
+          p.reject(new Error('Chat WebSocket request timed out'));
+        }
+      }, 180000);
+    }
+  }
+}
+
+async function recoverAfterVisibilityResume(): Promise<void> {
+  if (pendingWsRequests.size === 0) {
+    // No pending requests — just reconnect the control plane silently
+    ensureChatWsConnected().catch(() => { scheduleControlPlaneReconnect(); });
+    return;
+  }
+
+  const surviving = new Map(pendingWsRequests);
+
+  // 1. Reconnect immediately (skip backoff — user is actively looking)
+  try {
+    await ensureChatWsConnected();
+  } catch {
+    scheduleControlPlaneReconnect();
+    resumePendingTimeouts(); // let the 180s timeout handle it
+    return;
+  }
+
+  // 2. Re-join sessions so server replays missed events
+  for (const [, req] of surviving) {
+    if (req.sessionId) {
+      try {
+        const ws = chatWs;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'hello', sessionId: req.sessionId, sinceSeq: loadLastSeq(req.sessionId) }));
+        }
+      } catch { /* ignore */ }
+    }
+  }
+
+  // 3. Give replay 8s to deliver responses
+  await new Promise((r) => setTimeout(r, 8000));
+
+  // 4. For any still-pending requests, try REST fallback
+  for (const [id, req] of surviving) {
+    if (!pendingWsRequests.has(id)) continue; // already resolved via replay
+    if (!req.sessionId) continue;
+    try {
+      const history = await fetchSessionMessages(req.sessionId);
+      if (history.messages.length > 0) {
+        const last = history.messages[history.messages.length - 1];
+        if (last.role === 'assistant') {
+          pendingWsRequests.delete(id);
+          window.clearTimeout(req.timeoutId);
+          req.resolve({
+            message: last,
+            sessionId: req.sessionId,
+            pendingActions: [],
+            agentHistory: [],
+          });
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  // 5. Restart timeouts for anything still unresolved
+  resumePendingTimeouts();
+}
+
 function getSeqStorageKey(sessionId: string): string {
   return `devai_chat_seq_${sessionId}`;
 }
@@ -702,68 +802,24 @@ function scheduleControlPlaneReconnect(): void {
   }, delay);
 }
 
-let wsRecoveryScheduled = false;
 function failPendingWsRequests(reason: string): void {
   if (pendingWsRequests.size === 0) return;
-  if (wsRecoveryScheduled) return; // onclose + onerror both fire — only recover once
-  wsRecoveryScheduled = true;
 
-  // Don't reject immediately — the backend is still processing the request.
-  // Wait for reconnect, then try to recover via REST polling.
-  // The original 180s timeout is still running as a hard safety net.
-  const surviving = new Map(pendingWsRequests);
-  // Don't clear the map — keep entries so the reconnected WS can still
-  // resolve them if the server replays the response event.
+  if (pageHidden) {
+    // Page is hidden (user minimized / switched tab). Don't reject —
+    // timeouts are already paused. Recovery will happen when the user
+    // returns (visibilitychange → recoverAfterVisibilityResume).
+    wsClosedWhileHidden = true;
+    return;
+  }
 
-  // After reconnect, poll session messages to pick up the result.
-  const tryRecover = async () => {
-    try {
-      await ensureChatWsConnected();
-    } catch {
-      // Reconnect failed — the scheduled reconnect loop will keep trying.
-      // The 180s timeout will eventually reject if nothing works.
-      return;
-    }
-    // Re-join sessions so the server replays any missed events
-    for (const [, req] of surviving) {
-      if (req.sessionId) {
-        try {
-          const ws = chatWs;
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            const sinceSeq = loadLastSeq(req.sessionId);
-            ws.send(JSON.stringify({ type: 'hello', sessionId: req.sessionId, sinceSeq }));
-          }
-        } catch { /* ignore */ }
-      }
-    }
-    // Give the replay 8s to deliver the response. If not, poll via REST.
-    await new Promise((r) => setTimeout(r, 8000));
-    for (const [id, req] of surviving) {
-      if (!pendingWsRequests.has(id)) continue; // already resolved
-      if (!req.sessionId) continue;
-      try {
-        const history = await fetchSessionMessages(req.sessionId);
-        if (history.messages.length > 0) {
-          const last = history.messages[history.messages.length - 1];
-          if (last.role === 'assistant') {
-            pendingWsRequests.delete(id);
-            window.clearTimeout(req.timeoutId);
-            req.resolve({
-              message: last,
-              sessionId: req.sessionId,
-              pendingActions: [],
-              agentHistory: [],
-            });
-          }
-        }
-      } catch { /* ignore — 180s timeout is still the safety net */ }
-    }
-  };
-
-  // Schedule recovery after a short delay (let reconnect happen first)
-  setTimeout(() => {
-    tryRecover().finally(() => { wsRecoveryScheduled = false; });
-  }, 2000);
+  // Page is visible — WS died while user is looking. Reject immediately
+  // so the UI can show a retry option.
+  for (const [id, req] of pendingWsRequests.entries()) {
+    window.clearTimeout(req.timeoutId);
+    req.reject(new Error(reason));
+    pendingWsRequests.delete(id);
+  }
 }
 
 async function ensureChatWsConnected(): Promise<WebSocket> {
