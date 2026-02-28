@@ -1,0 +1,10 @@
+{
+  "name": "stockpulse",
+  "version": "2.0.0",
+  "type": "commonjs",
+  "dependencies": {
+    "@types/node": "^25.3.2",
+    "dotenv": "^17.3.1",
+    "yahoo-finance2": "^3.13.1"
+  }
+}
