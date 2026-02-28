@@ -415,15 +415,15 @@ export function ChatUI({
 
     setMessages((prev) => [...prev, userMessage]);
     // In parallel mode (already loading), freeze existing tool events to the
-    // previous message before clearing — prevents events from Request A
-    // appearing under Request B's message.
+    // previous user message that triggered them — keeps events visually
+    // associated with the prompt they belong to.
     if (isLoadingInternal) {
-      // Find the last assistant or user message to attach orphaned events to
+      const prevUserMsg = messages.filter((m) => m.role === 'user').pop();
       setToolEvents((currentEvents) => {
-        if (currentEvents.length > 0) {
-          setMessageToolEvents((prev) => ({
-            ...prev,
-            [userMessage.id]: [...currentEvents],
+        if (currentEvents.length > 0 && prevUserMsg) {
+          setMessageToolEvents((mte) => ({
+            ...mte,
+            [prevUserMsg.id]: [...(mte[prevUserMsg.id] || []), ...currentEvents],
           }));
         }
         return [];

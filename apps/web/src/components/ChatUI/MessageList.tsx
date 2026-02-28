@@ -235,11 +235,13 @@ export function MessageList({
 
       {/* Messages with associated tool events rendered inline */}
       {messages.map((message) => {
-        const frozen = message.role === 'assistant' ? messageToolEvents[message.id] : undefined;
+        const frozenBefore = message.role === 'assistant' ? messageToolEvents[message.id] : undefined;
+        const frozenAfter = message.role === 'user' ? messageToolEvents[message.id] : undefined;
         return (
           <Fragment key={message.id}>
-            {frozen && frozen.length > 0 && renderToolEventsBlock(frozen, false)}
+            {frozenBefore && frozenBefore.length > 0 && renderToolEventsBlock(frozenBefore, false)}
             {renderMessage(message)}
+            {frozenAfter && frozenAfter.length > 0 && renderToolEventsBlock(frozenAfter, false)}
           </Fragment>
         );
       })}
