@@ -22,7 +22,8 @@ export interface ChatSessionState {
 export type ChatSessionCommand =
   | { type: 'select'; sessionId: string }
   | { type: 'new' }
-  | { type: 'restart' };
+  | { type: 'restart' }
+  | { type: 'delete' };
 
 export interface ChatSessionCommandEnvelope {
   nonce: number;

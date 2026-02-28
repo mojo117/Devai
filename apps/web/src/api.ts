@@ -464,6 +464,13 @@ export async function updateSessionTitle(sessionId: string, title: string): Prom
   });
 }
 
+export async function deleteSession(sessionId: string): Promise<{ success: boolean }> {
+  return fetchJson<{ success: boolean }>(`${API_BASE}/sessions/${sessionId}`, {
+    method: 'DELETE',
+    headers: withAuthHeaders(),
+  });
+}
+
 export async function saveSessionMessage(
   sessionId: string,
   message: { id: string; role: string; content: string; timestamp: string },

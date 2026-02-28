@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import { fetchSessions, createSession, fetchSessionMessages, updateSessionTitle } from '../../../api';
+import { fetchSessions, fetchSessionMessages, updateSessionTitle, deleteSession } from '../../../api';
 import type { ChatMessage, SessionSummary } from '../../../types';
 import type { ChatSessionState, ChatSessionCommandEnvelope, ToolEvent } from '../types';
 
@@ -63,7 +63,8 @@ export function useChatSession({
 
   // Initial session load — use sessionStorage (tab-scoped) so each tab
   // tracks its own active session independently.
-  // New tab = no sessionStorage entry = create a fresh session.
+  // New tab = no sessionStorage entry = start with a blank slate (session
+  // gets created server-side when the first message is sent).
   useEffect(() => {
     let isMounted = true;
     const load = async () => {
@@ -74,14 +75,24 @@ export function useChatSession({
           storedId = sessionStorage.getItem('devai_activeSessionId');
         } catch { /* ignore */ }
 
-        if (!storedId) {
-          // New tab — create a fresh session
-          const response = await createSession();
-          storedId = response.session.id;
-          try { sessionStorage.setItem('devai_activeSessionId', storedId); } catch { /* ignore */ }
+        if (storedId) {
+          await refreshSessions(storedId);
+        } else {
+          // New tab — just load the session list, don't create one yet.
+          // A session will be created automatically when the user sends
+          // their first message.
+          const sessionList = await fetchSessions();
+          if (isMounted) setSessions(sessionList.sessions);
+          // If there are existing sessions, select the first one
+          if (sessionList.sessions.length > 0) {
+            await refreshSessions(sessionList.sessions[0].id);
+          } else {
+            if (isMounted) {
+              setSessionId(null);
+              setMessages([]);
+            }
+          }
         }
-
-        await refreshSessions(storedId);
       } catch {
         // Ignore load errors
       } finally {
@@ -103,17 +114,14 @@ export function useChatSession({
   }, [sessionId, sessions, sessionsLoading, messages.length, onSessionStateChange]);
 
   const handleNewChat = useCallback(async () => {
-    setSessionsLoading(true);
-    try {
-      const response = await createSession();
-      await refreshSessions(response.session.id);
-      onClearPinnedUserfiles?.();
-    } catch {
-      // Ignore create errors
-    } finally {
-      setSessionsLoading(false);
-    }
-  }, [refreshSessions, onClearPinnedUserfiles]);
+    // Don't create a session in the DB yet — just reset local state.
+    // The session will be created server-side when the user sends their
+    // first message (sendMultiAgentMessage with no sessionId).
+    setSessionId(null);
+    setMessages([]);
+    setToolEvents([]);
+    onClearPinnedUserfiles?.();
+  }, [setSessionId, setMessages, setToolEvents, onClearPinnedUserfiles]);
 
   const handleSelectSession = useCallback(async (selectedId: string) => {
     setSessionsLoading(true);
@@ -128,7 +136,7 @@ export function useChatSession({
 
   const handleRestartChat = useCallback(async () => {
     if (messages.length === 0) {
-      await handleNewChat();
+      handleNewChat();
       return;
     }
 
@@ -140,8 +148,9 @@ export function useChatSession({
         const timestamp = new Date().toLocaleString();
         await updateSessionTitle(sessionId, `[Restarted ${timestamp}] ${currentTitle}`);
       }
-      const response = await createSession();
-      await refreshSessions(response.session.id);
+      // Reset to blank — session will be created when first message is sent
+      setSessionId(null);
+      setMessages([]);
       setToolEvents([]);
       onClearPinnedUserfiles?.();
     } catch {
@@ -149,7 +158,30 @@ export function useChatSession({
     } finally {
       setSessionsLoading(false);
     }
-  }, [messages.length, sessionId, sessions, handleNewChat, refreshSessions, setToolEvents, onClearPinnedUserfiles]);
+  }, [messages.length, sessionId, sessions, handleNewChat, setSessionId, setMessages, setToolEvents, onClearPinnedUserfiles]);
+
+  const handleDeleteSession = useCallback(async () => {
+    if (!sessionId) return;
+    setSessionsLoading(true);
+    try {
+      await deleteSession(sessionId);
+      const sessionList = await fetchSessions();
+      setSessions(sessionList.sessions);
+      if (sessionList.sessions.length > 0) {
+        await refreshSessions(sessionList.sessions[0].id);
+      } else {
+        // No sessions left — reset to blank
+        setSessionId(null);
+        setMessages([]);
+      }
+      setToolEvents([]);
+      onClearPinnedUserfiles?.();
+    } catch {
+      // Ignore delete errors
+    } finally {
+      setSessionsLoading(false);
+    }
+  }, [sessionId, refreshSessions, setSessionId, setMessages, setToolEvents, onClearPinnedUserfiles]);
 
   // Accept session commands from the global header
   const lastSessionCommandNonceRef = useRef<number>(0);
@@ -165,8 +197,10 @@ export function useChatSession({
       void handleNewChat();
     } else if (cmd.type === 'restart') {
       void handleRestartChat();
+    } else if (cmd.type === 'delete') {
+      void handleDeleteSession();
     }
-  }, [sessionCommand, handleSelectSession, handleNewChat, handleRestartChat]);
+  }, [sessionCommand, handleSelectSession, handleNewChat, handleRestartChat, handleDeleteSession]);
 
   const refreshSessionList = useCallback(async () => {
     const sessionList = await fetchSessions();
@@ -183,5 +217,6 @@ export function useChatSession({
     handleNewChat,
     handleSelectSession,
     handleRestartChat,
+    handleDeleteSession,
   };
 }
