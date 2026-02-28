@@ -62,6 +62,54 @@ function truncateTelegramMessage(text: string): string {
   return `${text.slice(0, TELEGRAM_MESSAGE_MAX - 30)}\n\n...[truncated for Telegram]`;
 }
 
+/** Convert GitHub-flavored markdown to Telegram-compatible Markdown.
+ *  Telegram's legacy Markdown doesn't support tables, headers, or **double bold**. */
+function convertGfmToTelegram(text: string): string {
+  let result = text;
+
+  // Convert **bold** to *bold* (Telegram uses single asterisks)
+  result = result.replace(/\*\*(.+?)\*\*/g, '*$1*');
+
+  // Convert ## headers to *bold* lines
+  result = result.replace(/^#{1,6}\s+(.+)$/gm, '*$1*');
+
+  // Remove horizontal rules (---, ___, ***)
+  result = result.replace(/^[-_*]{3,}\s*$/gm, '');
+
+  // Convert markdown tables to aligned plain text
+  result = result.replace(
+    /(?:^[ \t]*\|.+\|[ \t]*\n)+/gm,
+    (tableBlock) => {
+      const rows = tableBlock.trim().split('\n').map((row) =>
+        row.trim().replace(/^\||\|$/g, '').split('|').map((cell) => cell.trim())
+      );
+      // Remove separator rows (e.g. |---|---|)
+      const dataRows = rows.filter((cols) =>
+        !cols.every((c) => /^[-:]+$/.test(c))
+      );
+      if (dataRows.length === 0) return '';
+
+      // Calculate column widths
+      const colCount = Math.max(...dataRows.map((r) => r.length));
+      const widths: number[] = [];
+      for (let i = 0; i < colCount; i++) {
+        widths.push(Math.max(...dataRows.map((r) => (r[i] || '').length), 1));
+      }
+
+      // Format as fixed-width using monospace
+      const formatted = dataRows.map((cols) =>
+        cols.map((c, i) => c.padEnd(widths[i])).join('  ')
+      ).join('\n');
+      return '```\n' + formatted + '\n```\n';
+    }
+  );
+
+  // Collapse 3+ consecutive blank lines to 2
+  result = result.replace(/\n{3,}/g, '\n\n');
+
+  return result.trim();
+}
+
 export async function sendTelegramMessage(chatId: string | number, text: string): Promise<void> {
   const token = config.telegramBotToken;
   if (!token) {
@@ -69,9 +117,10 @@ export async function sendTelegramMessage(chatId: string | number, text: string)
     return;
   }
 
+  const converted = convertGfmToTelegram(text || '');
   const payload = {
     chat_id: String(chatId),
-    text: truncateTelegramMessage(text || ''),
+    text: truncateTelegramMessage(converted),
     parse_mode: 'Markdown',
   };
 
@@ -89,7 +138,7 @@ export async function sendTelegramMessage(chatId: string | number, text: string)
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: String(chatId),
-      text: truncateTelegramMessage(text || ''),
+      text: truncateTelegramMessage(converted),
     }),
   });
 

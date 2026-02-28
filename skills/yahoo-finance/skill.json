@@ -1,0 +1,26 @@
+{
+  "id": "yahoo-finance",
+  "name": "Yahoo Finance API",
+  "description": "Fetch stock data from Yahoo Finance API. Get current price, PE ratio, PS ratio, market cap, and other financial metrics for any stock ticker. Supports international stocks with suffix (e.g. BASF.DE, BMW.DE for German stocks).",
+  "version": "1.0.0",
+  "parameters": {
+    "ticker": {
+      "type": "string",
+      "description": "Stock ticker symbol (e.g. 'AAPL', 'BMW.DE', 'BAS.F')"
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Optional: specific metrics to fetch (price, peRatio, psRatio, marketCap, dividend, eps, revenue). Defaults to all."
+    }
+  },
+  "createdBy": "chapo",
+  "tags": [
+    "finance",
+    "stocks",
+    "api",
+    "yahoo"
+  ]
+}
