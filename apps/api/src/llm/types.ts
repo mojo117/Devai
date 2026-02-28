@@ -50,6 +50,8 @@ export interface GenerateRequest {
   thinkingEnabled?: boolean;
   kimiSearchEnabled?: boolean;
   webSearchEnabled?: boolean;
+  /** OpenAI-compatible tool_choice: 'auto' | 'required' | 'none' */
+  toolChoice?: 'auto' | 'required' | 'none';
 }
 
 export interface ToolCall {

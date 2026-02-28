@@ -76,6 +76,9 @@ export class ZAIProvider implements LLMProviderAdapter {
       messages,
       tools,
     };
+    if (tools && request.toolChoice) {
+      createParams.tool_choice = request.toolChoice;
+    }
     if (useThinking) {
       createParams.enable_thinking = true;
     }

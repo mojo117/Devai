@@ -167,9 +167,10 @@ export class ChapoLoop {
 ${systemContextBlock}
 ${this.projectRoot ? `Working Directory: ${this.projectRoot}` : ''}
 
-You are Chapo in the decision loop. Execute ALL tasks directly using available tools:
-- Use askUser ONLY when you genuinely need clarification
-- When you have the answer, respond directly WITHOUT tool calls`;
+You are Chapo in the decision loop. Execute ALL tasks directly using available tools.
+- Do NOT describe what you would do — use your tools to actually do it.
+- Use askUser ONLY when you genuinely need clarification from the user.
+- Only respond without tool calls when your work is fully complete.`;
 
     this.conversation.setSystemPrompt(systemPrompt);
 
@@ -315,6 +316,10 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
 
       const t0 = Date.now();
       console.log(`${trace}[chapo-loop] LLM call #${this.iteration} starting (${provider}/${model}, ${tools.length}/${allTools.length} tools, thinking=${thinkingEnabled}${kimiSearchEnabled ? ', kimi-search' : ''}${webSearchEnabled ? ', glm-web-search' : ''})`);
+      // On the first iteration, force the model to use at least one tool
+      // instead of narrating what it would do.
+      const toolChoice = this.iteration === 0 ? 'required' as const : 'auto' as const;
+
       const [response, err] = await this.errorHandler.safe('llm_call', () =>
         llmRouter.generateWithFallback(provider, {
           model,
@@ -322,6 +327,7 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
           systemPrompt: this.conversation.getSystemPrompt(),
           tools,
           toolsEnabled: true,
+          toolChoice,
           sameProviderFallbacks,
           thinkingEnabled,
           kimiSearchEnabled,
