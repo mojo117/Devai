@@ -32,8 +32,11 @@ function App() {
 
   // Preview toggle backed by localStorage
   const [previewEnabled, setPreviewEnabled] = useState(() => {
-    try { return localStorage.getItem('devai_preview') === 'on'; }
-    catch { return false; }
+    try {
+      const stored = localStorage.getItem('devai_preview');
+      return stored === null ? true : stored === 'on';
+    }
+    catch { return true; }
   });
 
   const [detectedArtifact, setDetectedArtifact] = useState<Artifact | null>(null);

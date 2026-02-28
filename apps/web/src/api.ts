@@ -610,6 +610,7 @@ type PendingWsRequest = {
   reject: (err: Error) => void;
   onEvent?: (event: ChatStreamEvent) => void;
   timeoutId: number;
+  sessionId?: string;
 };
 
 let chatWs: WebSocket | null = null;
@@ -701,12 +702,68 @@ function scheduleControlPlaneReconnect(): void {
   }, delay);
 }
 
-function failPendingWsRequests(message: string): void {
-  for (const [id, req] of pendingWsRequests.entries()) {
-    window.clearTimeout(req.timeoutId);
-    req.reject(new Error(message));
-    pendingWsRequests.delete(id);
-  }
+let wsRecoveryScheduled = false;
+function failPendingWsRequests(reason: string): void {
+  if (pendingWsRequests.size === 0) return;
+  if (wsRecoveryScheduled) return; // onclose + onerror both fire — only recover once
+  wsRecoveryScheduled = true;
+
+  // Don't reject immediately — the backend is still processing the request.
+  // Wait for reconnect, then try to recover via REST polling.
+  // The original 180s timeout is still running as a hard safety net.
+  const surviving = new Map(pendingWsRequests);
+  // Don't clear the map — keep entries so the reconnected WS can still
+  // resolve them if the server replays the response event.
+
+  // After reconnect, poll session messages to pick up the result.
+  const tryRecover = async () => {
+    try {
+      await ensureChatWsConnected();
+    } catch {
+      // Reconnect failed — the scheduled reconnect loop will keep trying.
+      // The 180s timeout will eventually reject if nothing works.
+      return;
+    }
+    // Re-join sessions so the server replays any missed events
+    for (const [, req] of surviving) {
+      if (req.sessionId) {
+        try {
+          const ws = chatWs;
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            const sinceSeq = loadLastSeq(req.sessionId);
+            ws.send(JSON.stringify({ type: 'hello', sessionId: req.sessionId, sinceSeq }));
+          }
+        } catch { /* ignore */ }
+      }
+    }
+    // Give the replay 8s to deliver the response. If not, poll via REST.
+    await new Promise((r) => setTimeout(r, 8000));
+    for (const [id, req] of surviving) {
+      if (!pendingWsRequests.has(id)) continue; // already resolved
+      if (!req.sessionId) continue;
+      try {
+        const history = await fetchSessionMessages(req.sessionId);
+        if (history.messages.length > 0) {
+          const last = history.messages[history.messages.length - 1];
+          if (last.role === 'assistant') {
+            pendingWsRequests.delete(id);
+            window.clearTimeout(req.timeoutId);
+            req.resolve({
+              message: last,
+              sessionId: req.sessionId,
+              pendingActions: [],
+              agentHistory: [],
+            });
+          }
+        }
+      } catch { /* ignore — 180s timeout is still the safety net */ }
+    }
+  };
+
+  // Schedule recovery after a short delay (let reconnect happen first)
+  setTimeout(() => {
+    tryRecover().finally(() => { wsRecoveryScheduled = false; });
+  }, 2000);
 }
 
 async function ensureChatWsConnected(): Promise<WebSocket> {
@@ -848,6 +905,7 @@ async function sendWsCommand(
 ): Promise<MultiAgentResponse> {
   const ws = await ensureChatWsConnected();
   const requestId = uuid();
+  const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : undefined;
 
   const timeoutId = window.setTimeout(() => {
     const pending = pendingWsRequests.get(requestId);
@@ -858,7 +916,7 @@ async function sendWsCommand(
   }, 180000);
 
   const p = new Promise<MultiAgentResponse>((resolve, reject) => {
-    pendingWsRequests.set(requestId, { resolve, reject, onEvent, timeoutId });
+    pendingWsRequests.set(requestId, { resolve, reject, onEvent, timeoutId, sessionId });
   });
 
   ws.send(JSON.stringify({ ...payload, requestId }));
