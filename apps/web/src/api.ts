@@ -641,7 +641,7 @@ if (typeof document !== 'undefined') {
       }
     } else {
       pageHidden = false;
-      if (wsClosedWhileHidden || (chatWs && chatWs.readyState !== WebSocket.OPEN)) {
+      if (wsClosedWhileHidden || !chatWs || chatWs.readyState !== WebSocket.OPEN) {
         wsClosedWhileHidden = false;
         recoverAfterVisibilityResume();
       } else {
@@ -809,6 +809,7 @@ function hasAnyControlPlaneSubscribers(): boolean {
 }
 
 function scheduleControlPlaneReconnect(): void {
+  if (pageHidden) return; // Don't reconnect while hidden — recovery happens on visibility resume
   if (!hasAnyControlPlaneSubscribers()) return;
   if (chatWsReconnectTimer) return;
 
@@ -833,12 +834,17 @@ function failPendingWsRequests(reason: string): void {
     return;
   }
 
-  // Page is visible — WS died while user is looking. Reject immediately
-  // so the UI can show a retry option.
+  // Page is visible — WS died while user is looking. Give reconnection
+  // 5 seconds to restore the channel before rejecting.
   for (const [id, req] of pendingWsRequests.entries()) {
     window.clearTimeout(req.timeoutId);
-    req.reject(new Error(reason));
-    pendingWsRequests.delete(id);
+    req.timeoutId = window.setTimeout(() => {
+      const p = pendingWsRequests.get(id);
+      if (p) {
+        pendingWsRequests.delete(id);
+        p.reject(new Error(reason));
+      }
+    }, 5000);
   }
 }
 
@@ -931,6 +937,7 @@ async function ensureChatWsConnected(): Promise<WebSocket> {
     };
 
     ws.onclose = () => {
+      if (pageHidden) wsClosedWhileHidden = true;
       cleanupChatWs();
       failPendingWsRequests('Chat WebSocket disconnected');
       scheduleControlPlaneReconnect();
@@ -971,7 +978,9 @@ async function wsHello(sessionId: string): Promise<void> {
   try {
     ws.send(JSON.stringify({ type: 'hello', sessionId, sinceSeq }));
   } catch {
-    // ignore
+    // Send failed — connection is dead. Force-close so ensureChatWsConnected
+    // will create a fresh connection on the next call.
+    try { ws.close(); } catch { /* ignore */ }
   }
 }
 
@@ -983,19 +992,30 @@ async function sendWsCommand(
   const requestId = uuid();
   const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : undefined;
 
+  // Initial timeout is 45s — if NO events arrive the connection is likely dead.
+  // Once the first streaming event arrives, the onmessage handler resets this
+  // to 180s (inactivity timeout between events).
   const timeoutId = window.setTimeout(() => {
     const pending = pendingWsRequests.get(requestId);
     if (pending) {
       pendingWsRequests.delete(requestId);
       pending.reject(new Error('Chat WebSocket request timed out'));
     }
-  }, 180000);
+  }, 45000);
 
   const p = new Promise<MultiAgentResponse>((resolve, reject) => {
     pendingWsRequests.set(requestId, { resolve, reject, onEvent, timeoutId, sessionId });
   });
 
-  ws.send(JSON.stringify({ ...payload, requestId }));
+  try {
+    ws.send(JSON.stringify({ ...payload, requestId }));
+  } catch {
+    // Send failed — connection is dead
+    window.clearTimeout(timeoutId);
+    pendingWsRequests.delete(requestId);
+    try { ws.close(); } catch { /* ignore */ }
+    throw new Error('Network error: failed to send message');
+  }
   return p;
 }
 
@@ -1076,9 +1096,9 @@ export async function sendAgentApproval(
     }
   } catch (wsErr) {
     console.error('[api] WebSocket approval failed:', wsErr);
-    throw new Error('Verbindung zum Server verloren. Bitte Seite neu laden.');
+    throw new Error('Network error: connection to server lost');
   }
-  throw new Error('WebSocket nicht verfügbar. Bitte Seite neu laden.');
+  throw new Error('Network error: WebSocket not available');
 }
 
 export async function sendAgentQuestionResponse(
@@ -1093,9 +1113,9 @@ export async function sendAgentQuestionResponse(
     }
   } catch (wsErr) {
     console.error('[api] WebSocket question response failed:', wsErr);
-    throw new Error('Verbindung zum Server verloren. Bitte Seite neu laden.');
+    throw new Error('Network error: connection to server lost');
   }
-  throw new Error('WebSocket nicht verfügbar. Bitte Seite neu laden.');
+  throw new Error('Network error: WebSocket not available');
 }
 
 export async function sendMultiAgentMessage(
@@ -1112,9 +1132,10 @@ export async function sendMultiAgentMessage(
     }
   } catch (wsErr) {
     console.error('[api] WebSocket message failed:', wsErr);
-    throw new Error('Verbindung zum Server verloren. Bitte Seite neu laden.');
+    // Include "network" keyword so the retry heuristic in ChatUI matches this.
+    throw new Error('Network error: connection to server lost');
   }
-  throw new Error('WebSocket nicht verfügbar. Bitte Seite neu laden.');
+  throw new Error('Network error: WebSocket not available');
 }
 
 export async function getTrustMode(): Promise<{ mode: 'default' | 'trusted' }> {
