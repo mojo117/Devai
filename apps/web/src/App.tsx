@@ -5,7 +5,9 @@ import { type AgentName, type AgentPhase } from './components/AgentStatus';
 import { PreviewPanel } from './components/PreviewPanel';
 import type { Artifact } from './components/PreviewPanel';
 import { BurgerMenu } from './components/BurgerMenu';
+import { SessionSidebar } from './components/SessionSidebar';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { useSessionRegistry } from './components/ChatUI/hooks/useSessionRegistry';
 import {
   createPreviewArtifact,
   fetchPreviewArtifact,
@@ -29,6 +31,10 @@ function App() {
   const [chatSessionState, setChatSessionState] = useState<ChatSessionState | null>(null);
   const [sessionCommand, setSessionCommand] = useState<ChatSessionCommandEnvelope | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Session Registry
+  const sessionRegistry = useSessionRegistry(settings.clearPinnedUserfiles);
 
   // Preview toggle backed by localStorage
   const [previewEnabled, setPreviewEnabled] = useState(() => {
@@ -40,6 +46,16 @@ function App() {
   const [currentArtifact, setCurrentArtifact] = useState<Artifact | null>(null);
   const [mobilePreviewOpen, setMobilePreviewOpen] = useState(false);
   const lastSubmittedArtifactKeyRef = useRef<string | null>(null);
+
+  // Sync sessionRegistry state to chatSessionState for backwards compatibility
+  useEffect(() => {
+    setChatSessionState({
+      sessionId: sessionRegistry.activeSessionId,
+      sessions: sessionRegistry.sessionList,
+      sessionsLoading: sessionRegistry.isLoading,
+      hasMessages: (sessionRegistry.getActiveSession()?.messages.length ?? 0) > 0,
+    });
+  }, [sessionRegistry.activeSessionId, sessionRegistry.sessionList, sessionRegistry.isLoading, sessionRegistry]);
 
   // Swipe gesture detection for mobile preview panel
   const touchStartRef = useRef<{ x: number; y: number; t: number } | null>(null);
@@ -97,7 +113,7 @@ function App() {
       return () => { cancelled = true; };
     }
 
-    const sessionId = chatSessionState?.sessionId;
+    const sessionId = sessionRegistry.activeSessionId;
     if (!previewEnabled || !sessionId) {
       return;
     }
@@ -214,7 +230,7 @@ function App() {
       cancelled = true;
       clearAllPollHandles();
     };
-  }, [detectedArtifact, chatSessionState?.sessionId, previewEnabled]);
+  }, [detectedArtifact, sessionRegistry.activeSessionId, previewEnabled]);
 
   const handleScrapeFallback = useCallback(async (artifactId: string) => {
     const result = await triggerPreviewScrape(artifactId).catch(() => null);
@@ -271,6 +287,19 @@ function App() {
       command,
     }));
   }, []);
+
+  // Handle session selection from sidebar
+  const handleSelectSession = useCallback(async (id: string) => {
+    await sessionRegistry.activateSession(id);
+    setSidebarOpen(false);
+    issueSessionCommand({ type: 'select', sessionId: id });
+  }, [sessionRegistry, issueSessionCommand]);
+
+  const handleCreateSession = useCallback(async () => {
+    const id = await sessionRegistry.createNewSession();
+    issueSessionCommand({ type: 'select', sessionId: id });
+    setSidebarOpen(false);
+  }, [sessionRegistry, issueSessionCommand]);
 
   const handleAgentChange = useCallback((agent: AgentName | null, phase: AgentPhase) => {
     setActiveAgent(agent);
@@ -367,8 +396,19 @@ function App() {
       {/* Header */}
       <header className="sticky top-0 z-40 bg-devai-surface/95 backdrop-blur border-b border-devai-border px-3 md:px-4 py-2">
         <div className="flex items-center justify-between gap-2 max-w-5xl mx-auto w-full">
-          {/* Left: Logo */}
-          <h1 className="text-base font-bold text-devai-accent">DevAI</h1>
+          {/* Left: Sidebar toggle + Logo */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="md:hidden text-devai-text-secondary hover:text-devai-text transition-colors p-1"
+              title="Sessions"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <h1 className="text-base font-bold text-devai-accent">DevAI</h1>
+          </div>
 
           {/* Center: Session Controls */}
           <div className="flex items-center gap-2 text-[11px] text-devai-text-secondary">
@@ -463,6 +503,18 @@ function App() {
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
+        {/* Session Sidebar - Desktop always visible, mobile slide-over */}
+        <SessionSidebar
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          sessions={sessionRegistry.sessions}
+          sessionOrder={sessionRegistry.sessionList}
+          activeSessionId={sessionRegistry.activeSessionId}
+          isLoading={sessionRegistry.isLoading}
+          onSelectSession={handleSelectSession}
+          onCreateSession={handleCreateSession}
+        />
+
         {/* Desktop: side-by-side panels when preview enabled */}
         {previewEnabled ? (
           <div className="hidden md:flex flex-1 min-h-0 overflow-hidden">

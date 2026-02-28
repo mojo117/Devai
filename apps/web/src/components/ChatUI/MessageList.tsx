@@ -27,6 +27,7 @@ interface MessageListProps {
   onSelectSession: (id: string) => void;
   onRestartChat: () => void;
   onNewChat: () => void;
+  debugMode?: boolean;
 }
 
 interface DecisionPathPayload {
@@ -70,6 +71,7 @@ export function MessageList({
   onSelectSession,
   onRestartChat,
   onNewChat,
+  debugMode,
 }: MessageListProps) {
   const renderToolEventsBlock = (events: ToolEvent[], live: boolean) => {
     const merged = mergeConsecutiveThinking(events);
@@ -170,6 +172,11 @@ export function MessageList({
           }`}>
             {new Date(message.timestamp).toLocaleTimeString()}
           </p>
+          {debugMode && (
+            <p className="text-[10px] text-devai-text-muted/60 font-mono mt-0.5 select-all">
+              msg:{message.id} | session:{sessionId ?? '—'}
+            </p>
+          )}
         </div>
       </div>
     );

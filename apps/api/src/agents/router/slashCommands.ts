@@ -41,23 +41,8 @@ export async function tryHandleSlashCommand(
     return `Unknown engine "${arg}". Available: glm, gemini, claude, kimi.\nUsage: /engine <glm|gemini|claude|kimi>`;
   }
 
-  const previewMatch = trimmed.match(/^\/preview(?:\s+(on|off))?$/i);
-  if (previewMatch) {
-    const arg = previewMatch[1]?.toLowerCase();
-    if (!arg) return 'Preview: `/preview on` or `/preview off`. This is a client-side UI feature.';
-    return `Preview mode **${arg === 'on' ? 'ON' : 'OFF'}**. (Note: This takes effect in the web UI only.)`;
-  }
-
-  if (trimmed === '/list') {
-    return [
-      '**Slash Commands**\n',
-      '`/engine [glm|gemini|claude|kimi]` — LLM Engine wechseln oder Status anzeigen',
-      '`/preview [on|off]` — Preview-Panel im Web-UI ein-/ausschalten',
-      '`/mode` — Zwischen Serial und Parallel Mode umschalten',
-      '`/stop` — Alle laufenden Loops abbrechen',
-      '`/list` — Diese Liste anzeigen',
-    ].join('\n');
-  }
+  // /preview, /debug, /list are handled client-side in InputArea.tsx
+  // and never reach the backend.
 
   if (trimmed === '/stop') {
     const loopCount = getActiveLoopCount(sessionId);

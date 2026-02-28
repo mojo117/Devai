@@ -58,6 +58,10 @@ export function ChatUI({
   const [messageToolEvents, setMessageToolEvents] = useState<Record<string, ToolEvent[]>>({});
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set());
   const [currentTodos, setCurrentTodos] = useState<Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }>>([]);
+  const [debugMode, setDebugMode] = useState(() => {
+    try { return localStorage.getItem('devai_debug') === 'on'; }
+    catch { return false; }
+  });
   const [retryState, setRetryState] = useState<null | {
     input: string;
     userMessage: ChatMessage;
@@ -515,12 +519,39 @@ export function ChatUI({
     }
   }, [session.sessionId]);
 
-  const handleSetPreview = useCallback((enabled: boolean) => {
-    onSetPreview?.(enabled);
+  const handleSlashCommand = useCallback((command: string, match: RegExpMatchArray) => {
+    let content: string;
+    switch (command) {
+      case 'preview': {
+        const on = match[1].toLowerCase() === 'on';
+        onSetPreview?.(on);
+        content = on ? 'Preview pane enabled.' : 'Preview pane disabled.';
+        break;
+      }
+      case 'debug': {
+        const on = match[1].toLowerCase() === 'on';
+        setDebugMode(on);
+        try { localStorage.setItem('devai_debug', on ? 'on' : 'off'); } catch {}
+        content = on ? 'Debug mode enabled.' : 'Debug mode disabled.';
+        break;
+      }
+      case 'list':
+        content = [
+          '**Available commands:**',
+          '`/engine [glm|gemini|claude|kimi]` — Switch LLM engine or show status',
+          '`/preview on|off` — Toggle the preview panel',
+          '`/debug on|off` — Toggle debug mode (shows message & session IDs)',
+          '`/mode` — Toggle between serial and parallel mode',
+          '`/stop` — Abort all running loops',
+          '`/list` — Show this list',
+        ].join('\n');
+        break;
+      default: return;
+    }
     setMessages(prev => [...prev, {
-      id: `preview-${Date.now()}`,
+      id: `${command}-${Date.now()}`,
       role: 'system' as const,
-      content: enabled ? 'Preview pane enabled.' : 'Preview pane disabled.',
+      content,
       timestamp: new Date().toISOString(),
     }]);
   }, [onSetPreview]);
@@ -718,6 +749,7 @@ export function ChatUI({
         onSelectSession={session.handleSelectSession}
         onRestartChat={session.handleRestartChat}
         onNewChat={session.handleNewChat}
+        debugMode={debugMode}
       />
 
       {currentTodos.length > 0 && <TodoCard todos={currentTodos} />}
@@ -748,7 +780,7 @@ export function ChatUI({
         onFileUpload={handleFileUpload}
         isTranscribing={isTranscribing}
         onTranscribe={handleTranscription}
-        onSetPreview={handleSetPreview}
+        onSlashCommand={handleSlashCommand}
       />
     </div>
   );
