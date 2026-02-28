@@ -195,11 +195,14 @@ export class MoonshotProvider implements LLMProviderAdapter {
         content: getTextContent(message.content) || null,
         tool_calls: toolCalls,
       };
-      // Kimi requires reasoning_content on ALL assistant tool-call messages when
-      // thinking is enabled — must be consistent. When thinking is off, never inject it.
+      // Kimi requires reasoning_content on assistant tool-call messages when
+      // thinking is enabled. Only inject when actual content exists — empty
+      // strings cause a 400 error from the Kimi API.
       if (thinkingActive) {
         const reasoningContent = message.toolCalls[0]?.providerMetadata?.reasoning_content as string | undefined;
-        assistantMsg.reasoning_content = reasoningContent || '';
+        if (reasoningContent) {
+          assistantMsg.reasoning_content = reasoningContent;
+        }
       }
       messages.push(assistantMsg as unknown as OpenAI.ChatCompletionMessageParam);
       return;

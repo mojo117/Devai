@@ -58,11 +58,23 @@ export class ConversationManager {
 
   /**
    * Returns the current estimated token usage.
+   * Counts text content, tool call arguments, and tool results.
    */
   getTokenUsage(): number {
     let total = estimateTokens(this.systemPrompt);
     for (const msg of this.messages) {
       total += estimateTokens(getTextContent(msg.content));
+      if (msg.toolCalls) {
+        for (const tc of msg.toolCalls) {
+          total += estimateTokens(tc.name);
+          total += estimateTokens(JSON.stringify(tc.arguments));
+        }
+      }
+      if (msg.toolResults) {
+        for (const tr of msg.toolResults) {
+          total += estimateTokens(tr.result);
+        }
+      }
     }
     return total;
   }
