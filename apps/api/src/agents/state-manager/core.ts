@@ -1,4 +1,4 @@
-import { getAgentState, upsertAgentState, getDefaultEngine } from '../../db/queries.js';
+import { getAgentState, upsertAgentState, getDefaultEngine, getDefaultMode } from '../../db/queries.js';
 import type { ConversationState, GatheredInfo } from '../types.js';
 import { PersistenceQueue } from './persistenceQueue.js';
 
@@ -28,7 +28,6 @@ function buildDefaultState(sessionId: string): ConversationState {
     },
     pendingApprovals: [],
     pendingQuestions: [],
-    parallelExecutions: [],
     todos: [],
     // Multi-message state
     isLoopRunning: false,
@@ -81,7 +80,6 @@ function normalizeLoadedState(sessionId: string, raw: unknown): ConversationStat
     agentHistory: Array.isArray(r.agentHistory) ? r.agentHistory : base.agentHistory,
     pendingApprovals: Array.isArray(r.pendingApprovals) ? r.pendingApprovals : base.pendingApprovals,
     pendingQuestions: Array.isArray(r.pendingQuestions) ? r.pendingQuestions : base.pendingQuestions,
-    parallelExecutions: Array.isArray(r.parallelExecutions) ? r.parallelExecutions : base.parallelExecutions,
     todos: Array.isArray(r.todos) ? r.todos : base.todos,
     // Loop activity is runtime-only and cannot be restored safely from DB.
     isLoopRunning: false,
@@ -140,6 +138,15 @@ export async function ensureStateLoaded(sessionId: string): Promise<Conversation
           state.taskContext.gatheredInfo.engineProfile = defaultEngine;
         }
       } catch (err) { console.warn('[state] Failed to load default engine:', err instanceof Error ? err.message : err); }
+    }
+    // Apply global mode default if this session doesn't have one set
+    if (!state.taskContext.gatheredInfo.loopMode) {
+      try {
+        const defaultMode = await getDefaultMode();
+        if (defaultMode !== 'serial') {
+          state.taskContext.gatheredInfo.loopMode = defaultMode;
+        }
+      } catch (err) { console.warn('[state] Failed to load default mode:', err instanceof Error ? err.message : err); }
     }
     stateStore.set(sessionId, state);
     scheduleMemoryCleanup(sessionId);

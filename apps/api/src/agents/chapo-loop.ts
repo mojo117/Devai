@@ -4,17 +4,12 @@
  * A continuous loop where the LLM's tool_calls ARE the decisions:
  *   - No tool_calls = ANSWER → normalize → respond → exit
  *   - askUser = ASK → pause loop → wait for user reply
- *   - delegateToDevo = DELEGATE → run DEVO sub-loop → feed result back
- *   - delegateToCaio = DELEGATE → run CAIO sub-loop → feed result back
- *   - delegateParallel = DELEGATE → run multiple delegations concurrently
- *   - delegateToScout = DELEGATE → run SCOUT → feed result back
  *   - any other tool = TOOL → execute → feed result back → continue
  *
  * Errors at any point feed back into the loop as context.
  */
 
 import { AgentErrorHandler } from './error-handler.js';
-import { AnswerValidator, type DecisionPathInsights } from './answer-validator.js';
 import { ConversationManager } from './conversation-manager.js';
 import { llmRouter } from '../llm/router.js';
 import { getCombinedSystemContextBlock, warmSystemContextForSession, warmMemoryRetrievalForSession } from './systemContext.js';
@@ -22,34 +17,54 @@ import { SessionLogger } from '../audit/sessionLogger.js';
 import { getAgent, getToolsForAgent } from './router.js';
 import { getToolsForLLM } from '../tools/registry.js';
 import * as stateManager from './stateManager.js';
-import { SubAgentRunner } from './sub-agent-runner.js';
-import { type ParallelDelegation } from './chapo-loop/delegationUtils.js';
-import { type DelegationRunnerDeps } from './chapo-loop/delegationRunner.js';
 import { ChapoLoopContextManager } from './chapo-loop/contextManager.js';
 import { ChapoLoopGateManager } from './chapo-loop/gateManager.js';
 import { ChapoToolExecutor } from './chapo-loop/toolExecutor.js';
 import { buildToolResultContent } from './utils.js';
-import { config as appConfig } from '../config.js';
 import { logSchedulerExecution } from '../db/schedulerQueries.js';
 import { logAgentExecution } from '../db/agentExecutionQueries.js';
 import type {
   AgentStreamEvent,
   ModelSelection,
   ChapoLoopResult,
-  LoopDelegationResult,
-  LoopDelegationStatus,
-  ToolEvidence,
   RiskLevel,
 } from './types.js';
 import type { LLMProvider, ContentBlock } from '../llm/types.js';
 import { getTextContent } from '../llm/types.js';
-import { tagCurrentWork } from '../memory/topicTagger.js';
+import { tagCurrentWork } from '../memory/topicTagger.js'
+import { extractTurnEpisode, extractToolEpisode } from '../memory/episodicExtraction.js'
 import type { QueueQuestionOptions } from './chapo-loop/gateManager.js';
+
+interface DecisionPathInsights {
+  path: 'answer' | 'tool';
+  reason: string;
+  confidence: number;
+  unresolvedAssumptions: string[];
+}
 
 export type SendEventFn = (event: AgentStreamEvent) => void;
 
 interface ChapoLoopConfig {
   maxIterations: number;
+}
+
+/**
+ * Heuristic: enable extended thinking for complex first-turn queries.
+ * Thinking mode adds latency but improves reasoning on complex tasks.
+ * Only fires on the first iteration (planning phase).
+ */
+function shouldEnableThinking(userMessage: string, iteration: number): boolean {
+  if (iteration > 0) return false;
+
+  const complexPattern = /\b(debug|fix|refactor|plan|architect|design|why|how|analy[sz]|investigat|review|explain|compar|evaluat|warum|wieso|erkl[aä]r|vergleich|untersu|fehler|problem|research|search|find|implement|create|build|write|develop)\b/i;
+  if (complexPattern.test(userMessage)) return true;
+
+  const multiStepPattern = /\b(and|then|after|before|also|plus|additionally|und|dann|danach|außerdem|anschließend)\b.*\b(create|implement|fix|update|add|remove|change|write|build)\b/i;
+  if (multiStepPattern.test(userMessage)) return true;
+
+  if (userMessage.length > 300) return true;
+
+  return false;
 }
 
 // Module-level map for /stop to reach running loop instances
@@ -66,21 +81,17 @@ export function abortLoopInstances(sessionId: string): void {
 
 export class ChapoLoop {
   private errorHandler: AgentErrorHandler;
-  private answerValidator: AnswerValidator;
   private conversation: ConversationManager;
   private sessionLogger?: SessionLogger;
-  private subAgentRunner = new SubAgentRunner();
   private iteration = 0;
   private totalTokensUsed = 0;
+  private lastContent = '';
   private contextManager: ChapoLoopContextManager;
   private gateManager: ChapoLoopGateManager;
   private traceId = '';
 
-  // Execution metrics for structured logging (3.2)
   private toolCallLog: Array<{ name: string; durationMs: number; success: boolean }> = [];
-  private delegationLog: Array<{ target: string; durationMs: number; status: string }> = [];
 
-  // Parallel loop support
   private parallelTurnId: string | undefined;
   private abortController = new AbortController();
 
@@ -94,9 +105,8 @@ export class ChapoLoop {
     parallelTurnId?: string,
   ) {
     this.errorHandler = new AgentErrorHandler(3);
-    this.conversation = new ConversationManager(180_000);
+    this.conversation = new ConversationManager(80_000);
     this.sessionLogger = SessionLogger.getActive(sessionId);
-    this.answerValidator = new AnswerValidator(this.sessionLogger);
     this.contextManager = new ChapoLoopContextManager(this.sessionId, this.sendEvent, this.conversation);
     this.gateManager = new ChapoLoopGateManager(this.sessionId, this.sendEvent);
     this.traceId = traceId || '';
@@ -110,64 +120,6 @@ export class ChapoLoop {
 
   dispose(): void {
     this.contextManager.dispose();
-  }
-
-  private deriveDelegationStatus(
-    evidence: ToolEvidence[],
-    escalated: boolean,
-    hasContent: boolean,
-  ): LoopDelegationStatus {
-    if (escalated) return 'escalated';
-    if (evidence.length === 0 && !hasContent) return 'failed';
-
-    const failures = evidence.filter((e) => !e.success && !e.pendingApproval);
-    const successes = evidence.filter((e) => e.success);
-    const pending = evidence.filter((e) => e.pendingApproval);
-
-    if (failures.length === 0 && successes.length > 0) return 'success';
-    if (successes.length > 0 && failures.length > 0) return 'partial';
-    if (failures.length > 0 && successes.length === 0) return 'failed';
-    if (pending.length > 0 && successes.length === 0 && failures.length === 0) return 'partial';
-    return 'success';
-  }
-
-  private buildVerificationEnvelope(
-    delegation: ParallelDelegation,
-    result: LoopDelegationResult,
-  ): string {
-    const lines: string[] = [
-      `[DELEGATION RESULT — ${delegation.target.toUpperCase()}]`,
-      `Objective: ${delegation.objective}`,
-    ];
-
-    if (delegation.expectedOutcome) {
-      lines.push(`Expected Outcome: ${delegation.expectedOutcome}`);
-    }
-
-    lines.push('');
-    lines.push(`Status: ${result.status.toUpperCase()}`);
-
-    if (result.toolEvidence.length > 0) {
-      lines.push('Evidence:');
-      for (const ev of result.toolEvidence.slice(-12)) {
-        const icon = ev.success ? 'OK' : (ev.pendingApproval ? 'PENDING' : 'ERROR');
-        const extra = ev.externalId ? ` id=${ev.externalId}` : '';
-        lines.push(`  - [${icon}] ${ev.tool}${extra}: ${ev.summary}`);
-      }
-    }
-
-    if (result.escalation) {
-      lines.push(`\nEscalation: ${result.escalation}`);
-    }
-
-    if (result.findings) {
-      if (result.findings.recommendations.length > 0) {
-        lines.push(`\nRecommendations: ${result.findings.recommendations.join('; ')}`);
-      }
-    }
-
-    lines.push(`\nAgent Response:\n${result.summary}`);
-    return lines.join('\n');
   }
 
   private emitDecisionPath(insights: DecisionPathInsights): void {
@@ -215,14 +167,7 @@ export class ChapoLoop {
 ${systemContextBlock}
 ${this.projectRoot ? `Working Directory: ${this.projectRoot}` : ''}
 
-You are Chapo in the decision loop. Execute tasks DIRECTLY:
-- Delegate development tasks (domain "development") to DEVO
-- Delegate communication/admin tasks (domain "communication") to CAIO
-- Delegate research tasks (domain "research") to SCOUT
-- When delegating: provide domain + objective + optional constraints/context/expectedOutcome
-- Never mention specific tool names in delegations; the target agent picks their own tools
-- Use direct read-only tools only for context gathering or quick fact checks
-- Use delegateParallel only for independent sub-tasks
+You are Chapo in the decision loop. Execute ALL tasks directly using available tools:
 - Use askUser ONLY when you genuinely need clarification
 - When you have the answer, respond directly WITHOUT tool calls`;
 
@@ -291,7 +236,6 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
         exitReason: result.status,
         provider: `${this.modelSelection.provider || 'anthropic'}/${this.modelSelection.model}`,
         toolCalls: this.toolCallLog.length,
-        delegations: this.delegationLog.length,
       },
     }).catch((logErr) => console.error('[chapo-loop] execution log failed:', logErr));
 
@@ -307,7 +251,6 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       provider: this.modelSelection.provider,
       errorMessage: result.status === 'error' ? result.answer : undefined,
       metadata: {
-        delegations: this.delegationLog.length,
         traceId: this.traceId || undefined,
       },
     }).catch((logErr) => console.error('[chapo-loop] agent execution log failed:', logErr));
@@ -325,52 +268,24 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
   private async runLoop(userMessage: string | ContentBlock[]): Promise<ChapoLoopResult> {
     const chapo = getAgent('chapo');
     const chapoToolNames = getToolsForAgent('chapo');
-    const tools = getToolsForLLM().filter((t) => chapoToolNames.includes(t.name));
+    const allTools = getToolsForLLM().filter((t) => chapoToolNames.includes(t.name));
+    const userText = getTextContent(userMessage);
 
     const provider = (this.modelSelection.provider || 'anthropic') as LLMProvider;
     const model = this.modelSelection.model || chapo.model;
     const sameProviderFallbacks = this.modelSelection.sameProviderFallbacks;
     const trace = this.traceId ? `[trace:${this.traceId}] ` : '';
 
-    // --- Resilience state ---
-    const loopStartTime = Date.now();
-    let lastProgressAt = Date.now();
-    let costCapInjected = false;
-    let consecutiveNoProgress = 0;
     let lastErrorMessage = '';
-    const PROGRESS_THRESHOLD = 3;
 
-    console.log(`${trace}[chapo-loop] Tools: ${tools.length}`);
+    console.log(`${trace}[chapo-loop] Tools (unfiltered): ${allTools.length}`);
 
     for (this.iteration = 0; this.iteration < this.config.maxIterations; this.iteration++) {
-      // --- Abort check (for /stop command) ---
       if (this.abortController.signal.aborted) {
         if (this.parallelTurnId) {
           stateManager.updateLoopStatus(this.sessionId, this.parallelTurnId, 'aborted');
         }
         return { answer: 'Loop abgebrochen.', status: 'aborted' as const, totalIterations: this.iteration };
-      }
-
-      const elapsed = Date.now() - loopStartTime;
-
-      // --- Stall Timeout: only fires when no progress for hardTimeoutMs ---
-      const timeSinceProgress = Date.now() - lastProgressAt;
-      if (timeSinceProgress > appConfig.loopHardTimeoutMs) {
-        console.warn(`${trace}[chapo-loop] Stall timeout: ${Math.round(timeSinceProgress / 1000)}s without progress, iteration ${this.iteration}`);
-        stateManager.setGatheredInfo(this.sessionId, 'timeoutSnapshot', {
-          iteration: this.iteration,
-          elapsed,
-          tokensUsed: this.totalTokensUsed,
-          timestamp: new Date().toISOString(),
-        });
-        await stateManager.flushState(this.sessionId);
-
-        return this.queueQuestion(
-          `Seit ${Math.round(timeSinceProgress / 1000)}s kein Fortschritt. ` +
-          `Bisheriger Stand: ${this.iteration} Iterationen, ${Math.round(elapsed / 1000)}s Laufzeit. Soll ich weitermachen?`,
-          this.iteration,
-          { kind: 'continue', turnId: this.getActiveTurnId() || undefined },
-        );
       }
 
       this.sendEvent({
@@ -390,9 +305,16 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
         }
       }
 
-      // Call LLM with conversation + tools
+      const tools = allTools;
+
+      const thinkingEnabled = shouldEnableThinking(userText, this.iteration);
+
+      const isResearchQuery = /\b(search|research|find|look\s*up|documentation|latest|aktuell|suche|recherche|finde|investigate|explore)\b/i.test(userText);
+      const kimiSearchEnabled = provider === 'moonshot' && isResearchQuery;
+      const webSearchEnabled = provider === 'zai' && isResearchQuery;
+
       const t0 = Date.now();
-      console.log(`${trace}[chapo-loop] LLM call #${this.iteration} starting (${provider}/${model}, ${tools.length} tools)`);
+      console.log(`${trace}[chapo-loop] LLM call #${this.iteration} starting (${provider}/${model}, ${tools.length}/${allTools.length} tools, thinking=${thinkingEnabled}${kimiSearchEnabled ? ', kimi-search' : ''}${webSearchEnabled ? ', glm-web-search' : ''})`);
       const [response, err] = await this.errorHandler.safe('llm_call', () =>
         llmRouter.generateWithFallback(provider, {
           model,
@@ -401,32 +323,20 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
           tools,
           toolsEnabled: true,
           sameProviderFallbacks,
+          thinkingEnabled,
+          kimiSearchEnabled,
+          webSearchEnabled,
         })
       );
 
       const llmDuration = Date.now() - t0;
       console.log(`${trace}[chapo-loop] LLM call #${this.iteration} completed in ${llmDuration}ms, err=${err?.message || 'none'}, content=${response?.content?.slice(0, 100) || 'null'}, toolCalls=${response?.toolCalls?.length || 0}`);
 
-      // LLM responded — reset progress tracker
-      if (response) lastProgressAt = Date.now();
-
-      // Accumulate token usage
       if (response?.usage) {
         this.totalTokensUsed += response.usage.inputTokens + response.usage.outputTokens;
       }
 
-      // --- 2.5 Cost Safety Cap ---
-      if (!costCapInjected && this.totalTokensUsed > appConfig.costCapPerRunTokens) {
-        costCapInjected = true;
-        this.conversation.addMessage({
-          role: 'system',
-          content: `[COST WARNING] Token budget exhausted (${this.totalTokensUsed} tokens used, limit: ${appConfig.costCapPerRunTokens}). Deliver final answer NOW.`,
-        });
-        console.warn(`${trace}[chapo-loop] Cost cap reached: ${this.totalTokensUsed} tokens`);
-      }
-
       if (err) {
-        // --- 2.2 Error Deduplication ---
         const errorText = this.errorHandler.formatForLLM(err);
         if (errorText !== lastErrorMessage) {
           this.conversation.addMessage({
@@ -449,15 +359,33 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
             totalIterations: this.iteration + 1,
           };
         }
-        consecutiveNoProgress++;
         continue;
       }
 
-      // No tool calls → ACTION: ANSWER (direct — loop ends)
+      if (response.content) this.lastContent = response.content;
+
       if (!response.toolCalls || response.toolCalls.length === 0) {
         const answer = response.content || '';
-        const userText = getTextContent(userMessage);
-        return this.answerValidator.validateAndNormalize(userText, answer, this.iteration, this.emitDecisionPath.bind(this));
+
+        extractTurnEpisode(this.sessionId, {
+          userMessage: userText.slice(0, 500),
+          assistantAnswer: answer.slice(0, 500),
+          toolsUsed: this.toolCallLog.map((t) => t.name),
+          iteration: this.iteration,
+        }).catch((err) => console.error(`${trace}[chapo-loop] episodic turn extraction failed:`, err))
+
+        this.emitDecisionPath({
+          path: 'answer',
+          reason: 'No further tool calls needed; answer delivered directly.',
+          confidence: 0.8,
+          unresolvedAssumptions: [],
+        });
+
+        return {
+          answer,
+          status: 'completed',
+          totalIterations: this.iteration + 1,
+        };
       }
 
       // Add assistant message with tool calls to conversation
@@ -477,9 +405,8 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
         queueQuestion: this.queueQuestion.bind(this),
         queueApproval: this.queueApproval.bind(this),
         emitDecisionPath: this.emitDecisionPath.bind(this),
-        getDelegationRunnerDeps: this.getDelegationRunnerDeps.bind(this),
-        buildVerificationEnvelope: this.buildVerificationEnvelope.bind(this),
         buildToolResultContent,
+        projectRoot: this.projectRoot,
       });
 
       for (const toolCall of response.toolCalls) {
@@ -494,19 +421,6 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
           const toolDuration = Date.now() - toolT0;
           if (outcome.earlyReturn) {
             earlyReturn = outcome.earlyReturn;
-            // Log delegation metrics if this was a delegation
-            if (toolCall.name.startsWith('delegate')) {
-              const target = toolCall.name.replace('delegateTo', '').replace('delegateParallel', 'parallel');
-              this.delegationLog.push({ target, durationMs: toolDuration, status: earlyReturn.status });
-              // Log to parallel buffer
-              if (this.parallelTurnId) {
-                stateManager.appendLoopAction(this.sessionId, this.parallelTurnId, {
-                  iteration: this.iteration,
-                  tool: toolCall.name,
-                  summary: `${target.toUpperCase()} delegation: ${earlyReturn.status}`,
-                });
-              }
-            }
             break;
           }
           if (outcome.toolResult) {
@@ -519,6 +433,14 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
                 tool: toolCall.name,
                 summary: buildActionSummary(toolCall.name, toolCall.arguments, outcome.toolResult),
               });
+            }
+            // Fire-and-forget: episodic extraction for significant tool results
+            if (!outcome.toolResult.isError) {
+              extractToolEpisode(this.sessionId, {
+                toolName: toolCall.name,
+                toolArgs: toolCall.arguments,
+                toolResult: outcome.toolResult.result,
+              }).catch((err) => console.error(`${trace}[chapo-loop] episodic tool extraction failed:`, err))
             }
             // Structured reflection: inject thinking after tool failures
             if (outcome.toolResult.isError) {
@@ -546,42 +468,20 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
         return earlyReturn;
       }
 
-      // --- 2.1 Deadlock Detection ---
-      const hadMeaningfulAction = toolResults.some((r) => !r.isError);
-      if (hadMeaningfulAction) {
-        consecutiveNoProgress = 0;
-        lastProgressAt = Date.now();
-      } else {
-        consecutiveNoProgress++;
-      }
-      if (consecutiveNoProgress >= PROGRESS_THRESHOLD) {
-        this.conversation.addMessage({
-          role: 'system',
-          content: `[PROGRESS WARNING] ${consecutiveNoProgress} consecutive iterations without successful tool execution. ` +
-            `Either: (1) deliver a partial answer, (2) try a different approach, or (3) ask the user for help. ` +
-            `Do NOT repeat the same failing approach.`,
-        });
-        consecutiveNoProgress = 0;
-      }
-
-      // Feed tool results back to LLM for the next iteration
       this.conversation.addMessage({
         role: 'user',
         content: '',
         toolResults,
       });
 
-      // --- 2.3 Checkpoint after significant operations ---
       if (toolResults.length > 0) {
         stateManager.setGatheredInfo(this.sessionId, 'loopCheckpoint', {
           iteration: this.iteration,
           tokensUsed: this.totalTokensUsed,
           timestamp: new Date().toISOString(),
         });
-        // Debounced flush is sufficient for checkpoints (not crash-critical like gates)
       }
 
-      // Fire-and-forget: tag current work topic for recent focus
       if (response.toolCalls && response.toolCalls.length > 0) {
         const toolNames = response.toolCalls.map((tc) => tc.name);
         const filePaths = this.extractFilePathsFromToolCalls(response.toolCalls);
@@ -594,16 +494,13 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
       }
     }
 
-    // Loop exhaustion — ask user if they want to continue
-    return this.queueQuestion(
-      'This request needed more steps than allowed. Should I continue?',
-      this.iteration,
-      {
-        kind: 'continue',
-        turnId: this.getActiveTurnId() || undefined,
-        fingerprint: `limit:plain:${this.getActiveTurnId() || 'none'}`,
-      },
-    );
+    // Loop exhaustion — deliver whatever we have so far
+    console.warn(`${trace}[chapo-loop] Loop exhausted after ${this.iteration} iterations, delivering last answer`);
+    return {
+      answer: this.lastContent || 'Maximale Iterationen erreicht. Bitte erneut versuchen oder die Aufgabe aufteilen.',
+      status: 'completed' as const,
+      totalIterations: this.iteration,
+    };
   }
 
   private extractFilePathsFromToolCalls(toolCalls: Array<{ name: string; arguments: Record<string, unknown> }>): string[] {
@@ -634,18 +531,6 @@ You are Chapo in the decision loop. Execute tasks DIRECTLY:
     return this.gateManager.queueApproval(description, riskLevel, totalIterations);
   }
 
-  private getDelegationRunnerDeps(): DelegationRunnerDeps {
-    return {
-      sessionId: this.sessionId,
-      projectRoot: this.projectRoot,
-      modelSelection: this.modelSelection,
-      sendEvent: this.sendEvent,
-      errorHandler: this.errorHandler,
-      subAgentRunner: this.subAgentRunner,
-      deriveDelegationStatus: this.deriveDelegationStatus.bind(this),
-      buildToolResultContent,
-    };
-  }
 }
 
 /** Build a short 1-line summary for the parallel context buffer. */
@@ -665,20 +550,6 @@ function buildActionSummary(
   if (toolName === 'fs_listFiles') {
     const path = typeof args.path === 'string' ? args.path : '?';
     return `${path} aufgelistet`;
-  }
-
-  // Delegations
-  if (toolName === 'delegateToDevo') {
-    const obj = typeof args.objective === 'string' ? args.objective.slice(0, 60) : '?';
-    return `DEVO: ${obj}`;
-  }
-  if (toolName === 'delegateToCaio') {
-    const obj = typeof args.objective === 'string' ? args.objective.slice(0, 60) : '?';
-    return `CAIO: ${obj}`;
-  }
-  if (toolName === 'delegateToScout') {
-    const obj = typeof args.objective === 'string' ? args.objective.slice(0, 60) : '?';
-    return `SCOUT: ${obj}`;
   }
 
   // Web

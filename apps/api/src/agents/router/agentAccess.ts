@@ -4,15 +4,9 @@ import { mcpManager } from '../../mcp/index.js';
 
 // Agent definitions
 import { CHAPO_AGENT } from '../chapo.js';
-import { DEVO_AGENT } from '../devo.js';
-import { SCOUT_AGENT } from '../scout.js';
-import { CAIO_AGENT } from '../caio.js';
 
 const AGENTS: Record<AgentName, AgentDefinition> = {
   chapo: CHAPO_AGENT,
-  devo: DEVO_AGENT,
-  scout: SCOUT_AGENT,
-  caio: CAIO_AGENT,
 };
 
 // Get agent definition

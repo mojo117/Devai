@@ -57,9 +57,7 @@ function registerSkillTool(manifest: SkillManifest): void {
     category: 'native',
   });
 
-  // Grant access to CHAPO and DEVO
   toolRegistry.grantAccess('chapo', toolName);
-  toolRegistry.grantAccess('devo', toolName);
 
   console.info(`[skills] Registered skill tool: ${toolName}`);
 }

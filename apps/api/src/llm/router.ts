@@ -5,14 +5,14 @@ import { GeminiProvider } from './providers/gemini.js';
 import { ZAIProvider } from './providers/zai.js';
 import { MoonshotProvider } from './providers/moonshot.js';
 import { logUsage } from './usage-logger.js';
-import { circuitBreaker } from './circuitBreaker.js';
+import { errorTracker } from './circuitBreaker.js';
 
-// Default fallback chain
-const DEFAULT_FALLBACK_CHAIN: LLMProvider[] = ['zai', 'anthropic', 'openai', 'gemini', 'moonshot'];
+// Default fallback chain (removed anthropic/openai/gemini — use kimi as primary fallback)
+const DEFAULT_FALLBACK_CHAIN: LLMProvider[] = ['zai', 'moonshot'];
 
 // Default models per provider (used when falling back to a different provider)
 const DEFAULT_MODELS: Record<LLMProvider, string> = {
-  zai: 'glm-5',
+  zai: 'glm-4.7',
   anthropic: 'claude-sonnet-4-20250514',
   openai: 'gpt-4o',
   gemini: 'gemini-3.1-pro-preview',
@@ -176,9 +176,9 @@ export class LLMRouter {
         continue;
       }
 
-      if (!circuitBreaker.isAvailable(providerName)) {
-        console.info(`[llm] Skipping ${providerName} — circuit breaker open`);
-        errors.push({ provider: providerName, error: 'circuit breaker open' });
+      if (!errorTracker.isAvailable(providerName)) {
+        console.info(`[llm] Skipping ${providerName} — too many recent errors`);
+        errors.push({ provider: providerName, error: 'error tracker blocked' });
         continue;
       }
 
@@ -187,12 +187,16 @@ export class LLMRouter {
       if (originalModel && !isModelForProvider(originalModel, providerName)) {
         const fallbackModel = DEFAULT_MODELS[providerName];
         console.info(`[llm] Adjusting model from ${originalModel} to ${fallbackModel} for provider ${providerName}`);
-        adjustedRequest = { ...request, model: fallbackModel };
+        // Disable thinking on cross-provider fallback: reasoning_content from the
+        // original provider's history is incompatible with the fallback provider's
+        // format requirements (e.g. Kimi requires it on ALL assistant messages when
+        // thinking is enabled, but ZAI only adds it on thinking-enabled iterations).
+        adjustedRequest = { ...request, model: fallbackModel, thinkingEnabled: false };
       }
 
       try {
         const response = await this.generateWithRetry(providerName, adjustedRequest);
-        circuitBreaker.recordSuccess(providerName);
+        errorTracker.recordSuccess(providerName);
         return { ...response, usedProvider: providerName };
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -208,7 +212,7 @@ export class LLMRouter {
           try {
             console.info(`[llm] Trying same-provider fallback ${altModel} on ${providerName}`);
             const response = await this.generateWithRetry(providerName, { ...request, model: altModel });
-            circuitBreaker.recordSuccess(providerName);
+            errorTracker.recordSuccess(providerName);
             recovered = true;
             return { ...response, usedProvider: providerName };
           } catch (fallbackErr) {
@@ -218,13 +222,12 @@ export class LLMRouter {
         }
 
         if (!recovered) {
-          circuitBreaker.recordError(providerName, errorMsg);
+          errorTracker.recordError(providerName, errorMsg);
           console.warn(`[llm] Provider ${providerName} exhausted, trying next...`);
         }
       }
     }
 
-    // All providers failed
     const errorSummary = errors.map(e => `${e.provider}: ${e.error}`).join('; ');
     throw new Error(`All LLM providers failed. Errors: ${errorSummary}`);
   }
@@ -238,4 +241,4 @@ export class LLMRouter {
 // Singleton instance
 export const llmRouter = new LLMRouter();
 
-export { circuitBreaker } from './circuitBreaker.js';
+export { errorTracker } from './circuitBreaker.js';

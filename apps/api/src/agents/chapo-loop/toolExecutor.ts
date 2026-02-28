@@ -1,32 +1,27 @@
 import { executeToolWithApprovalBridge } from '../../actions/approvalBridge.js';
 import * as stateManager from '../stateManager.js';
 import type { AgentErrorHandler } from '../error-handler.js';
-import type { DecisionPathInsights } from '../answer-validator.js';
 import type {
   AgentStreamEvent,
   ChapoLoopResult,
-  LoopDelegationResult,
   RiskLevel,
 } from '../types.js';
-import {
-  buildDelegation,
-  parseParallelDelegations,
-  type ParallelDelegation,
-} from './delegationUtils.js';
 import type { QueueQuestionOptions } from './gateManager.js';
-import {
-  buildDelegationDecisionPath,
-  buildDelegationThinkingStatus,
-  delegateParallel as runParallelDelegations,
-  delegateToAgent as runDelegationToAgent,
-  resolveDelegationTarget,
-  type DelegationRunnerDeps,
-} from './delegationRunner.js';
+
+interface DecisionPathInsights {
+  path: 'answer' | 'tool';
+  reason: string;
+  confidence: number;
+  unresolvedAssumptions: string[];
+}
 import {
   setChapoPlan,
 } from './chapoControlTools.js';
-import { getUserfileById, listUserfiles } from '../../db/userfileQueries.js';
-import { createUserfileSignedUrl } from '../../services/userfileService.js';
+import { getUserfileById, getRecentUserfileByOriginalName, type UserfileRow } from '../../db/userfileQueries.js';
+import { createUserfileSignedUrl, downloadUserfile, searchUserfiles, uploadUserfileFromBuffer } from '../../services/userfileService.js';
+import { readFile } from 'fs/promises';
+import { basename } from 'path';
+import { runHooks } from '../../hooks/hookRunner.js';
 
 interface ToolCallLike {
   id: string;
@@ -61,11 +56,10 @@ interface ToolExecutorDeps {
     totalIterations: number,
   ) => Promise<ChapoLoopResult>;
   emitDecisionPath: (insights: DecisionPathInsights) => void;
-  getDelegationRunnerDeps: () => DelegationRunnerDeps;
-  buildVerificationEnvelope: (delegation: ParallelDelegation, result: LoopDelegationResult) => string;
   buildToolResultContent: (
     result: { success: boolean; result?: unknown; error?: string },
   ) => { content: string; isError: boolean };
+  projectRoot: string | null;
 }
 
 export class ChapoToolExecutor {
@@ -79,7 +73,7 @@ export class ChapoToolExecutor {
         steps: toolCall.arguments.steps as Array<{
           id: string;
           text: string;
-          owner: 'chapo' | 'devo' | 'scout' | 'caio';
+          owner: 'chapo';
           status: 'todo' | 'doing' | 'done' | 'blocked';
         }>,
       });
@@ -92,25 +86,92 @@ export class ChapoToolExecutor {
       };
     }
 
-    // ACTION: SHOW IN PREVIEW — display uploaded userfile in preview panel
+    // ACTION: SHOW IN PREVIEW — display file in preview panel
+    // Supports: userfileId (existing upload) or filePath (auto-upload with TTL freshness check)
     if (toolCall.name === 'show_in_preview') {
-      const userfileId = toolCall.arguments.userfileId as string;
-      if (!userfileId) {
+      const userfileId = toolCall.arguments.userfileId as string | undefined;
+      const filePath = toolCall.arguments.filePath as string | undefined;
+
+      if (!userfileId && !filePath) {
         return {
           toolResult: {
             toolUseId: toolCall.id,
-            result: 'Error: userfileId ist erforderlich.',
+            result: 'Error: userfileId oder filePath ist erforderlich.',
             isError: true,
           },
         };
       }
 
-      const file = await getUserfileById(userfileId);
+      let file: UserfileRow | null = userfileId ? await getUserfileById(userfileId) : null;
+
+      // If filePath provided, check for recent upload or upload fresh
+      if (filePath && !file) {
+        const filename = basename(filePath);
+        const isTextFile = filename.endsWith('.md') || filename.endsWith('.txt') || 
+          filename.endsWith('.markdown') || filename.endsWith('.json');
+        
+        // TTL: 5 minutes for text files, always fresh for others
+        const ttlMs = isTextFile ? 5 * 60 * 1000 : 0;
+        
+        // Check for recent upload
+        const recent = await getRecentUserfileByOriginalName(filename, ttlMs);
+        
+        if (recent) {
+          console.log(`[show_in_preview] Using cached userfile ${recent.id} for ${filename} (${Math.round((Date.now() - new Date(recent.uploaded_at).getTime()) / 1000)}s old)`);
+          file = recent;
+        } else {
+          // Upload fresh
+          try {
+            const buffer = await readFile(filePath);
+            const mimeType = filename.endsWith('.md') || filename.endsWith('.markdown')
+              ? 'text/markdown'
+              : filename.endsWith('.txt')
+                ? 'text/plain'
+                : filename.endsWith('.json')
+                  ? 'application/json'
+                  : 'application/octet-stream';
+            
+            const uploadResult = await uploadUserfileFromBuffer(buffer, filename, mimeType);
+            if (!uploadResult.success) {
+              return {
+                toolResult: {
+                  toolUseId: toolCall.id,
+                  result: `Error: Upload fehlgeschlagen für ${filename}`,
+                  isError: true,
+                },
+              };
+            }
+            
+            console.log(`[show_in_preview] Uploaded fresh ${filename} as ${uploadResult.file.id}`);
+            file = {
+              id: uploadResult.file.id,
+              original_name: uploadResult.file.originalName,
+              mime_type: uploadResult.file.mimeType,
+              storage_path: uploadResult.file.storagePath,
+              uploaded_at: uploadResult.file.uploadedAt,
+              size_bytes: uploadResult.file.sizeBytes,
+              filename: uploadResult.file.filename,
+              expires_at: uploadResult.file.expiresAt,
+              parsed_content: null,
+              parse_status: uploadResult.file.parseStatus,
+            } as UserfileRow;
+          } catch (readErr) {
+            return {
+              toolResult: {
+                toolUseId: toolCall.id,
+                result: `Error: Datei nicht gefunden oder nicht lesbar: ${filePath}`,
+                isError: true,
+              },
+            };
+          }
+        }
+      }
+
       if (!file) {
         return {
           toolResult: {
             toolUseId: toolCall.id,
-            result: `Error: Datei mit ID "${userfileId}" nicht gefunden.`,
+            result: `Error: Datei "${userfileId || filePath}" nicht gefunden.`,
             isError: true,
           },
         };
@@ -118,8 +179,29 @@ export class ChapoToolExecutor {
 
       try {
         const signed = await createUserfileSignedUrl(file.storage_path);
+        const isMarkdown = file.original_name.endsWith('.md') || 
+          file.original_name.endsWith('.markdown') ||
+          file.mime_type === 'text/markdown';
+        const isTextFile = isMarkdown ||
+          file.mime_type === 'text/plain' ||
+          file.original_name.endsWith('.txt') ||
+          file.original_name.endsWith('.json');
+        
+        let content: string | undefined;
+        if (isTextFile) {
+          try {
+            const downloaded = await downloadUserfile(file.storage_path);
+            if (downloaded) {
+              content = downloaded.buffer.toString('utf-8');
+              console.log(`[show_in_preview] Downloaded ${content.length} chars for ${file.original_name}`);
+            } else {
+              console.warn(`[show_in_preview] downloadUserfile returned null for ${file.storage_path}`);
+            }
+          } catch (downloadErr) {
+            console.error(`[show_in_preview] Download error:`, downloadErr);
+          }
+        }
 
-        // Emit tool_call event with preview metadata so frontend artifact detection picks it up
         this.deps.sendEvent({
           type: 'tool_call',
           agent: 'chapo',
@@ -128,7 +210,8 @@ export class ChapoToolExecutor {
             signedUrl: signed.url,
             filename: file.original_name,
             mimeType: file.mime_type,
-            userfileId,
+            userfileId: file.id,
+            content,
           },
         });
 
@@ -152,44 +235,14 @@ export class ChapoToolExecutor {
 
     // ACTION: SEARCH FILES — list/search uploaded userfiles
     if (toolCall.name === 'search_files') {
-      const query = (toolCall.arguments.query as string)?.trim().toLowerCase() || '';
-      try {
-        const allFiles = await listUserfiles();
-        const filtered = query
-          ? allFiles.filter((f) => f.original_name.toLowerCase().includes(query))
-          : allFiles.slice(0, 20);
-
-        if (filtered.length === 0) {
-          return {
-            toolResult: {
-              toolUseId: toolCall.id,
-              result: query
-                ? `Keine Dateien gefunden für "${query}".`
-                : 'Keine hochgeladenen Dateien vorhanden.',
-              isError: false,
-            },
-          };
-        }
-
-        const lines = filtered.map((f) =>
-          `- **${f.original_name}** | ID: \`${f.id}\` | ${f.mime_type} | ${Math.round(f.size_bytes / 1024)}KB | ${new Date(f.uploaded_at).toLocaleDateString('de-DE')}`
-        );
-        return {
-          toolResult: {
-            toolUseId: toolCall.id,
-            result: `${filtered.length} Datei(en) gefunden:\n${lines.join('\n')}`,
-            isError: false,
-          },
-        };
-      } catch (err) {
-        return {
-          toolResult: {
-            toolUseId: toolCall.id,
-            result: `Error: ${err instanceof Error ? err.message : String(err)}`,
-            isError: true,
-          },
-        };
-      }
+      const searchResult = await searchUserfiles(toolCall.arguments.query as string | undefined);
+      return {
+        toolResult: {
+          toolUseId: toolCall.id,
+          result: searchResult.result,
+          isError: !searchResult.success,
+        },
+      };
     }
 
     // ACTION: TODO — update self-managed todo list
@@ -273,118 +326,28 @@ export class ChapoToolExecutor {
       return { earlyReturn };
     }
 
-    // ACTION: DELEGATE in parallel to multiple agents
-    if (toolCall.name === 'delegateParallel') {
-      const delegations = parseParallelDelegations(toolCall.arguments.delegations);
-      if (delegations.length === 0) {
-        return {
-          toolResult: {
-            toolUseId: toolCall.id,
-            result: 'Error: delegateParallel benoetigt mindestens eine gueltige Delegation.',
-            isError: true,
-          },
-        };
-      }
-
-      this.deps.emitDecisionPath({
-        path: 'tool',
-        reason: `Unabhaengige Teilaufgaben werden parallel delegiert (${delegations.length}).`,
-        confidence: 0.8,
-        unresolvedAssumptions: [],
-      });
-
-      this.deps.sendEvent({
-        type: 'agent_thinking',
-        agent: 'chapo',
-        status: `Delegiere parallel (${delegations.length} Aufgaben)...`,
-      });
-
-      const [parallelResult, parallelErr] = await this.deps.errorHandler.safe(
-        `delegate:parallel:${this.deps.iteration}`,
-        () => runParallelDelegations(
-          this.deps.getDelegationRunnerDeps(),
-          delegations,
-          this.deps.buildVerificationEnvelope,
-        ),
-      );
-
-      if (parallelErr) {
-        return {
-          toolResult: {
-            toolUseId: toolCall.id,
-            result: `Parallel-Delegation Fehler: ${this.deps.errorHandler.formatForLLM(parallelErr)}`,
-            isError: true,
-          },
-        };
-      }
-
-      const failedCount = parallelResult.results.filter((entry) => !entry.success).length;
-      this.deps.sendEvent({
-        type: 'tool_result',
-        agent: 'chapo',
-        toolName: toolCall.name,
-        result: { delegated: true, parallel: delegations.length },
-        success: failedCount === 0,
-      });
-      return {
-        toolResult: {
-          toolUseId: toolCall.id,
-          result: parallelResult.summary,
-          isError: failedCount > 0,
-        },
-      };
-    }
-
-    // ACTION: DELEGATE to DEVO/CAIO/SCOUT through one unified pipeline
-    const delegationTarget = resolveDelegationTarget(toolCall.name);
-    if (delegationTarget) {
-      const delegation = buildDelegation(delegationTarget, toolCall.arguments);
-      this.deps.emitDecisionPath(buildDelegationDecisionPath(delegation));
-
-      this.deps.sendEvent({
-        type: 'agent_thinking',
-        agent: 'chapo',
-        status: buildDelegationThinkingStatus(delegation),
-      });
-
-      const [delegationResult, delegationErr] = await this.deps.errorHandler.safe(
-        `delegate:${delegation.target}:${this.deps.iteration}`,
-        () => runDelegationToAgent(this.deps.getDelegationRunnerDeps(), delegation, 'chapo'),
-      );
-
-      if (delegationErr) {
-        return {
-          toolResult: {
-            toolUseId: toolCall.id,
-            result: `${delegation.target.toUpperCase()} Fehler: ${this.deps.errorHandler.formatForLLM(delegationErr)}`,
-            isError: true,
-          },
-        };
-      }
-
-      const envelope = this.deps.buildVerificationEnvelope(delegation, delegationResult);
-      this.deps.sendEvent({
-        type: 'tool_result',
-        agent: 'chapo',
-        toolName: toolCall.name,
-        result: { delegated: true, agent: delegation.target, status: delegationResult.status },
-        success: delegationResult.status === 'success' || delegationResult.status === 'partial',
-      });
-      return {
-        toolResult: {
-          toolUseId: toolCall.id,
-          result: envelope,
-          isError: delegationResult.status === 'failed',
-        },
-      };
-    }
-
     // requestApproval — handle as user question
     if (toolCall.name === 'requestApproval') {
       const description = (toolCall.arguments.description as string) || 'Freigabe erforderlich';
       const riskLevel = ((toolCall.arguments.riskLevel as RiskLevel) || 'medium');
       const earlyReturn = await this.deps.queueApproval(description, riskLevel, this.deps.iteration + 1);
       return { earlyReturn };
+    }
+
+    // --- HOOK: before:tool ---
+    const beforeHook = await runHooks('before:tool', {
+      toolName: toolCall.name,
+      toolArgs: toolCall.arguments,
+      projectRoot: this.deps.projectRoot,
+    });
+    if (beforeHook.blocked) {
+      return {
+        toolResult: {
+          toolUseId: toolCall.id,
+          result: `[BLOCKED] ${beforeHook.blockReason}`,
+          isError: true,
+        },
+      };
     }
 
     // ACTION: TOOL — execute any regular tool
@@ -427,6 +390,15 @@ export class ChapoToolExecutor {
         result: { error: toolErr.message },
         success: false,
       });
+
+      // Fire after:tool:error hook for crashed tools
+      runHooks('after:tool:error', {
+        toolName: toolCall.name,
+        toolArgs: toolCall.arguments,
+        toolResult: toolErr.message,
+        projectRoot: this.deps.projectRoot,
+      }).catch((hookErr) => console.warn('[hooks] after:tool:error hook error:', hookErr));
+
       return {
         toolResult: {
           toolUseId: toolCall.id,
@@ -451,6 +423,14 @@ export class ChapoToolExecutor {
       const path = toolCall.arguments.path as string;
       stateManager.addGatheredFile(this.deps.sessionId, path);
     }
+
+    // --- HOOK: after:tool (fire-and-forget) ---
+    runHooks(content.isError ? 'after:tool:error' : 'after:tool', {
+      toolName: toolCall.name,
+      toolArgs: toolCall.arguments,
+      toolResult: content.content,
+      projectRoot: this.deps.projectRoot,
+    }).catch((err) => console.warn('[hooks] after:tool hook error:', err));
 
     return {
       toolResult: {

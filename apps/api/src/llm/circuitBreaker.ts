@@ -1,34 +1,24 @@
 /**
- * Circuit Breaker for LLM providers — prevents wasting time on failing providers.
- *
- * Three states: CLOSED (normal) → OPEN (skip provider) → HALF_OPEN (test) → CLOSED
+ * Simple error tracker for LLM providers.
+ * Tracks consecutive errors per provider to skip failing providers temporarily.
  */
 
 interface ProviderHealth {
-  state: 'closed' | 'open' | 'half_open';
   errorCount: number;
-  windowStart: number;
-  openedAt: number | null;
   lastError: string | null;
+  lastErrorAt: number;
 }
 
-const ERROR_THRESHOLD = 5;
-const WINDOW_MS = 60_000;
-const COOLDOWN_MS = 30_000;
+const ERROR_THRESHOLD = 3;
+const RECOVERY_MS = 30_000;
 
-class CircuitBreaker {
+class ErrorTracker {
   private providers = new Map<string, ProviderHealth>();
 
   private getHealth(provider: string): ProviderHealth {
     let health = this.providers.get(provider);
     if (!health) {
-      health = {
-        state: 'closed',
-        errorCount: 0,
-        windowStart: Date.now(),
-        openedAt: null,
-        lastError: null,
-      };
+      health = { errorCount: 0, lastError: null, lastErrorAt: 0 };
       this.providers.set(provider, health);
     }
     return health;
@@ -36,74 +26,31 @@ class CircuitBreaker {
 
   isAvailable(provider: string): boolean {
     const health = this.getHealth(provider);
-    if (health.state === 'closed') return true;
-    if (health.state === 'open') {
-      if (Date.now() - (health.openedAt || 0) > COOLDOWN_MS) {
-        health.state = 'half_open';
-        return true;
-      }
-      return false;
-    }
-    return true; // half_open: allow one test request
+    if (health.errorCount < ERROR_THRESHOLD) return true;
+    return Date.now() - health.lastErrorAt > RECOVERY_MS;
   }
 
   recordSuccess(provider: string): void {
     const health = this.getHealth(provider);
-    health.state = 'closed';
     health.errorCount = 0;
-    health.windowStart = Date.now();
-    health.openedAt = null;
     health.lastError = null;
   }
 
   recordError(provider: string, error: string): void {
     const health = this.getHealth(provider);
-
-    if (health.state === 'half_open') {
-      // Test request failed — reopen circuit
-      health.state = 'open';
-      health.openedAt = Date.now();
-      health.lastError = error;
-      console.warn(`[circuit-breaker] ${provider}: half_open → open (test failed: ${error.slice(0, 80)})`);
-      return;
-    }
-
-    // Reset window if expired
-    if (Date.now() - health.windowStart > WINDOW_MS) {
-      health.errorCount = 0;
-      health.windowStart = Date.now();
-    }
-
     health.errorCount++;
     health.lastError = error;
-
-    if (health.errorCount >= ERROR_THRESHOLD) {
-      health.state = 'open';
-      health.openedAt = Date.now();
-      console.warn(`[circuit-breaker] ${provider}: closed → open (${health.errorCount} errors in window)`);
-    }
+    health.lastErrorAt = Date.now();
   }
 
-  getStatus(provider: string): { state: string; errorCount: number; lastError: string | null } {
+  getStatus(provider: string): { available: boolean; errorCount: number; lastError: string | null } {
     const health = this.getHealth(provider);
     return {
-      state: health.state,
+      available: this.isAvailable(provider),
       errorCount: health.errorCount,
       lastError: health.lastError,
     };
   }
-
-  getSnapshot(): Record<string, { state: string; errorCount: number; lastError: string | null }> {
-    const result: Record<string, { state: string; errorCount: number; lastError: string | null }> = {};
-    for (const [provider, health] of this.providers) {
-      result[provider] = {
-        state: health.state,
-        errorCount: health.errorCount,
-        lastError: health.lastError,
-      };
-    }
-    return result;
-  }
 }
 
-export const circuitBreaker = new CircuitBreaker();
+export const errorTracker = new ErrorTracker();

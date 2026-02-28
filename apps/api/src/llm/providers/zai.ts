@@ -19,7 +19,6 @@ export class ZAIProvider implements LLMProviderAdapter {
       this.client = new OpenAI({
         apiKey: config.zaiApiKey,
         baseURL: 'https://api.z.ai/api/coding/paas/v4',
-        timeout: 120_000, // 120s request timeout (GLM-5 reasoning is slow with tools)
       });
     }
     return this.client;
@@ -47,9 +46,10 @@ export class ZAIProvider implements LLMProviderAdapter {
     }
 
     // Add conversation messages
+    const thinkingActive = !!(request.thinkingEnabled && (request.model || 'glm-5') === 'glm-5');
     for (const m of request.messages) {
       if (m.role === 'system') continue; // Already handled above
-      this.convertMessage(m, messages, toolNameToAlias);
+      this.convertMessage(m, messages, toolNameToAlias, thinkingActive);
     }
 
     const tools = request.toolsEnabled && request.tools
@@ -67,15 +67,32 @@ export class ZAIProvider implements LLMProviderAdapter {
       ? (request.model?.includes('4.6v') ? request.model : 'glm-4.6v-flash')
       : (request.model || 'glm-5');
 
-    const response = await client.chat.completions.create({
+    // GLM-5 thinking mode: enable extended reasoning for complex tasks
+    const useThinking = request.thinkingEnabled && model === 'glm-5';
+    const useWebSearch = request.webSearchEnabled && model.startsWith('glm-');
+    const createParams: Record<string, unknown> = {
       model,
-      max_tokens: request.maxTokens || 4096,
+      max_tokens: request.maxTokens || 16384,
       messages,
       tools,
-    });
+    };
+    if (useThinking) {
+      createParams.enable_thinking = true;
+    }
+    if (useWebSearch) {
+      createParams.web_search = true;
+    }
+
+    const response = await client.chat.completions.create(
+      createParams as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming
+    );
 
     const choice = response.choices[0];
     const message = choice.message;
+    // GLM-5 returns reasoning_content when thinking is enabled (same field as Kimi)
+    const reasoningContent = useThinking
+      ? (message as unknown as Record<string, unknown>).reasoning_content as string | undefined
+      : undefined;
 
     // Extract tool calls
     const toolCalls: GenerateResponse['toolCalls'] = [];
@@ -87,6 +104,7 @@ export class ZAIProvider implements LLMProviderAdapter {
             id: tc.id,
             name,
             arguments: JSON.parse(tc.function.arguments || '{}'),
+            ...(reasoningContent ? { providerMetadata: { reasoning_content: reasoningContent } } : {}),
           });
         }
       }
@@ -100,6 +118,15 @@ export class ZAIProvider implements LLMProviderAdapter {
       usage: response.usage ? {
         inputTokens: response.usage.prompt_tokens,
         outputTokens: response.usage.completion_tokens,
+        // Detect if ZAI API returns cached token info (prompt_tokens_details)
+        ...(() => {
+          const details = (response.usage as unknown as Record<string, unknown>).prompt_tokens_details as Record<string, number> | undefined;
+          if (details?.cached_tokens) {
+            console.log(`[zai] Context caching active: ${details.cached_tokens} cached tokens`);
+            return { cachedTokens: details.cached_tokens };
+          }
+          return {};
+        })(),
       } : undefined,
     };
   }
@@ -166,7 +193,8 @@ export class ZAIProvider implements LLMProviderAdapter {
   private convertMessage(
     message: LLMMessage,
     messages: OpenAI.ChatCompletionMessageParam[],
-    toolNameToAlias: Map<string, string>
+    toolNameToAlias: Map<string, string>,
+    thinkingActive: boolean
   ): void {
     // Assistant message with tool calls
     if (message.role === 'assistant' && message.toolCalls?.length) {
@@ -178,11 +206,21 @@ export class ZAIProvider implements LLMProviderAdapter {
           arguments: JSON.stringify(tc.arguments),
         },
       }));
-      messages.push({
+      const assistantMsg: Record<string, unknown> = {
         role: 'assistant',
         content: getTextContent(message.content) || null,
         tool_calls: toolCalls,
-      });
+      };
+      // Only inject reasoning_content when thinking is active for this request.
+      // Cross-provider fallback disables thinking, so stale reasoning_content
+      // from a different provider won't leak into the message history.
+      if (thinkingActive) {
+        const reasoningContent = message.toolCalls[0]?.providerMetadata?.reasoning_content as string | undefined;
+        if (reasoningContent) {
+          assistantMsg.reasoning_content = reasoningContent;
+        }
+      }
+      messages.push(assistantMsg as unknown as OpenAI.ChatCompletionMessageParam);
       return;
     }
 

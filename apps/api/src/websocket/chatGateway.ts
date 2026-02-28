@@ -1,5 +1,6 @@
 import type { WebSocket } from 'ws';
 import { triggerSessionEndExtraction } from '../memory/service.js';
+import { promoteMaturedTopics } from '../memory/episodicExtraction.js';
 import { cleanupSession } from '../memory/topicTagger.js';
 import { getMessages } from '../db/queries.js';
 
@@ -50,6 +51,11 @@ export function unregisterChatClient(ws: WebSocket, sessionId: string): void {
       triggerSessionEndExtraction(conversationText, sessionId);
     }).catch((err) => {
       console.error('[ChatGW] session-end extraction failed:', err);
+    });
+
+    // Promote mature recentFocus topics to long-term episodic memory
+    promoteMaturedTopics(sessionId).catch((err) => {
+      console.error('[ChatGW] topic promotion failed:', err);
     });
 
     // Cleanup tagger debounce state

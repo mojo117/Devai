@@ -1,5 +1,5 @@
 /**
- * Engine Profiles — switchable model configurations for all agents.
+ * Engine Profiles — switchable model configurations.
  *
  * Usage: /engine <glm|gemini|claude> from Telegram or web chat.
  * Stored per-session in gatheredInfo.engineProfile.
@@ -22,33 +22,25 @@ export type EngineProfile = Partial<Record<AgentName, AgentModelOverride>>;
 /**
  * Engine profile definitions.
  *
- * DEVO fast tasks use glm-4.7-flash (FREE).
- * SCOUT and CAIO use glm-4.7 across all profiles.
+ * Single-agent mode: all profiles configure CHAPO only.
  */
 export const ENGINE_PROFILES: Record<EngineName, EngineProfile> = {
   glm: {
-    chapo: { model: 'glm-5', fallbackModel: 'claude-opus-4-5-20251101', sameProviderFallback: 'glm-4.7' },
-    devo: { model: 'glm-5', fastModel: 'glm-4.7-flash', fallbackModel: 'claude-sonnet-4-20250514', sameProviderFallback: 'glm-4.7' },
-    scout: { model: 'glm-4.7', fallbackModel: 'claude-sonnet-4-20250514' },
-    caio: { model: 'glm-4.7', fallbackModel: 'claude-sonnet-4-20250514' },
+    chapo: { 
+      model: 'glm-5', 
+      fastModel: 'glm-4.7-flash', 
+      fallbackModel: 'glm-4.7-flash',
+      sameProviderFallback: 'glm-4.7',
+    },
   },
   gemini: {
-    chapo: { model: 'gemini-3.1-pro-preview', fallbackModel: 'glm-5' },
-    devo: { model: 'gemini-3.1-pro-preview', fastModel: 'glm-4.7-flash', fallbackModel: 'glm-5' },
-    scout: { model: 'glm-4.7', fallbackModel: 'gemini-3.1-pro-preview' },
-    caio: { model: 'glm-4.7', fallbackModel: 'gemini-3.1-pro-preview' },
+    chapo: { model: 'gemini-3.1-pro-preview', fastModel: 'kimi-k2.5', fallbackModel: 'kimi-k2.5' },
   },
   claude: {
-    chapo: { model: 'claude-opus-4-5-20251101', fallbackModel: 'glm-5' },
-    devo: { model: 'claude-sonnet-4-20250514', fastModel: 'glm-4.7-flash', fallbackModel: 'glm-5' },
-    scout: { model: 'glm-4.7', fallbackModel: 'claude-sonnet-4-20250514' },
-    caio: { model: 'glm-4.7', fallbackModel: 'claude-sonnet-4-20250514' },
+    chapo: { model: 'claude-opus-4-5-20251101', fastModel: 'kimi-k2.5', fallbackModel: 'kimi-k2.5' },
   },
   kimi: {
-    chapo: { model: 'kimi-k2.5', fallbackModel: 'glm-5' },
-    devo: { model: 'glm-5', fastModel: 'glm-4.7-flash', fallbackModel: 'kimi-k2.5', sameProviderFallback: 'glm-4.7' },
-    scout: { model: 'glm-4.7', fallbackModel: 'kimi-k2.5' },
-    caio: { model: 'glm-4.7', fallbackModel: 'kimi-k2.5' },
+    chapo: { model: 'kimi-k2.5', fastModel: 'kimi-k2.5', fallbackModel: 'glm-4.7', sameProviderFallback: 'glm-4.7' },
   },
 };
 
@@ -73,9 +65,6 @@ export function formatEngineStatus(engine: EngineName): string {
   };
   return [
     `Engine: ${engine.toUpperCase()}`,
-    `  CHAPO: ${p.chapo?.model} (fallback: ${fb(p.chapo)})`,
-    `  DEVO:  ${p.devo?.model} / fast: ${p.devo?.fastModel ?? 'none'} (fallback: ${fb(p.devo)})`,
-    `  SCOUT: ${p.scout?.model} (fallback: ${fb(p.scout)})`,
-    `  CAIO:  ${p.caio?.model} (fallback: ${fb(p.caio)})`,
+    `  CHAPO: ${p.chapo?.model} / fast: ${p.chapo?.fastModel ?? 'none'} (fallback: ${fb(p.chapo)})`,
   ].join('\n');
 }

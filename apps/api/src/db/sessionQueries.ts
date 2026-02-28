@@ -7,6 +7,7 @@ export interface SessionSummary {
   id: string;
   title: string | null;
   createdAt: string;
+  lastUsedAt: string;
 }
 
 export function getDefaultUserId(): string {
@@ -16,9 +17,9 @@ export function getDefaultUserId(): string {
 export async function listSessions(userId: string = DEFAULT_USER_ID): Promise<SessionSummary[]> {
   const { data, error } = await getSupabase()
     .from('sessions')
-    .select('id, title, created_at')
+    .select('id, title, created_at, last_used_at')
     .eq('user_id', userId)
-    .order('created_at', { ascending: false });
+    .order('last_used_at', { ascending: false });
 
   if (error) {
     console.error('Failed to list sessions:', error);
@@ -29,6 +30,7 @@ export async function listSessions(userId: string = DEFAULT_USER_ID): Promise<Se
     id: row.id,
     title: row.title,
     createdAt: row.created_at,
+    lastUsedAt: row.last_used_at,
   }));
 }
 
@@ -43,13 +45,14 @@ export async function createSession(title?: string, userId: string = DEFAULT_USE
       user_id: userId,
       title: title || null,
       created_at: now,
+      last_used_at: now,
     });
 
   if (error) {
     console.error('Failed to create session:', error);
   }
 
-  return { id, title: title || null, createdAt: now };
+  return { id, title: title || null, createdAt: now, lastUsedAt: now };
 }
 
 export async function ensureSessionExists(
@@ -65,6 +68,7 @@ export async function ensureSessionExists(
       user_id: userId,
       title: title || null,
       created_at: now,
+      last_used_at: now,
     }, {
       onConflict: 'id',
       ignoreDuplicates: true,
@@ -104,6 +108,39 @@ export async function updateSessionTitleIfEmpty(sessionId: string, title: string
   const existing = await getSessionTitle(sessionId);
   if (existing) return;
   await updateSessionTitle(sessionId, title);
+}
+
+export async function touchSession(sessionId: string): Promise<void> {
+  const { error } = await getSupabase()
+    .from('sessions')
+    .update({ last_used_at: new Date().toISOString() })
+    .eq('id', sessionId);
+
+  if (error) {
+    console.error('Failed to touch session:', error);
+  }
+}
+
+export async function deleteOldSessions(
+  ageInDays: number,
+  userId: string = DEFAULT_USER_ID,
+): Promise<number> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - ageInDays);
+
+  const { data, error } = await getSupabase()
+    .from('sessions')
+    .delete()
+    .eq('user_id', userId)
+    .lt('last_used_at', cutoff.toISOString())
+    .select('id');
+
+  if (error) {
+    console.error('Failed to delete old sessions:', error);
+    return 0;
+  }
+
+  return (data || []).length;
 }
 
 export async function getRecentFailedSessions(

@@ -1,5 +1,6 @@
 import { getSupabase } from './index.js';
 import type { ChatMessage } from '@devai/shared';
+import { touchSession } from './sessionQueries.js';
 
 export interface StoredMessage extends ChatMessage {
   sessionId: string;
@@ -60,5 +61,8 @@ export async function saveMessage(
 
   if (error) {
     console.error('Failed to save message:', error);
+    return;
   }
+
+  await touchSession(sessionId).catch(() => {});
 }

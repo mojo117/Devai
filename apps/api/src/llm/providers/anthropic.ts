@@ -38,7 +38,7 @@ export class AnthropicProvider implements LLMProviderAdapter {
 
     const response = await client.messages.create({
       model: request.model || 'claude-sonnet-4-20250514',
-      max_tokens: request.maxTokens || 4096,
+      max_tokens: request.maxTokens || 16384,
       system: request.systemPrompt,
       messages,
       tools,

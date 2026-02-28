@@ -16,8 +16,9 @@ import * as taskforgeTools from './taskforge.js';
 import * as emailTools from './email.js';
 import * as telegramTools from './telegram.js';
 import * as contextApi from './context.js';
+import * as supabaseEdgeTools from './supabaseEdgeFunctions.js';
 import { skillCreate, skillUpdate, skillDelete, skillReload, skillList } from './skillHandlers.js';
-import { listUserfiles } from '../db/userfileQueries.js';
+import { searchUserfiles } from '../services/userfileService.js';
 
 export type ToolArgs = Record<string, unknown>;
 
@@ -86,14 +87,14 @@ export const TOOL_HANDLERS: Record<string, ToolHandler> = {
   web_fetch: async (args) => webTools.webFetch(args.url as string, {
     timeout: args.timeout as number | undefined,
   }),
-  scout_search_fast: async (args) => firecrawlTools.scoutSearchFast(args.query as string, {
+  search_quick: async (args) => firecrawlTools.scoutSearchFast(args.query as string, {
     limit: args.limit as number | undefined,
     country: args.country as string | undefined,
     location: args.location as string | undefined,
     categories: args.categories as Array<'research' | 'github' | 'pdf'> | undefined,
     sources: args.sources as Array<'web' | 'news'> | undefined,
   }),
-  scout_search_deep: async (args) => firecrawlTools.scoutSearchDeep(args.query as string, {
+  search_deep: async (args) => firecrawlTools.scoutSearchDeep(args.query as string, {
     limit: args.limit as number | undefined,
     country: args.country as string | undefined,
     location: args.location as string | undefined,
@@ -101,14 +102,14 @@ export const TOOL_HANDLERS: Record<string, ToolHandler> = {
     sources: args.sources as Array<'web' | 'news'> | undefined,
     recency: args.recency as 'day' | 'week' | 'month' | 'year' | undefined,
   }),
-  scout_site_map: async (args) => firecrawlTools.scoutSiteMap(args.url as string, {
+  search_site_map: async (args) => firecrawlTools.scoutSiteMap(args.url as string, {
     search: args.search as string | undefined,
     limit: args.limit as number | undefined,
     includeSubdomains: args.includeSubdomains as boolean | undefined,
     ignoreSitemap: args.ignoreSitemap as boolean | undefined,
     sitemapOnly: args.sitemapOnly as boolean | undefined,
   }),
-  scout_crawl_focused: async (args) => firecrawlTools.scoutCrawlFocused(args.url as string, {
+  search_crawl: async (args) => firecrawlTools.scoutCrawlFocused(args.url as string, {
     prompt: args.prompt as string | undefined,
     includePaths: args.includePaths as string[] | undefined,
     excludePaths: args.excludePaths as string[] | undefined,
@@ -117,12 +118,12 @@ export const TOOL_HANDLERS: Record<string, ToolHandler> = {
     includeSubdomains: args.includeSubdomains as boolean | undefined,
     allowExternalLinks: args.allowExternalLinks as boolean | undefined,
   }),
-  scout_extract_schema: async (args) => firecrawlTools.scoutExtractSchema(args.urls as string[], {
+  search_extract: async (args) => firecrawlTools.scoutExtractSchema(args.urls as string[], {
     prompt: args.prompt as string | undefined,
     schema: args.schema as Record<string, unknown> | undefined,
     enableWebSearch: args.enableWebSearch as boolean | undefined,
   }),
-  scout_research_bundle: async (args) => firecrawlTools.scoutResearchBundle(args.query as string, {
+  search_research: async (args) => firecrawlTools.scoutResearchBundle(args.query as string, {
     domains: args.domains as string[] | undefined,
     recencyDays: args.recencyDays as number | undefined,
     maxFindings: args.maxFindings as number | undefined,
@@ -132,16 +133,16 @@ export const TOOL_HANDLERS: Record<string, ToolHandler> = {
     cwd: args.cwd as string | undefined,
     timeout: args.timeout as number | undefined,
   }),
-  devo_exec_session_start: async (args) => execSessionTools.devoExecSessionStart(args.command as string, {
+  exec_session_start: async (args) => execSessionTools.devoExecSessionStart(args.command as string, {
     cwd: args.cwd as string | undefined,
     timeoutMs: args.timeoutMs as number | undefined,
     allowArbitraryInput: args.allowArbitraryInput as boolean | undefined,
   }),
-  devo_exec_session_write: async (args) => execSessionTools.devoExecSessionWrite(
+  exec_session_write: async (args) => execSessionTools.devoExecSessionWrite(
     args.sessionId as string,
     args.input as string,
   ),
-  devo_exec_session_poll: async (args) => execSessionTools.devoExecSessionPoll(
+  exec_session_poll: async (args) => execSessionTools.devoExecSessionPoll(
     args.sessionId as string,
     {
       maxBytes: args.maxBytes as number | undefined,
@@ -275,22 +276,8 @@ export const TOOL_HANDLERS: Record<string, ToolHandler> = {
   ),
 
   search_files: async (args) => {
-    const query = (args.query as string)?.trim().toLowerCase() || '';
-    const allFiles = await listUserfiles();
-    const filtered = query
-      ? allFiles.filter((f) => f.original_name.toLowerCase().includes(query))
-      : allFiles.slice(0, 20);
-
-    if (filtered.length === 0) {
-      return query
-        ? `Keine Dateien gefunden für "${query}".`
-        : 'Keine hochgeladenen Dateien vorhanden.';
-    }
-
-    const lines = filtered.map((f) =>
-      `- **${f.original_name}** | ID: \`${f.id}\` | ${f.mime_type} | ${Math.round(f.size_bytes / 1024)}KB | ${new Date(f.uploaded_at).toLocaleDateString('de-DE')}`
-    );
-    return `${filtered.length} Datei(en) gefunden:\n${lines.join('\n')}`;
+    const result = await searchUserfiles(args.query as string | undefined);
+    return result.result;
   },
 
   skill_create: async (args) => skillCreate(args),
@@ -298,6 +285,26 @@ export const TOOL_HANDLERS: Record<string, ToolHandler> = {
   skill_delete: async (args) => skillDelete(args),
   skill_reload: async () => skillReload(),
   skill_list: async () => skillList(),
+
+  supabase_list_functions: async () => supabaseEdgeTools.listFunctions(),
+  supabase_get_function: async (args) => supabaseEdgeTools.getFunction(args.functionName as string),
+  supabase_deploy_function: async (args) => supabaseEdgeTools.deployFunction({
+    functionName: args.functionName as string,
+    files: args.files as { name: string; content: string }[],
+    entrypointPath: args.entrypointPath as string | undefined,
+    importMapPath: args.importMapPath as string | undefined,
+    verifyJWT: args.verifyJWT as boolean | undefined,
+  }),
+  supabase_delete_function: async (args) => supabaseEdgeTools.deleteFunction(args.functionName as string),
+  supabase_invoke_function: async (args) => supabaseEdgeTools.invokeFunction(
+    args.functionName as string,
+    args.payload as Record<string, unknown> | undefined,
+    args.headers as Record<string, string> | undefined,
+  ),
+  supabase_get_function_logs: async (args) => supabaseEdgeTools.getFunctionLogs(
+    args.functionName as string,
+    args.limit as number | undefined,
+  ),
 };
 
 export const READ_ONLY_TOOLS = new Set([
@@ -313,12 +320,12 @@ export const READ_ONLY_TOOLS = new Set([
   'pm2_logs',
   'web_search',
   'web_fetch',
-  'scout_search_fast',
-  'scout_search_deep',
-  'scout_site_map',
-  'scout_crawl_focused',
-  'scout_extract_schema',
-  'scout_research_bundle',
+  'search_quick',
+  'search_deep',
+  'search_site_map',
+  'search_crawl',
+  'search_extract',
+  'search_research',
   'context_listDocuments',
   'context_readDocument',
   'context_searchDocuments',

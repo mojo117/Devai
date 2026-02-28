@@ -13,9 +13,6 @@ import type {
   AgentPhase,
   AgentToolCall,
   ApprovalRequest,
-  DelegationResult,
-  DelegationTask,
-  ParallelExecution,
   QualificationResult,
   UserQuestion,
 } from '../types.js';
@@ -487,65 +484,6 @@ export function getPendingQuestions(sessionId: string): UserQuestion[] {
   return state?.pendingQuestions ?? [];
 }
 
-// Parallel Executions
-export function startParallelExecution(
-  sessionId: string,
-  agents: AgentName[],
-  tasks: DelegationTask[],
-): ParallelExecution {
-  const state = getOrCreateState(sessionId);
-
-  const execution: ParallelExecution = {
-    executionId: nanoid(),
-    agents,
-    tasks,
-    status: 'running',
-    results: [],
-    startTime: new Date().toISOString(),
-  };
-
-  state.parallelExecutions.push(execution);
-  schedulePersist(sessionId);
-  return execution;
-}
-
-export function addParallelResult(
-  sessionId: string,
-  executionId: string,
-  result: DelegationResult,
-): void {
-  const state = getState(sessionId);
-  if (!state) return;
-
-  const execution = state.parallelExecutions.find((e) => e.executionId === executionId);
-  if (execution) {
-    execution.results.push(result);
-
-    // Check if all tasks are complete
-    if (execution.results.length === execution.tasks.length) {
-      const hasFailure = execution.results.some((r) => !r.success);
-      execution.status = hasFailure ? 'partial_failure' : 'completed';
-      execution.endTime = new Date().toISOString();
-    }
-    schedulePersist(sessionId);
-  }
-}
-
-export function getParallelExecution(
-  sessionId: string,
-  executionId: string,
-): ParallelExecution | undefined {
-  const state = getState(sessionId);
-  return state?.parallelExecutions.find((e) => e.executionId === executionId);
-}
-
-export function getActiveParallelExecutions(
-  sessionId: string,
-): ParallelExecution[] {
-  const state = getState(sessionId);
-  return state?.parallelExecutions.filter((e) => e.status === 'running') ?? [];
-}
-
 // State Summary (for debugging/UI)
 export function getStateSummary(sessionId: string): {
   sessionId: string;
@@ -554,7 +492,6 @@ export function getStateSummary(sessionId: string): {
   historyCount: number;
   pendingApprovals: number;
   pendingQuestions: number;
-  activeParallelExecutions: number;
   approvalGranted: boolean;
 } | null {
   const state = getState(sessionId);
@@ -567,7 +504,6 @@ export function getStateSummary(sessionId: string): {
     historyCount: state.agentHistory.length,
     pendingApprovals: state.pendingApprovals.length,
     pendingQuestions: state.pendingQuestions.length,
-    activeParallelExecutions: state.parallelExecutions.filter((e) => e.status === 'running').length,
     approvalGranted: state.taskContext.approvalGranted,
   };
 }

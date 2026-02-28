@@ -42,9 +42,9 @@ function generateToolDescription(toolName: string, args: Record<string, unknown>
       return `Trigger workflow: ${args.workflow} on ${args.ref}`;
     case 'bash_execute':
       return `Execute: ${args.command}`;
-    case 'devo_exec_session_start':
+    case 'exec_session_start':
       return `Start exec session: ${args.command}`;
-    case 'devo_exec_session_write':
+    case 'exec_session_write':
       return `Write to exec session: ${args.sessionId}`;
     case 'ssh_execute':
       return `SSH to ${args.host}: ${args.command}`;

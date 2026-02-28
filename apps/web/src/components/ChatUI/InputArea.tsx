@@ -24,7 +24,7 @@ interface InputAreaProps {
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   isTranscribing: boolean;
   onTranscribe: (audioBlob: Blob) => void;
-  onSetPreview?: (enabled: boolean) => void;
+  onSlashCommand?: (command: string, match: RegExpMatchArray) => void;
 }
 
 export function InputArea({
@@ -45,7 +45,7 @@ export function InputArea({
   onFileUpload,
   isTranscribing,
   onTranscribe,
-  onSetPreview,
+  onSlashCommand,
 }: InputAreaProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
@@ -100,14 +100,22 @@ export function InputArea({
 
   const handleFormSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
-    const previewMatch = input.trim().match(/^\/preview\s+(on|off)$/i);
-    if (previewMatch) {
-      onSetPreview?.(previewMatch[1].toLowerCase() === 'on');
-      setInput('');
-      return;
+    const FRONTEND_SLASH_COMMANDS: [string, RegExp][] = [
+      ['preview', /^\/preview\s+(on|off)$/i],
+      ['debug',   /^\/debug\s+(on|off)$/i],
+      ['list',    /^\/list$/i],
+    ];
+    const trimmed = input.trim();
+    for (const [cmd, pattern] of FRONTEND_SLASH_COMMANDS) {
+      const match = trimmed.match(pattern);
+      if (match) {
+        onSlashCommand?.(cmd, match);
+        setInput('');
+        return;
+      }
     }
     onSubmit(e);
-  }, [input, onSetPreview, setInput, onSubmit]);
+  }, [input, onSlashCommand, setInput, onSubmit]);
 
   const handleDictateClick = useCallback(() => {
     setPlusMenuOpen(false);

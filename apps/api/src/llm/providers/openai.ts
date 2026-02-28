@@ -57,7 +57,7 @@ export class OpenAIProvider implements LLMProviderAdapter {
 
     const response = await client.chat.completions.create({
       model: request.model || 'gpt-4o',
-      max_tokens: request.maxTokens || 4096,
+      max_tokens: request.maxTokens || 16384,
       messages,
       tools,
     });

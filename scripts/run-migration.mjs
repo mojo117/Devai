@@ -17,9 +17,9 @@ CREATE TABLE IF NOT EXISTS agent_execution_logs (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
   agent TEXT NOT NULL
-    CHECK (agent IN ('chapo', 'devo', 'caio', 'scout')),
+    CHECK (agent IN ('chapo', 'chapo-sub', 'system')),
   delegated_from TEXT
-    CHECK (delegated_from IS NULL OR delegated_from IN ('chapo', 'devo', 'caio')),
+    CHECK (delegated_from IS NULL OR delegated_from IN ('chapo')),
   phase TEXT NOT NULL
     CHECK (phase IN ('start', 'success', 'failure', 'escalated')),
   duration_ms INTEGER,

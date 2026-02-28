@@ -23,7 +23,7 @@ import {
 import type { SendEventFn } from './shared.js';
 
 /**
- * Main entry point: Process a user request through the multi-agent system
+ * Main entry point: Process a user request through the agent system
  */
 export async function processRequest(
   sessionId: string,
@@ -203,10 +203,7 @@ export async function handleUserResponse(
     );
   }
 
-  const historyAgent: AgentName =
-    question.fromAgent === 'chapo' || question.fromAgent === 'devo' || question.fromAgent === 'scout' || question.fromAgent === 'caio'
-      ? question.fromAgent
-      : 'chapo';
+  const historyAgent: AgentName = 'chapo';
 
   const userResponse: UserResponse = {
     questionId,

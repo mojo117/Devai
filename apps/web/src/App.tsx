@@ -11,16 +11,14 @@ import {
   fetchPreviewArtifact,
   fetchHealth,
   triggerPreviewScrape,
+  readProjectFile,
 } from './api';
 import type { HealthResponse } from './types';
 import { useAuth } from './hooks/useAuth';
 import { usePersistedSettings } from './hooks/usePersistedSettings';
 
 function App() {
-  // Custom hooks for grouped state
   const auth = useAuth();
-  const [error, setError] = useState<string | null>(null);
-
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const settings = usePersistedSettings(auth.isAuthed);
 
@@ -34,13 +32,15 @@ function App() {
 
   // Preview toggle backed by localStorage
   const [previewEnabled, setPreviewEnabled] = useState(() => {
-    try { return localStorage.getItem('devai_preview') === 'on'; }
-    catch { return false; }
+    try {
+      const stored = localStorage.getItem('devai_preview');
+      return stored === null ? true : stored === 'on';
+    }
+    catch { return true; }
   });
 
   const [detectedArtifact, setDetectedArtifact] = useState<Artifact | null>(null);
   const [currentArtifact, setCurrentArtifact] = useState<Artifact | null>(null);
-  const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [mobilePreviewOpen, setMobilePreviewOpen] = useState(false);
   const lastSubmittedArtifactKeyRef = useRef<string | null>(null);
 
@@ -82,6 +82,24 @@ function App() {
 
     setCurrentArtifact(detectedArtifact);
 
+    // Artifact from fs_edit: has filePath but no content — fetch it
+    if (detectedArtifact.filePath && !detectedArtifact.content) {
+      let cancelled = false;
+      readProjectFile(detectedArtifact.filePath)
+        .then((res) => {
+          if (cancelled) return;
+          setCurrentArtifact((prev) =>
+            prev && prev.id === detectedArtifact.id
+              ? { ...prev, content: res.content }
+              : prev,
+          );
+        })
+        .catch((err) => {
+          if (!cancelled) console.warn('[App] Failed to fetch file for preview:', err);
+        });
+      return () => { cancelled = true; };
+    }
+
     const sessionId = chatSessionState?.sessionId;
     if (!previewEnabled || !sessionId) {
       return;
@@ -104,7 +122,14 @@ function App() {
     lastSubmittedArtifactKeyRef.current = artifactKey;
 
     let cancelled = false;
-    let pollHandle: number | null = null;
+    const pollHandles = new Set<number>();
+    
+    const clearAllPollHandles = () => {
+      for (const handle of pollHandles) {
+        window.clearTimeout(handle);
+      }
+      pollHandles.clear();
+    };
 
     const attachRemote = (remote: {
       id: string;
@@ -115,6 +140,7 @@ function App() {
       mimeType?: string | null;
       type?: Artifact['type'];
     }) => {
+      if (cancelled) return;
       setCurrentArtifact((prev) => {
         const base = prev && prev.id === detectedArtifact.id ? prev : detectedArtifact;
         return { ...base, remote };
@@ -138,9 +164,11 @@ function App() {
       attachRemote(nextRemote);
 
       if (res.artifact.status === 'ready' || res.artifact.status === 'failed') return;
-      pollHandle = window.setTimeout(() => {
+      const handle = window.setTimeout(() => {
+        pollHandles.delete(handle);
         void pollArtifact(artifactId, remaining - 1);
       }, 1000);
+      pollHandles.add(handle);
     };
 
     const create = async () => {
@@ -187,7 +215,7 @@ function App() {
 
     return () => {
       cancelled = true;
-      if (pollHandle) window.clearTimeout(pollHandle);
+      clearAllPollHandles();
     };
   }, [detectedArtifact, chatSessionState?.sessionId, previewEnabled]);
 
@@ -269,14 +297,23 @@ function App() {
     return () => { cancelled = true; };
   }, [auth.isAuthed]);
 
-  // Agent icon/phase for header
-  const agentIcon = activeAgent === 'chapo'
-    ? '🎯'
-    : activeAgent === 'devo'
-    ? '🔧'
-    : activeAgent === 'scout'
-    ? '🔍'
-    : '🤖';
+  // Status pill logic
+  const isAgentActive = activeAgent && agentPhase !== 'idle';
+  const statusDotClass = isAgentActive
+    ? agentPhase === 'thinking' ? 'bg-cyan-400 animate-pulse'
+    : agentPhase === 'error' ? 'bg-red-400'
+    : 'bg-yellow-400 animate-pulse'
+    : health ? 'bg-green-400' : 'bg-yellow-400';
+  const statusLabel = isAgentActive
+    ? agentPhase === 'thinking' ? 'Thinking...'
+    : agentPhase === 'error' ? 'Error'
+    : 'Working...'
+    : health ? 'Online' : 'Offline';
+  const statusTextClass = isAgentActive
+    ? agentPhase === 'thinking' ? 'text-cyan-400'
+    : agentPhase === 'error' ? 'text-red-400'
+    : 'text-yellow-400'
+    : health ? 'text-green-400' : 'text-yellow-400';
 
   // Auth loading screen
   if (!auth.authChecked) {
@@ -349,10 +386,12 @@ function App() {
       <header className="sticky top-0 z-40 bg-devai-surface/95 backdrop-blur border-b border-devai-border px-3 md:px-4 py-2">
         <div className="flex items-center justify-between gap-2 max-w-5xl mx-auto w-full">
           {/* Left: Logo */}
-          <h1 className="text-base font-bold text-devai-accent">DevAI</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-base font-bold text-devai-accent">DevAI</h1>
+          </div>
 
           {/* Center: Session Controls */}
-          <div className="flex items-center gap-2 text-[11px] text-devai-text-secondary">
+          <div className="flex items-center gap-2">
             <select
               value={chatSessionState?.sessionId || chatSessionState?.sessions[0]?.id || ''}
               onChange={(e) => {
@@ -361,7 +400,7 @@ function App() {
                 issueSessionCommand({ type: 'select', sessionId: v });
               }}
               disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState || chatSessionState.sessions.length === 0}
-              className="bg-devai-card border border-devai-border rounded px-2 py-1 text-xs text-devai-text max-w-[120px] md:max-w-[220px]"
+              className="bg-devai-card border border-devai-border rounded px-2 py-1 text-xs text-devai-text max-w-[140px] md:max-w-[280px]"
               title={chatSessionState?.sessionId || ''}
             >
               {!chatSessionState || chatSessionState.sessionsLoading ? (
@@ -369,48 +408,62 @@ function App() {
               ) : chatSessionState.sessions.length === 0 ? (
                 <option value="">No sessions</option>
               ) : (
-                chatSessionState.sessions.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.title ? s.title : s.id.slice(0, 8)}
-                  </option>
-                ))
+                chatSessionState.sessions.map((s) => {
+                  const label = s.title || s.id.slice(0, 8);
+                  const date = s.lastUsedAt || s.createdAt;
+                  const dateStr = date ? new Date(date).toLocaleDateString(undefined, { day: '2-digit', month: 'short' }) : '';
+                  return (
+                    <option key={s.id} value={s.id}>
+                      {dateStr ? `${label}  —  ${dateStr}` : label}
+                    </option>
+                  );
+                })
               )}
             </select>
             <button
               onClick={() => issueSessionCommand({ type: 'restart' })}
               disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState?.hasMessages}
-              className="text-[11px] text-devai-accent hover:text-devai-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Save current conversation to history and start fresh"
+              className="flex items-center gap-1 bg-devai-card border border-devai-border rounded-lg px-2 py-1 text-xs text-devai-text-secondary hover:text-devai-text hover:border-devai-border-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              title="Restart session"
             >
-              Restart
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h5M20 20v-5h-5M5.5 15.5A7.5 7.5 0 0112 4.5c2.76 0 5.2 1.49 6.5 3.72M18.5 8.5A7.5 7.5 0 0112 19.5c-2.76 0-5.2-1.49-6.5-3.72" />
+              </svg>
+              <span className="hidden md:inline">Restart</span>
             </button>
             <button
               onClick={() => issueSessionCommand({ type: 'new' })}
               disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState}
-              className="text-[11px] text-devai-text-secondary hover:text-devai-text disabled:opacity-50"
+              className="flex items-center gap-1 bg-devai-card border border-devai-border rounded-lg px-2 py-1 text-xs text-devai-text-secondary hover:text-devai-text hover:border-devai-border-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              title="New session"
             >
-              New
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              <span className="hidden md:inline">New</span>
+            </button>
+            <button
+              onClick={() => {
+                if (window.confirm('Delete this session? This cannot be undone.')) {
+                  issueSessionCommand({ type: 'delete' });
+                }
+              }}
+              disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState?.sessionId}
+              className="flex items-center gap-1 bg-devai-card border border-devai-border rounded-lg px-2 py-1 text-xs text-red-400 hover:text-red-300 hover:border-red-400/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              title="Delete session"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              <span className="hidden md:inline">Delete</span>
             </button>
           </div>
 
-          {/* Right: Status + Agent + Burger */}
+          {/* Right: Status + Controls */}
           <div className="flex items-center gap-3 text-[11px]">
-            <span className="flex items-center gap-1">
-              <span>{agentIcon}</span>
-              {activeAgent && (
-                <span className={`text-[10px] ${
-                  agentPhase === 'thinking' ? 'text-cyan-400 animate-pulse' :
-                  agentPhase === 'execution' || agentPhase === 'executing' ? 'text-yellow-400' :
-                  agentPhase === 'error' ? 'text-red-400' :
-                  'text-devai-text-muted'
-                }`}>
-                  {agentPhase === 'thinking' && '...'}
-                  {(agentPhase === 'execution' || agentPhase === 'executing') && '...'}
-                </span>
-              )}
-            </span>
-            <span className={`${health ? 'text-green-400' : 'text-yellow-400'}`}>
-              {health ? '●' : '○'}
+            <span className="flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${statusDotClass}`} />
+              <span className={`hidden md:inline ${statusTextClass}`}>{statusLabel}</span>
             </span>
             <button
               onClick={() => setPreviewEnabled(p => !p)}
@@ -437,19 +490,6 @@ function App() {
           </div>
         </div>
       </header>
-
-      {/* Error Banner */}
-      {error && (
-        <div className="bg-red-900/50 border-b border-red-700 px-4 md:px-6 py-2 text-red-200 text-sm">
-          {error}
-          <button
-            onClick={() => setError(null)}
-            className="ml-4 underline hover:no-underline"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
 
       {/* Main Content */}
       <div
@@ -483,19 +523,9 @@ function App() {
                 </div>
               </Panel>
               <PanelResizeHandle className="w-1.5 bg-devai-border hover:bg-devai-accent/40 transition-colors cursor-col-resize" />
-              <Panel
-                defaultSize={45}
-                minSize={20}
-                collapsible
-                collapsedSize={3}
-                onCollapse={() => setPreviewCollapsed(true)}
-                onExpand={() => setPreviewCollapsed(false)}
-              >
+              <Panel defaultSize={45} minSize={20}>
                 <PreviewPanel
                   artifact={currentArtifact}
-                  onClose={() => setPreviewEnabled(false)}
-                  collapsed={previewCollapsed}
-                  onToggleCollapse={() => setPreviewCollapsed(p => !p)}
                   onScrapeFallback={handleScrapeFallback}
                 />
               </Panel>
@@ -577,9 +607,6 @@ function App() {
             <div className="absolute inset-0 bg-devai-bg animate-slide-in-right">
               <PreviewPanel
                 artifact={currentArtifact}
-                onClose={() => setMobilePreviewOpen(false)}
-                collapsed={false}
-                onToggleCollapse={() => setMobilePreviewOpen(false)}
                 onScrapeFallback={handleScrapeFallback}
               />
             </div>

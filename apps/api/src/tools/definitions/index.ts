@@ -10,6 +10,7 @@ import { historyTools } from './historyTools.js';
 import { schedulerTools } from './schedulerTools.js';
 import { communicationTools } from './communicationTools.js';
 import { skillTools } from './skillTools.js';
+import { supabaseTools } from './supabaseTools.js';
 
 export {
   fsTools,
@@ -22,6 +23,7 @@ export {
   schedulerTools,
   communicationTools,
   skillTools,
+  supabaseTools,
 };
 
 export const TOOL_REGISTRY: ToolDefinition[] = [
@@ -35,4 +37,5 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
   ...schedulerTools,
   ...communicationTools,
   ...skillTools,
+  ...supabaseTools,
 ];

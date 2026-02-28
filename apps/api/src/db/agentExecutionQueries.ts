@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid';
 import { getSupabase } from './index.js';
 
-export type AgentName = 'chapo' | 'devo' | 'caio' | 'scout';
+export type AgentName = 'chapo';
 export type AgentExecutionPhase = 'start' | 'success' | 'failure' | 'escalated';
 
 export interface AgentExecutionLogRow {

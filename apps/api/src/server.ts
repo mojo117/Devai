@@ -30,7 +30,7 @@ import { schedulerService } from './scheduler/schedulerService.js';
 import { processRequest } from './agents/router.js';
 import { loadRecentConversationHistory } from './agents/router/requestUtils.js';
 import { sendTelegramMessage } from './external/telegram.js';
-import { getAgentSoulStatusReport } from './prompts/agentSoul.js';
+
 import { ensureSessionExists, saveMessage } from './db/queries.js';
 import { getDefaultNotificationChannel, logSchedulerExecution } from './db/schedulerQueries.js';
 import {
@@ -39,6 +39,7 @@ import {
   formatHealthAlert,
   memoryDecayJob,
   recentTopicDecayJob,
+  cleanupOldSessionsJob,
 } from './services/systemReliability.js';
 import { configureHeartbeat, runHeartbeat } from './services/heartbeatService.js';
 import { previewBuildWorker } from './preview/previewBuildWorker.js';
@@ -173,16 +174,6 @@ const start = async () => {
     if (config.moonshotApiKey) providers.push('Moonshot');
     console.log(`Configured LLM providers: ${providers.length > 0 ? providers.join(', ') : 'None'}`);
     previewBuildWorker.start();
-
-    // Log agent soul loading status (CAIO/DEVO/SCOUT)
-    const soulStatuses = getAgentSoulStatusReport();
-    for (const soul of soulStatuses) {
-      if (soul.loaded) {
-        console.log(`[Soul] ${soul.agent.toUpperCase()} loaded from ${soul.soulFile} (${soul.charCount} chars)`);
-      } else {
-        console.warn(`[Soul] ${soul.agent.toUpperCase()} missing or empty (${soul.soulFile})`);
-      }
-    }
 
     // Load skills and register as tools
     const skillResult = await refreshSkills();
@@ -360,6 +351,15 @@ const start = async () => {
     });
 
     schedulerService.registerInternalJob({
+      id: 'maintenance-session-cleanup',
+      name: 'Maintenance: Session Cleanup',
+      cronExpression: '15 3 * * *',
+      run: cleanupOldSessionsJob,
+      runOnStart: false,
+      notifyOnFailure: false,
+    });
+
+    schedulerService.registerInternalJob({
       id: 'system-health-watchdog',
       name: 'System Health Watchdog',
       cronExpression: '*/5 * * * *',
@@ -371,7 +371,7 @@ const start = async () => {
     schedulerService.registerInternalJob({
       id: 'heartbeat-check',
       name: 'Heartbeat: Autonomy Check',
-      cronExpression: '0 */2 * * *',
+      cronExpression: '0 12 * * *',
       run: runHeartbeat,
       runOnStart: false,
       notifyOnFailure: true,

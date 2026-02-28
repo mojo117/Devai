@@ -1,10 +1,10 @@
-export const ALLOWED_EXTENSIONS = [
+const ALLOWED_EXTENSIONS = [
   '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
   '.txt', '.md', '.csv', '.msg', '.eml', '.oft', '.zip',
   '.png', '.jpg', '.jpeg', '.gif', '.webp',
 ];
 
-export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+export const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 export function validateFile(file: File): string | null {
   const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();

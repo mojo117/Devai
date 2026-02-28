@@ -42,9 +42,8 @@ describe('ChapoToolExecutor', () => {
       queueQuestion,
       queueApproval,
       emitDecisionPath: vi.fn(),
-      getDelegationRunnerDeps: vi.fn(() => ({} as never)),
-      buildVerificationEnvelope: vi.fn(() => 'ok'),
       buildToolResultContent: vi.fn(() => ({ content: 'ok', isError: false })),
+      projectRoot: null,
     });
 
     const outcome = await executor.execute({

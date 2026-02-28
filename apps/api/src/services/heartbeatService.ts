@@ -4,16 +4,18 @@ import { sendTelegramMessage } from '../external/telegram.js'
 import { getState } from '../agents/stateManager.js'
 import { config } from '../config.js'
 
-const HEARTBEAT_PROMPT = `Heartbeat-Check. Pruefe:
+const HEARTBEAT_PROMPT = `Heartbeat-Check. Pruefe Systemzustand:
 
 1. Chat-Historie — Gibt es kuerzliche Sessions mit unbeantwortet gebliebenen
    Fragen, abgebrochenen Loops oder Fehlermeldungen?
 
 2. Logs — Pruefe die API-Logs auf wiederkehrende Fehler, Timeouts oder
-   auffaellige Muster der letzten 120 Minuten. (ssh_execute: pm2 logs devai-api-dev --lines 100 --nostream)
+   auffaellige Muster der letzten 120 Minuten. Verwende pm2_logs oder logs_getStagingLogs.
 
 3. Eigene Memory — Hast du dir etwas gemerkt, worauf du reagieren solltest?
    Offene Erinnerungen, anstehende Aufgaben aus vorherigen Sessions?
+
+4. Scheduler — Pruefe auf fehlgeschlagene oder problematische geplante Jobs.
 
 Wenn nichts ansteht: Antworte mit "NOOP" — keine Aktion, kein Output.
 Wenn etwas ansteht: Fasse die Findings zusammen. Ergreife KEINE eigenstaendigen Massnahmen — der User entscheidet was passiert. Deine Aufgabe ist nur: beobachten, analysieren, berichten.`

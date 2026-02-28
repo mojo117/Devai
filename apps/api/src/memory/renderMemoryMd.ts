@@ -78,6 +78,14 @@ export function mapNamespaceToCategory(
     return 'Projekte';
   }
 
+  // devai/episodic/* with episodic type → Termine & Events
+  if (
+    (ns === 'devai/episodic' || ns.startsWith('devai/episodic/')) &&
+    memoryType === 'episodic'
+  ) {
+    return 'Termine & Events';
+  }
+
   // Everything else → Erkenntnisse
   return 'Erkenntnisse';
 }

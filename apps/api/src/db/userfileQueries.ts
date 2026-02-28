@@ -66,6 +66,30 @@ export async function getUserfileById(id: string): Promise<UserfileRow | null> {
   return data as UserfileRow;
 }
 
+export async function getRecentUserfileByOriginalName(
+  originalName: string,
+  maxAgeMs: number,
+): Promise<UserfileRow | null> {
+  const minUploadedAt = new Date(Date.now() - maxAgeMs).toISOString();
+
+  const { data, error } = await getSupabase()
+    .from('user_files')
+    .select('*')
+    .eq('original_name', originalName)
+    .gte('uploaded_at', minUploadedAt)
+    .order('uploaded_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') return null;
+    console.error('Failed to get recent userfile by name:', error);
+    return null;
+  }
+
+  return data as UserfileRow;
+}
+
 export async function getUserfilesByIds(ids: string[]): Promise<UserfileRow[]> {
   if (ids.length === 0) return [];
 

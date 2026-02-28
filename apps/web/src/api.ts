@@ -1,6 +1,5 @@
 import type {
   ChatMessage,
-  LLMProvider,
   Action,
   HealthResponse,
   ProjectFilesResponse,
@@ -12,62 +11,16 @@ import type {
   SettingResponse,
 } from './types';
 
+/** uuid() requires secure context (HTTPS). Fallback for HTTP. */
+const uuid = (): string =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+      });
+
 const API_BASE = '/api';
-
-/**
- * Parse an NDJSON stream and return the final response.
- * Emits events via onEvent callback as they arrive.
- */
-async function parseNDJSONStream<T>(
-  body: ReadableStream<Uint8Array>,
-  onEvent?: (event: ChatStreamEvent) => void
-): Promise<T> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let finalResponse: T | null = null;
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line) as { type?: string; response?: unknown };
-        onEvent?.(event as ChatStreamEvent);
-        if (event.type === 'response') {
-          finalResponse = event.response as T;
-        }
-      } catch (e) {
-        console.warn('Failed to parse NDJSON line:', line, e);
-      }
-    }
-  }
-
-  // Process any remaining buffer content after stream ends
-  if (buffer.trim()) {
-    try {
-      const event = JSON.parse(buffer) as { type?: string; response?: unknown };
-      onEvent?.(event as ChatStreamEvent);
-      if (event.type === 'response') {
-        finalResponse = event.response as T;
-      }
-    } catch (e) {
-      console.warn('Failed to parse final NDJSON buffer:', buffer, e);
-    }
-  }
-
-  if (!finalResponse) {
-    throw new Error('No response received from server');
-  }
-
-  return finalResponse;
-}
 
 interface ApiErrorResponse {
   error?: string
@@ -229,34 +182,6 @@ async function fetchVoid(url: string, init?: RequestInit): Promise<void> {
   }
 }
 
-async function parseJsonOrNdjson<T>(
-  res: Response,
-  onEvent?: (event: ChatStreamEvent) => void
-): Promise<T> {
-  const contentType = res.headers.get('content-type') || '';
-  if (!contentType.includes('application/x-ndjson')) {
-    return (await res.json()) as T;
-  }
-
-  if (!res.body) {
-    throw new Error('Missing response body');
-  }
-
-  return parseNDJSONStream<T>(res.body, onEvent);
-}
-
-async function fetchJsonOrNdjson<T>(
-  url: string,
-  init?: RequestInit,
-  onEvent?: (event: ChatStreamEvent) => void
-): Promise<T> {
-  const res = await apiFetch(url, init);
-  if (!res.ok) {
-    throw new Error(await readApiError(res));
-  }
-  return parseJsonOrNdjson<T>(res, onEvent);
-}
-
 export async function logout(): Promise<void> {
   try {
     await apiFetch(`${API_BASE}/auth/logout`, { method: 'POST' });
@@ -316,10 +241,139 @@ export async function fetchHealth(): Promise<HealthResponse> {
   return fetchJson<HealthResponse>(`${API_BASE}/health`);
 }
 
-export interface ChatStreamEvent {
-  type: string
-  [key: string]: unknown
+// Base interface for common fields - not part of the union directly
+interface BaseEvent {
+  id?: string
+  timestamp?: string
+  agent?: string
 }
+
+export interface AgentStartEvent extends BaseEvent {
+  type: 'agent_start'
+  agent: string
+  phase: string
+}
+
+export interface AgentThinkingEvent extends BaseEvent {
+  type: 'agent_thinking'
+  agent: string
+  status: string
+}
+
+export interface AgentCompleteEvent extends BaseEvent {
+  type: 'agent_complete'
+  agent: string
+}
+
+export interface ToolCallEvent extends BaseEvent {
+  type: 'tool_call'
+  toolName: string
+  toolId?: string
+  args?: Record<string, unknown>
+  arguments?: Record<string, unknown>
+}
+
+export interface ToolResultEvent extends BaseEvent {
+  type: 'tool_result'
+  toolName?: string
+  name?: string
+  result?: unknown
+  success?: boolean
+  completed?: boolean
+}
+
+export interface ToolResultChunkEvent extends BaseEvent {
+  type: 'tool_result_chunk'
+  toolName?: string
+  name?: string
+  chunk?: string
+}
+
+export interface ActionPendingEvent extends BaseEvent {
+  type: 'action_pending'
+  actionId: string
+  toolName: string
+  toolArgs: Record<string, unknown>
+  description: string
+  preview?: { kind: string; path: string; diff?: string; summary?: string }
+}
+
+export interface ContextStatsEvent extends BaseEvent {
+  type: 'context_stats'
+  stats: {
+    tokensUsed: number
+    tokenBudget: number
+    note?: string
+  }
+}
+
+export interface MessageQueuedEvent extends BaseEvent {
+  type: 'message_queued'
+  messageId?: string
+  preview?: string
+}
+
+export interface InboxProcessingEvent extends BaseEvent {
+  type: 'inbox_processing'
+  count: number
+}
+
+export interface LoopStartedEvent extends BaseEvent {
+  type: 'loop_started'
+  turnId: string
+  taskLabel: string
+}
+
+export interface LoopCompletedEvent extends BaseEvent {
+  type: 'loop_completed'
+  turnId: string
+  taskLabel: string
+}
+
+export interface ModeChangedEvent extends BaseEvent {
+  type: 'mode_changed'
+  mode: string
+}
+
+export interface PartialResponseEvent extends BaseEvent {
+  type: 'partial_response'
+  message: string
+  inReplyTo?: string
+}
+
+export interface ResponseEvent extends BaseEvent {
+  type: 'response'
+  response: { message?: { id: string; role: string; content: string; timestamp: string } }
+}
+
+export interface TodoUpdatedEvent extends BaseEvent {
+  type: 'todo_updated'
+  todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }>
+}
+
+export interface StatusEvent extends BaseEvent {
+  type: 'status'
+  status?: string
+}
+
+export type ChatStreamEvent =
+  | AgentStartEvent
+  | AgentThinkingEvent
+  | AgentCompleteEvent
+  | ToolCallEvent
+  | ToolResultEvent
+  | ToolResultChunkEvent
+  | ActionPendingEvent
+  | ContextStatsEvent
+  | MessageQueuedEvent
+  | InboxProcessingEvent
+  | LoopStartedEvent
+  | LoopCompletedEvent
+  | ModeChangedEvent
+  | PartialResponseEvent
+  | ResponseEvent
+  | TodoUpdatedEvent
+  | StatusEvent
 
 interface WebSocketMessage {
   type?: string
@@ -329,26 +383,6 @@ interface WebSocketMessage {
   response?: MultiAgentResponse
   [key: string]: unknown
 }
-
-export async function sendMessage(
-  messages: ChatMessage[],
-  provider: LLMProvider,
-  projectRoot?: string,
-  skillIds?: string[],
-  pinnedFiles?: string[],
-  projectContextOverride?: { enabled: boolean; summary: string },
-  sessionId?: string,
-  onEvent?: (event: ChatStreamEvent) => void,
-  abortSignal?: AbortSignal
-): Promise<{ message: ChatMessage; pendingActions: Action[]; sessionId?: string; contextStats?: { tokensUsed: number; tokenBudget: number; note?: string } }> {
-  return fetchJsonOrNdjson<{ message: ChatMessage; pendingActions: Action[]; sessionId?: string; contextStats?: { tokensUsed: number; tokenBudget: number; note?: string } }>(`${API_BASE}/chat`, {
-    method: 'POST',
-    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ messages, provider, projectRoot, skillIds, pinnedFiles, projectContextOverride, sessionId }),
-    signal: abortSignal,
-  }, onEvent);
-}
-
 
 export async function listProjectFiles(path: string, ignore?: string[]): Promise<ProjectFilesResponse> {
   const params = new URLSearchParams({ path });
@@ -430,6 +464,13 @@ export async function updateSessionTitle(sessionId: string, title: string): Prom
   });
 }
 
+export async function deleteSession(sessionId: string): Promise<{ success: boolean }> {
+  return fetchJson<{ success: boolean }>(`${API_BASE}/sessions/${sessionId}`, {
+    method: 'DELETE',
+    headers: withAuthHeaders(),
+  });
+}
+
 export async function saveSessionMessage(
   sessionId: string,
   message: { id: string; role: string; content: string; timestamp: string },
@@ -500,7 +541,7 @@ export async function rejectAction(actionId: string): Promise<{ action: Action }
 export interface AgentHistoryEntry {
   entryId: string;
   timestamp: string;
-  agent: 'chapo' | 'devo' | 'scout';
+  agent: 'chapo';
   action: string;
   input?: unknown;
   output?: unknown;
@@ -569,6 +610,7 @@ type PendingWsRequest = {
   reject: (err: Error) => void;
   onEvent?: (event: ChatStreamEvent) => void;
   timeoutId: number;
+  sessionId?: string;
 };
 
 let chatWs: WebSocket | null = null;
@@ -580,6 +622,106 @@ const pendingWsRequests = new Map<string, PendingWsRequest>();
 const lastSeqBySession = new Map<string, number>();
 const sessionListeners = new Map<string, Set<(event: ChatStreamEvent) => void>>();
 const actionListeners = new Set<(event: ChatStreamEvent) => void>();
+
+// --- Visibility-aware WS recovery for mobile ---
+let pageHidden = typeof document !== 'undefined' && document.hidden;
+let wsClosedWhileHidden = false;
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      pageHidden = true;
+      // Pause all pending request timeouts — they shouldn't fire while the
+      // user isn't looking at the screen.
+      for (const req of pendingWsRequests.values()) {
+        window.clearTimeout(req.timeoutId);
+        req.timeoutId = 0;
+      }
+    } else {
+      pageHidden = false;
+      if (wsClosedWhileHidden || (chatWs && chatWs.readyState !== WebSocket.OPEN)) {
+        wsClosedWhileHidden = false;
+        recoverAfterVisibilityResume();
+      } else {
+        // WS survived — just restart the paused timeouts
+        resumePendingTimeouts();
+      }
+    }
+  });
+}
+
+function resumePendingTimeouts(): void {
+  for (const [id, req] of pendingWsRequests) {
+    if (req.timeoutId === 0) {
+      req.timeoutId = window.setTimeout(() => {
+        const p = pendingWsRequests.get(id);
+        if (p) {
+          pendingWsRequests.delete(id);
+          p.reject(new Error('Chat WebSocket request timed out'));
+        }
+      }, 180000);
+    }
+  }
+}
+
+async function recoverAfterVisibilityResume(): Promise<void> {
+  if (pendingWsRequests.size === 0) {
+    // No pending requests — just reconnect the control plane silently
+    ensureChatWsConnected().catch(() => { scheduleControlPlaneReconnect(); });
+    return;
+  }
+
+  const surviving = new Map(pendingWsRequests);
+
+  // 1. Reconnect immediately (skip backoff — user is actively looking)
+  try {
+    await ensureChatWsConnected();
+  } catch {
+    scheduleControlPlaneReconnect();
+    resumePendingTimeouts(); // let the 180s timeout handle it
+    return;
+  }
+
+  // 2. Re-join sessions so server replays missed events
+  for (const [, req] of surviving) {
+    if (req.sessionId) {
+      try {
+        const ws = chatWs;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'hello', sessionId: req.sessionId, sinceSeq: loadLastSeq(req.sessionId) }));
+        }
+      } catch { /* ignore */ }
+    }
+  }
+
+  // 3. Give replay 8s to deliver responses
+  await new Promise((r) => setTimeout(r, 8000));
+
+  // 4. For any still-pending requests, try REST fallback
+  for (const [id, req] of surviving) {
+    if (!pendingWsRequests.has(id)) continue; // already resolved via replay
+    if (!req.sessionId) continue;
+    try {
+      const history = await fetchSessionMessages(req.sessionId);
+      if (history.messages.length > 0) {
+        const last = history.messages[history.messages.length - 1];
+        if (last.role === 'assistant') {
+          pendingWsRequests.delete(id);
+          window.clearTimeout(req.timeoutId);
+          req.resolve({
+            message: last,
+            sessionId: req.sessionId,
+            pendingActions: [],
+            agentHistory: [],
+          });
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  // 5. Restart timeouts for anything still unresolved
+  resumePendingTimeouts();
+}
 
 function getSeqStorageKey(sessionId: string): string {
   return `devai_chat_seq_${sessionId}`;
@@ -660,10 +802,22 @@ function scheduleControlPlaneReconnect(): void {
   }, delay);
 }
 
-function failPendingWsRequests(message: string): void {
+function failPendingWsRequests(reason: string): void {
+  if (pendingWsRequests.size === 0) return;
+
+  if (pageHidden) {
+    // Page is hidden (user minimized / switched tab). Don't reject —
+    // timeouts are already paused. Recovery will happen when the user
+    // returns (visibilitychange → recoverAfterVisibilityResume).
+    wsClosedWhileHidden = true;
+    return;
+  }
+
+  // Page is visible — WS died while user is looking. Reject immediately
+  // so the UI can show a retry option.
   for (const [id, req] of pendingWsRequests.entries()) {
     window.clearTimeout(req.timeoutId);
-    req.reject(new Error(message));
+    req.reject(new Error(reason));
     pendingWsRequests.delete(id);
   }
 }
@@ -732,6 +886,17 @@ async function ensureChatWsConnected(): Promise<WebSocket> {
           window.clearTimeout(pending.timeoutId);
           pendingWsRequests.delete(requestId);
           pending.resolve(msg.response as MultiAgentResponse);
+        } else {
+          // Reset inactivity timeout on every intermediate event so long-running
+          // requests stay alive as long as the server keeps sending progress events.
+          window.clearTimeout(pending.timeoutId);
+          pending.timeoutId = window.setTimeout(() => {
+            const p = pendingWsRequests.get(requestId!);
+            if (p) {
+              pendingWsRequests.delete(requestId!);
+              p.reject(new Error('Chat WebSocket request timed out'));
+            }
+          }, 180000);
         }
         return;
       }
@@ -795,7 +960,8 @@ async function sendWsCommand(
   onEvent?: (event: ChatStreamEvent) => void
 ): Promise<MultiAgentResponse> {
   const ws = await ensureChatWsConnected();
-  const requestId = crypto.randomUUID();
+  const requestId = uuid();
+  const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : undefined;
 
   const timeoutId = window.setTimeout(() => {
     const pending = pendingWsRequests.get(requestId);
@@ -806,7 +972,7 @@ async function sendWsCommand(
   }, 180000);
 
   const p = new Promise<MultiAgentResponse>((resolve, reject) => {
-    pendingWsRequests.set(requestId, { resolve, reject, onEvent, timeoutId });
+    pendingWsRequests.set(requestId, { resolve, reject, onEvent, timeoutId, sessionId });
   });
 
   ws.send(JSON.stringify({ ...payload, requestId }));
@@ -827,7 +993,7 @@ async function sendMultiAgentMessageWs(
   }
   try {
     if (sessionId) await wsHello(sessionId);
-    return await sendWsCommand({
+    const response = await sendWsCommand({
       type: 'request',
       message,
       projectRoot,
@@ -835,6 +1001,14 @@ async function sendMultiAgentMessageWs(
       ...buildSessionModePayload(options),
       ...(pinnedUserfileIds && pinnedUserfileIds.length > 0 ? { pinnedUserfileIds } : {}),
     }, onEvent);
+
+    // If the request was queued (parallel/serial mode), keep the session listener
+    // alive so we receive the actual response when the parallel loop completes.
+    if (response.queued) {
+      remove = null;
+    }
+
+    return response;
   } finally {
     remove?.();
   }
@@ -921,26 +1095,6 @@ export async function sendMultiAgentMessage(
     throw new Error('Verbindung zum Server verloren. Bitte Seite neu laden.');
   }
   throw new Error('WebSocket nicht verfügbar. Bitte Seite neu laden.');
-}
-
-export async function fetchAgentState(sessionId: string): Promise<{
-  sessionId: string;
-  currentPhase: string;
-  activeAgent: string;
-  agentHistory: AgentHistoryEntry[];
-  pendingApprovals: unknown[];
-  pendingQuestions: unknown[];
-}> {
-  return fetchJson<{
-    sessionId: string;
-    currentPhase: string;
-    activeAgent: string;
-    agentHistory: AgentHistoryEntry[];
-    pendingApprovals: unknown[];
-    pendingQuestions: unknown[];
-  }>(`${API_BASE}/chat/agents/${sessionId}/state`, {
-    headers: withAuthHeaders(),
-  });
 }
 
 export async function getTrustMode(): Promise<{ mode: 'default' | 'trusted' }> {
