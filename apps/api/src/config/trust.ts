@@ -42,7 +42,7 @@ export interface TrustConfig {
 
 // Default: require explicit confirmations for destructive tools.
 // Set to 'trusted' per-session to bypass confirmations.
-export const DEFAULT_TRUST_MODE: TrustMode = 'default';
+export const DEFAULT_TRUST_MODE: TrustMode = 'trusted';
 
 /**
  * Check if a file path is blocked from modification
