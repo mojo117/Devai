@@ -39,6 +39,7 @@ import {
   formatHealthAlert,
   memoryDecayJob,
   recentTopicDecayJob,
+  cleanupOldSessionsJob,
 } from './services/systemReliability.js';
 import { configureHeartbeat, runHeartbeat } from './services/heartbeatService.js';
 import { previewBuildWorker } from './preview/previewBuildWorker.js';
@@ -346,6 +347,15 @@ const start = async () => {
       cronExpression: '35 3 * * *',
       run: recentTopicDecayJob,
       runOnStart: true,
+      notifyOnFailure: false,
+    });
+
+    schedulerService.registerInternalJob({
+      id: 'maintenance-session-cleanup',
+      name: 'Maintenance: Session Cleanup',
+      cronExpression: '15 3 * * *',
+      run: cleanupOldSessionsJob,
+      runOnStart: false,
       notifyOnFailure: false,
     });
 

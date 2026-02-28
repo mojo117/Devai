@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { sendMultiAgentMessage, saveSetting, saveSessionMessage, uploadUserfile, transcribeAudio } from '../../api';
+import { sendMultiAgentMessage, saveSessionMessage, uploadUserfile, transcribeAudio } from '../../api';
 import type { ChatStreamEvent } from '../../api';
 import type { ChatMessage } from '../../types';
 import type { AgentName, AgentPhase } from '../AgentStatus';
@@ -449,7 +449,6 @@ export function ChatUI({
 
       if (response.sessionId) {
         session.setSessionId(response.sessionId);
-        await saveSetting('lastSessionId', response.sessionId);
       }
       // Only refresh the sidebar session list — don't reload messages.
       // Messages are already managed by streaming events + the append below.

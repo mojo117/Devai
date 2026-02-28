@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import { fetchSessions, createSession, fetchSessionMessages, fetchSetting, saveSetting, updateSessionTitle } from '../../../api';
+import { fetchSessions, createSession, fetchSessionMessages, updateSessionTitle } from '../../../api';
 import type { ChatMessage, SessionSummary } from '../../../types';
 import type { ChatSessionState, ChatSessionCommandEnvelope, ToolEvent } from '../types';
 
@@ -23,7 +23,14 @@ export function useChatSession({
   onEventsLoaded,
   onClearPinnedUserfiles,
 }: UseChatSessionOptions) {
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionId, setSessionIdRaw] = useState<string | null>(null);
+  const setSessionId = useCallback((id: string | null) => {
+    setSessionIdRaw(id);
+    try {
+      if (id) sessionStorage.setItem('devai_activeSessionId', id);
+      else sessionStorage.removeItem('devai_activeSessionId');
+    } catch { /* ignore */ }
+  }, []);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
 
@@ -52,16 +59,28 @@ export function useChatSession({
       setSessionId(null);
       setMessages([]);
     }
-  }, [setMessages, onEventsLoaded]);
+  }, [setSessionId, setMessages, onEventsLoaded]);
 
-  // Initial session load
+  // Initial session load — use sessionStorage (tab-scoped) so each tab
+  // tracks its own active session independently.
+  // New tab = no sessionStorage entry = create a fresh session.
   useEffect(() => {
     let isMounted = true;
     const load = async () => {
       setSessionsLoading(true);
       try {
-        const stored = await fetchSetting('lastSessionId');
-        const storedId = typeof stored.value === 'string' ? stored.value : null;
+        let storedId: string | null = null;
+        try {
+          storedId = sessionStorage.getItem('devai_activeSessionId');
+        } catch { /* ignore */ }
+
+        if (!storedId) {
+          // New tab — create a fresh session
+          const response = await createSession();
+          storedId = response.session.id;
+          try { sessionStorage.setItem('devai_activeSessionId', storedId); } catch { /* ignore */ }
+        }
+
         await refreshSessions(storedId);
       } catch {
         // Ignore load errors
@@ -87,7 +106,6 @@ export function useChatSession({
     setSessionsLoading(true);
     try {
       const response = await createSession();
-      await saveSetting('lastSessionId', response.session.id);
       await refreshSessions(response.session.id);
       onClearPinnedUserfiles?.();
     } catch {
@@ -100,7 +118,6 @@ export function useChatSession({
   const handleSelectSession = useCallback(async (selectedId: string) => {
     setSessionsLoading(true);
     try {
-      await saveSetting('lastSessionId', selectedId);
       await refreshSessions(selectedId);
     } catch {
       // Ignore select errors
@@ -124,7 +141,6 @@ export function useChatSession({
         await updateSessionTitle(sessionId, `[Restarted ${timestamp}] ${currentTitle}`);
       }
       const response = await createSession();
-      await saveSetting('lastSessionId', response.session.id);
       await refreshSessions(response.session.id);
       setToolEvents([]);
       onClearPinnedUserfiles?.();

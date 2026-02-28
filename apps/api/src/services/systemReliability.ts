@@ -2,6 +2,7 @@ import { getLatestHealthWatchdogEvent, getLatestSchedulerFailure } from '../db/s
 import { config } from '../config.js';
 import { getSupabase, getSupabaseHealthStatus, pingSupabase } from '../db/index.js';
 import { getExpiredUserfiles, deleteExpiredUserfiles } from '../db/userfileQueries.js';
+import { deleteOldSessions } from '../db/sessionQueries.js';
 import { llmRouter } from '../llm/router.js';
 import { isPerplexityConfigured } from '../llm/perplexity.js';
 import { runDecay } from '../memory/memoryStore.js';
@@ -155,6 +156,11 @@ export async function memoryDecayJob(): Promise<string> {
 export async function recentTopicDecayJob(): Promise<string> {
   const result = await runRecentTopicDecay();
   return `Recent topic decay: ${result.decayed} decayed, ${result.pruned} pruned`;
+}
+
+export async function cleanupOldSessionsJob(): Promise<string> {
+  const count = await deleteOldSessions(14);
+  return count > 0 ? `Deleted ${count} old session(s)` : 'No old sessions to delete';
 }
 
 export function formatHealthAlert(snapshot: SystemHealthSnapshot): string {

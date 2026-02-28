@@ -89,7 +89,7 @@ export function HistoryPanelContent() {
               {session.title ? session.title : session.id.slice(0, 8)}
             </div>
             <div className="text-[10px] text-devai-text-muted">
-              {new Date(session.createdAt).toLocaleString()}
+              {new Date(session.lastUsedAt).toLocaleString()}
             </div>
           </button>
         ))}

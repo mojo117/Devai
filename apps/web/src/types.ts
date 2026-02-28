@@ -43,6 +43,7 @@ export interface SessionSummary {
   id: string;
   title: string | null;
   createdAt: string;
+  lastUsedAt: string;
 }
 
 export interface SessionsResponse {
