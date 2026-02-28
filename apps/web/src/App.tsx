@@ -11,16 +11,14 @@ import {
   fetchPreviewArtifact,
   fetchHealth,
   triggerPreviewScrape,
+  readProjectFile,
 } from './api';
 import type { HealthResponse } from './types';
 import { useAuth } from './hooks/useAuth';
 import { usePersistedSettings } from './hooks/usePersistedSettings';
 
 function App() {
-  // Custom hooks for grouped state
   const auth = useAuth();
-  const [error, setError] = useState<string | null>(null);
-
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const settings = usePersistedSettings(auth.isAuthed);
 
@@ -40,7 +38,6 @@ function App() {
 
   const [detectedArtifact, setDetectedArtifact] = useState<Artifact | null>(null);
   const [currentArtifact, setCurrentArtifact] = useState<Artifact | null>(null);
-  const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [mobilePreviewOpen, setMobilePreviewOpen] = useState(false);
   const lastSubmittedArtifactKeyRef = useRef<string | null>(null);
 
@@ -81,6 +78,24 @@ function App() {
     }
 
     setCurrentArtifact(detectedArtifact);
+
+    // Artifact from fs_edit: has filePath but no content — fetch it
+    if (detectedArtifact.filePath && !detectedArtifact.content) {
+      let cancelled = false;
+      readProjectFile(detectedArtifact.filePath)
+        .then((res) => {
+          if (cancelled) return;
+          setCurrentArtifact((prev) =>
+            prev && prev.id === detectedArtifact.id
+              ? { ...prev, content: res.content }
+              : prev,
+          );
+        })
+        .catch((err) => {
+          if (!cancelled) console.warn('[App] Failed to fetch file for preview:', err);
+        });
+      return () => { cancelled = true; };
+    }
 
     const sessionId = chatSessionState?.sessionId;
     if (!previewEnabled || !sessionId) {
@@ -442,19 +457,6 @@ function App() {
         </div>
       </header>
 
-      {/* Error Banner */}
-      {error && (
-        <div className="bg-red-900/50 border-b border-red-700 px-4 md:px-6 py-2 text-red-200 text-sm">
-          {error}
-          <button
-            onClick={() => setError(null)}
-            className="ml-4 underline hover:no-underline"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
       {/* Main Content */}
       <div
         className="flex-1 flex w-full overflow-hidden min-h-0 relative"
@@ -487,19 +489,9 @@ function App() {
                 </div>
               </Panel>
               <PanelResizeHandle className="w-1.5 bg-devai-border hover:bg-devai-accent/40 transition-colors cursor-col-resize" />
-              <Panel
-                defaultSize={45}
-                minSize={20}
-                collapsible
-                collapsedSize={3}
-                onCollapse={() => setPreviewCollapsed(true)}
-                onExpand={() => setPreviewCollapsed(false)}
-              >
+              <Panel defaultSize={45} minSize={20}>
                 <PreviewPanel
                   artifact={currentArtifact}
-                  onClose={() => setPreviewEnabled(false)}
-                  collapsed={previewCollapsed}
-                  onToggleCollapse={() => setPreviewCollapsed(p => !p)}
                   onScrapeFallback={handleScrapeFallback}
                 />
               </Panel>
@@ -581,9 +573,6 @@ function App() {
             <div className="absolute inset-0 bg-devai-bg animate-slide-in-right">
               <PreviewPanel
                 artifact={currentArtifact}
-                onClose={() => setMobilePreviewOpen(false)}
-                collapsed={false}
-                onToggleCollapse={() => setMobilePreviewOpen(false)}
                 onScrapeFallback={handleScrapeFallback}
               />
             </div>

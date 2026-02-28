@@ -1,3 +1,3 @@
 export { PreviewPanel } from './PreviewPanel';
 export type { Artifact } from './artifactParser';
-export { parseArtifacts, parseToolEventArtifacts, getLatestArtifact } from './artifactParser';
+export { parseToolEventArtifacts, getLatestArtifact } from './artifactParser';

@@ -23,6 +23,7 @@ export interface ToolEventLike {
   type: string;
   name?: string;
   arguments?: unknown;
+  result?: unknown;
 }
 
 const SUPPORTED_TYPES: Record<string, Artifact['type']> = {
@@ -61,6 +62,11 @@ const WRITE_TOOLS = new Set([
   'fs_write_file',
   'create_text_file',
   'writeFile',
+]);
+
+/** Tool names that edit existing files (no full content in args) */
+const EDIT_TOOLS = new Set([
+  'fs_edit',
 ]);
 
 /** Mime-type prefix → artifact type (order matters — specific before generic) */
@@ -117,7 +123,34 @@ export function parseToolEventArtifacts(events: ToolEventLike[]): Artifact[] {
   const artifacts: Artifact[] = [];
 
   for (const ev of events) {
-    if (ev.type !== 'tool_call' || !ev.name) continue;
+    if (!ev.name) continue;
+
+    // Handle tool_result events from edit tools (content must be fetched)
+    if (ev.type === 'tool_result' && EDIT_TOOLS.has(ev.name)) {
+      const res = ev.result as Record<string, unknown> | null;
+      const filePath = String(res?.path ?? '');
+      if (!filePath) continue;
+
+      const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase();
+      const type = FILE_EXT_MAP[ext];
+      if (!type) continue;
+
+      const fileName = filePath.split('/').pop() || filePath;
+
+      artifacts.push({
+        id: djb2Hash(`${filePath}\n${Date.now()}`),
+        type,
+        language: type === 'webapp' ? ext.slice(1) || 'ts' : type,
+        content: undefined,
+        title: fileName,
+        filePath,
+        sourceKind: 'tool_event',
+      });
+      continue;
+    }
+
+    // Only process tool_call events from here on
+    if (ev.type !== 'tool_call') continue;
 
     const args = ev.arguments as Record<string, unknown> | null;
     if (!args) continue;

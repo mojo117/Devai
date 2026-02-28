@@ -1,6 +1,5 @@
 import type {
   ChatMessage,
-  LLMProvider,
   Action,
   HealthResponse,
   ProjectFilesResponse,
@@ -22,61 +21,6 @@ const uuid = (): string =>
       });
 
 const API_BASE = '/api';
-
-/**
- * Parse an NDJSON stream and return the final response.
- * Emits events via onEvent callback as they arrive.
- */
-async function parseNDJSONStream<T>(
-  body: ReadableStream<Uint8Array>,
-  onEvent?: (event: ChatStreamEvent) => void
-): Promise<T> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let finalResponse: T | null = null;
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line) as { type?: string; response?: unknown };
-        onEvent?.(event as ChatStreamEvent);
-        if (event.type === 'response') {
-          finalResponse = event.response as T;
-        }
-      } catch (e) {
-        console.warn('Failed to parse NDJSON line:', line, e);
-      }
-    }
-  }
-
-  // Process any remaining buffer content after stream ends
-  if (buffer.trim()) {
-    try {
-      const event = JSON.parse(buffer) as { type?: string; response?: unknown };
-      onEvent?.(event as ChatStreamEvent);
-      if (event.type === 'response') {
-        finalResponse = event.response as T;
-      }
-    } catch (e) {
-      console.warn('Failed to parse final NDJSON buffer:', buffer, e);
-    }
-  }
-
-  if (!finalResponse) {
-    throw new Error('No response received from server');
-  }
-
-  return finalResponse;
-}
 
 interface ApiErrorResponse {
   error?: string
@@ -236,34 +180,6 @@ async function fetchVoid(url: string, init?: RequestInit): Promise<void> {
   if (!res.ok) {
     throw new Error(await readApiError(res));
   }
-}
-
-async function parseJsonOrNdjson<T>(
-  res: Response,
-  onEvent?: (event: ChatStreamEvent) => void
-): Promise<T> {
-  const contentType = res.headers.get('content-type') || '';
-  if (!contentType.includes('application/x-ndjson')) {
-    return (await res.json()) as T;
-  }
-
-  if (!res.body) {
-    throw new Error('Missing response body');
-  }
-
-  return parseNDJSONStream<T>(res.body, onEvent);
-}
-
-async function fetchJsonOrNdjson<T>(
-  url: string,
-  init?: RequestInit,
-  onEvent?: (event: ChatStreamEvent) => void
-): Promise<T> {
-  const res = await apiFetch(url, init);
-  if (!res.ok) {
-    throw new Error(await readApiError(res));
-  }
-  return parseJsonOrNdjson<T>(res, onEvent);
 }
 
 export async function logout(): Promise<void> {
@@ -467,26 +383,6 @@ interface WebSocketMessage {
   response?: MultiAgentResponse
   [key: string]: unknown
 }
-
-export async function sendMessage(
-  messages: ChatMessage[],
-  provider: LLMProvider,
-  projectRoot?: string,
-  skillIds?: string[],
-  pinnedFiles?: string[],
-  projectContextOverride?: { enabled: boolean; summary: string },
-  sessionId?: string,
-  onEvent?: (event: ChatStreamEvent) => void,
-  abortSignal?: AbortSignal
-): Promise<{ message: ChatMessage; pendingActions: Action[]; sessionId?: string; contextStats?: { tokensUsed: number; tokenBudget: number; note?: string } }> {
-  return fetchJsonOrNdjson<{ message: ChatMessage; pendingActions: Action[]; sessionId?: string; contextStats?: { tokensUsed: number; tokenBudget: number; note?: string } }>(`${API_BASE}/chat`, {
-    method: 'POST',
-    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ messages, provider, projectRoot, skillIds, pinnedFiles, projectContextOverride, sessionId }),
-    signal: abortSignal,
-  }, onEvent);
-}
-
 
 export async function listProjectFiles(path: string, ignore?: string[]): Promise<ProjectFilesResponse> {
   const params = new URLSearchParams({ path });
@@ -1078,26 +974,6 @@ export async function sendMultiAgentMessage(
     throw new Error('Verbindung zum Server verloren. Bitte Seite neu laden.');
   }
   throw new Error('WebSocket nicht verfügbar. Bitte Seite neu laden.');
-}
-
-export async function fetchAgentState(sessionId: string): Promise<{
-  sessionId: string;
-  currentPhase: string;
-  activeAgent: string;
-  agentHistory: AgentHistoryEntry[];
-  pendingApprovals: unknown[];
-  pendingQuestions: unknown[];
-}> {
-  return fetchJson<{
-    sessionId: string;
-    currentPhase: string;
-    activeAgent: string;
-    agentHistory: AgentHistoryEntry[];
-    pendingApprovals: unknown[];
-    pendingQuestions: unknown[];
-  }>(`${API_BASE}/chat/agents/${sessionId}/state`, {
-    headers: withAuthHeaders(),
-  });
 }
 
 export async function getTrustMode(): Promise<{ mode: 'default' | 'trusted' }> {

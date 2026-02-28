@@ -6,17 +6,11 @@ import { PdfRenderer } from './PdfRenderer';
 
 interface PreviewPanelProps {
   artifact: Artifact | null;
-  onClose: () => void;
-  collapsed: boolean;
-  onToggleCollapse: () => void;
   onScrapeFallback?: (artifactId: string) => void;
 }
 
 export function PreviewPanel({
   artifact,
-  onClose,
-  collapsed,
-  onToggleCollapse,
   onScrapeFallback,
 }: PreviewPanelProps) {
   const remote = artifact?.remote;
@@ -24,30 +18,6 @@ export function PreviewPanel({
   const isBuilding = remote?.status === 'queued' || remote?.status === 'building';
   const isFailed = remote?.status === 'failed';
 
-  // When collapsed: show thin vertical strip with "Preview" label rotated 90deg and expand button
-  if (collapsed) {
-    return (
-      <div
-        className="h-full flex flex-col items-center justify-center bg-devai-card border-l border-devai-border cursor-pointer hover:bg-devai-surface transition-colors"
-        onClick={onToggleCollapse}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            onToggleCollapse();
-          }
-        }}
-      >
-        <span className="text-devai-text-muted text-xs font-mono [writing-mode:vertical-rl] rotate-180 select-none">
-          Preview
-        </span>
-        <span className="text-devai-text-muted mt-2 text-sm">{'\u25C0'}</span>
-      </div>
-    );
-  }
-
-  // Full panel
   return (
     <div className="h-full flex flex-col bg-devai-card border-l border-devai-border">
       {/* Header */}
@@ -73,22 +43,6 @@ export function PreviewPanel({
           ) : (
             <span className="text-xs text-devai-text-muted font-mono">Preview</span>
           )}
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={onToggleCollapse}
-            className="p-1 text-devai-text-muted hover:text-devai-text transition-colors"
-            title="Collapse preview"
-          >
-            {'\u25B6'}
-          </button>
-          <button
-            onClick={onClose}
-            className="p-1 text-devai-text-muted hover:text-red-400 transition-colors"
-            title="Close preview"
-          >
-            {'\u2715'}
-          </button>
         </div>
       </div>
 
