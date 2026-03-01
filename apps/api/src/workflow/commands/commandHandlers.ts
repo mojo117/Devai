@@ -334,7 +334,7 @@ export class CommandHandlers {
     await setLoopRunning(activeSessionId, true);
 
     try {
-      const result = await processRequest(
+      const { answer, isError } = await processRequest(
         activeSessionId,
         augmentedMessage,
         recentHistory,
@@ -342,7 +342,7 @@ export class CommandHandlers {
         sendEvent as (event: AgentStreamEvent) => void,
       );
 
-      const responseMessage = createChatMessage('assistant', result);
+      const responseMessage = createChatMessage('assistant', answer);
       // Persist file reference headers with the message so CHAPO can find userfileIds in history
       const persistedContent = typeof augmentedMessage === 'string'
         ? augmentedMessage
@@ -358,7 +358,7 @@ export class CommandHandlers {
         userMessage,
         responseMessage,
         collectedToolEvents,
-        isError: false,
+        isError,
       });
 
       const title = buildSessionTitle(message);
@@ -378,7 +378,7 @@ export class CommandHandlers {
           const recentHistory = buildConversationHistoryContext(queuedHistory);
           const { sendEvent: qSendEvent, collectedToolEvents: qCollected } = createCollectingBridge(ctx);
 
-          const qResult = await processRequest(
+          const { answer: qAnswer, isError: qIsError } = await processRequest(
             activeSessionId,
             queuedMsg.content,
             recentHistory,
@@ -387,14 +387,14 @@ export class CommandHandlers {
           );
 
           const qUserMsg = createChatMessage('user', queuedMsg.content);
-          const qResponseMsg = createChatMessage('assistant', qResult);
+          const qResponseMsg = createChatMessage('assistant', qAnswer);
           await persistAndEmitTerminalResponse({
             ctx,
             sessionId: activeSessionId,
             userMessage: qUserMsg,
             responseMessage: qResponseMsg,
             collectedToolEvents: qCollected,
-            isError: false,
+            isError: qIsError,
           });
         }
         // Check for more messages that arrived during processing
@@ -448,7 +448,7 @@ export class CommandHandlers {
     const recentHistory = historySnapshot;
 
     try {
-      const result = await processRequest(
+      const { answer: pAnswer, isError: pIsError } = await processRequest(
         sessionId,
         augmentedMessage,
         recentHistory,
@@ -457,7 +457,7 @@ export class CommandHandlers {
         parallelTurnId,
       );
 
-      const responseMessage = createChatMessage('assistant', result);
+      const responseMessage = createChatMessage('assistant', pAnswer);
       const userMessage = createChatMessage('user', originalMessage);
 
       await persistAndEmitTerminalResponse({
@@ -466,7 +466,7 @@ export class CommandHandlers {
         userMessage,
         responseMessage,
         collectedToolEvents,
-        isError: false,
+        isError: pIsError,
       });
 
       sendEvent({
@@ -509,14 +509,14 @@ export class CommandHandlers {
 
     const { sendEvent, collectedToolEvents } = createCollectingBridge(ctx);
 
-    const result = await handleUserResponse(
+    const qaResult = await handleUserResponse(
       command.sessionId,
       command.questionId,
       command.answer,
       sendEvent as (event: AgentStreamEvent) => void,
     );
 
-    const responseMessage = createChatMessage('assistant', result);
+    const responseMessage = createChatMessage('assistant', qaResult);
     const userMessage = createChatMessage('user', command.answer);
 
     await persistAndEmitTerminalResponse({
@@ -548,14 +548,14 @@ export class CommandHandlers {
 
     const { sendEvent, collectedToolEvents } = createCollectingBridge(ctx);
 
-    const result = await handleUserApproval(
+    const approvalResult = await handleUserApproval(
       command.sessionId,
       command.approvalId,
       command.approved,
       sendEvent as (event: AgentStreamEvent) => void,
     );
 
-    const responseMessage = createChatMessage('assistant', result);
+    const responseMessage = createChatMessage('assistant', approvalResult);
     const userMessage = createChatMessage('user', buildApprovalDecisionText(command));
 
     await persistAndEmitTerminalResponse({
