@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect, type RefObject } from 'react';
+import { useRef, useState, useCallback, useEffect, type RefObject, type ChangeEvent } from 'react';
 import { Spinner } from '../ui';
 
 interface RetryState {
@@ -18,14 +18,17 @@ interface InputAreaProps {
   fileHintsError: string | null;
   activeHintIndex: number;
   onPickHint: (hint: string) => void;
-  onInputKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  onInputKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   isFileUploading: boolean;
   fileInputRef: RefObject<HTMLInputElement>;
-  onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onFileUpload: (e: ChangeEvent<HTMLInputElement>) => void;
   isTranscribing: boolean;
   onTranscribe: (audioBlob: Blob) => void;
-  onSetPreview?: (enabled: boolean) => void;
+  onSlashCommand?: (command: string, match: RegExpMatchArray) => void;
 }
+
+const MAX_VISIBLE_LINES = 10;
+const LINE_HEIGHT_PX = 24;
 
 export function InputArea({
   input,
@@ -45,13 +48,29 @@ export function InputArea({
   onFileUpload,
   isTranscribing,
   onTranscribe,
-  onSetPreview,
+  onSlashCommand,
 }: InputAreaProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const plusMenuRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const autoResizeTextarea = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    const scrollHeight = textarea.scrollHeight;
+    const maxHeight = LINE_HEIGHT_PX * MAX_VISIBLE_LINES;
+    const newHeight = Math.min(scrollHeight, maxHeight);
+    textarea.style.height = `${newHeight}px`;
+    textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }, []);
+
+  useEffect(() => {
+    autoResizeTextarea();
+  }, [input, autoResizeTextarea]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -100,14 +119,22 @@ export function InputArea({
 
   const handleFormSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
-    const previewMatch = input.trim().match(/^\/preview\s+(on|off)$/i);
-    if (previewMatch) {
-      onSetPreview?.(previewMatch[1].toLowerCase() === 'on');
-      setInput('');
-      return;
+    const FRONTEND_SLASH_COMMANDS: [string, RegExp][] = [
+      ['preview', /^\/preview\s+(on|off)$/i],
+      ['debug',   /^\/debug\s+(on|off)$/i],
+      ['list',    /^\/list$/i],
+    ];
+    const trimmed = input.trim();
+    for (const [cmd, pattern] of FRONTEND_SLASH_COMMANDS) {
+      const match = trimmed.match(pattern);
+      if (match) {
+        onSlashCommand?.(cmd, match);
+        setInput('');
+        return;
+      }
     }
     onSubmit(e);
-  }, [input, onSetPreview, setInput, onSubmit]);
+  }, [input, onSlashCommand, setInput, onSubmit]);
 
   const handleDictateClick = useCallback(() => {
     setPlusMenuOpen(false);
@@ -204,18 +231,27 @@ export function InputArea({
         </div>
 
         {/* Input field */}
-        <div className="relative flex-1 min-w-0">
-          <input
-            type="text"
+        <div className="relative flex-1 min-w-0 self-end">
+          <textarea
+            ref={textareaRef}
             value={isRecording ? 'Recording...' : input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={onInputKeyDown}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleFormSubmit(e);
+              } else {
+                onInputKeyDown(e);
+              }
+            }}
             placeholder="Message... (@ for files)"
             disabled={isRecording}
-            className="w-full bg-devai-card border border-devai-border rounded-xl px-3 sm:px-4 py-2.5 text-sm text-devai-text placeholder-devai-text-muted focus:outline-none focus:border-devai-border-light focus:ring-1 focus:ring-devai-accent/30 disabled:opacity-50"
+            rows={1}
+            className="w-full bg-devai-card border border-devai-border rounded-xl px-3 sm:px-4 py-2.5 text-sm text-devai-text placeholder-devai-text-muted focus:outline-none focus:border-devai-border-light focus:ring-1 focus:ring-devai-accent/30 disabled:opacity-50 resize-none overflow-y-hidden"
+            style={{ maxHeight: `${LINE_HEIGHT_PX * MAX_VISIBLE_LINES}px` }}
           />
           {fileHints.length > 0 && (
-            <div className="absolute bottom-12 left-0 right-0 bg-devai-surface border border-devai-border rounded-lg shadow-lg max-h-48 overflow-y-auto text-xs z-20">
+            <div className="absolute top-full mt-1 left-0 right-0 bg-devai-surface border border-devai-border rounded-lg shadow-lg max-h-48 overflow-y-auto text-xs z-20">
               {fileHints.map((hint, idx) => (
                 <button
                   type="button"
@@ -231,12 +267,12 @@ export function InputArea({
             </div>
           )}
           {fileHintsLoading && (
-            <div className="absolute bottom-12 left-0 right-0 text-[10px] text-devai-text-muted bg-devai-surface border border-devai-border rounded-lg px-3 py-2 z-20">
+            <div className="absolute top-full mt-1 left-0 right-0 text-[10px] text-devai-text-muted bg-devai-surface border border-devai-border rounded-lg px-3 py-2 z-20">
               Searching files...
             </div>
           )}
           {fileHintsError && (
-            <div className="absolute bottom-12 left-0 right-0 text-[10px] text-red-300 bg-devai-surface border border-devai-border rounded-lg px-3 py-2 z-20">
+            <div className="absolute top-full mt-1 left-0 right-0 text-[10px] text-red-300 bg-devai-surface border border-devai-border rounded-lg px-3 py-2 z-20">
               {fileHintsError}
             </div>
           )}

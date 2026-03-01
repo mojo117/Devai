@@ -9,7 +9,7 @@ export interface ToolEvent {
   arguments?: unknown;
   result?: unknown;
   completed?: boolean;
-  agent?: AgentName;
+  agent?: AgentName | string;
 }
 
 export interface ChatSessionState {
@@ -22,7 +22,8 @@ export interface ChatSessionState {
 export type ChatSessionCommand =
   | { type: 'select'; sessionId: string }
   | { type: 'new' }
-  | { type: 'restart' };
+  | { type: 'restart' }
+  | { type: 'delete' };
 
 export interface ChatSessionCommandEnvelope {
   nonce: number;
@@ -36,7 +37,7 @@ export interface ToolEventUpdate {
   result?: unknown;
   completed?: boolean;
   chunk?: string;
-  agent?: AgentName;
+  agent?: AgentName | string;
 }
 
 export interface ChatUIProps {
@@ -60,29 +61,4 @@ export interface ChatUIProps {
   previewEnabled?: boolean;
   /** Called when an artifact is detected in chat messages. */
   onArtifactDetected?: (artifact: Artifact | null) => void;
-}
-
-export type DelegationStatus = 'working' | 'completed' | 'failed' | 'escalated';
-
-export interface DelegationToolStep {
-  id: string;
-  name: string;
-  argsPreview: string;
-  resultPreview?: string;
-  success?: boolean;
-  durationMs?: number;
-}
-
-export interface DelegationData {
-  id: string;
-  from: AgentName;
-  to: AgentName;
-  task: string;
-  domain?: string;
-  status: DelegationStatus;
-  startTime: number;
-  durationMs?: number;
-  toolSteps: DelegationToolStep[];
-  prompt?: string;
-  response?: string;
 }

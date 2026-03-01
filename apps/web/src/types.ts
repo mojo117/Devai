@@ -43,6 +43,7 @@ export interface SessionSummary {
   id: string;
   title: string | null;
   createdAt: string;
+  lastUsedAt: string;
 }
 
 export interface SessionsResponse {
@@ -101,46 +102,6 @@ export interface HealthResponse {
   mcp?: McpServerStatus[];
   projectRoot: string | null;
   allowedRoots: string[];
-}
-
-export interface LooperPrompt {
-  id: string;
-  title: string;
-  prompt: string;
-}
-
-export interface LooperPromptsResponse {
-  runtime: 'looper';
-  prompts: LooperPrompt[];
-}
-
-export interface SkillSummary {
-  id: string;
-  name: string;
-  description: string;
-  version?: string;
-  tags?: string[];
-}
-
-export interface SkillsResponse {
-  skills: SkillSummary[];
-  loadedAt: string | null;
-  errors: string[];
-}
-
-export interface ProjectContext {
-  framework: 'vite' | 'cra' | 'next' | 'node' | 'unknown';
-  language: 'typescript' | 'javascript';
-  hasTests: boolean;
-  testCommand?: string;
-  buildCommand?: string;
-  packageManager: 'npm' | 'yarn' | 'pnpm';
-  summary: string;
-}
-
-export interface ProjectResponse {
-  projectRoot: string;
-  context: ProjectContext;
 }
 
 export interface ProjectFileEntry {

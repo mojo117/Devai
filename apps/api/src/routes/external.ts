@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
 import { commandDispatcher } from '../workflow/commands/dispatcher.js';
-import { ensureStateLoaded, getState, isLoopActive, getSessionMode, setGatheredInfo, flushState } from '../agents/stateManager.js';
+import { ensureStateLoaded, getState, isLoopActive, getSessionMode, setSessionMode, setGatheredInfo, flushState } from '../agents/stateManager.js';
 import { pushToInbox } from '../agents/inbox.js';
 import type { InboxMessage } from '../agents/types.js';
 import {
@@ -14,7 +14,7 @@ import {
 import type { WorkflowCommand } from '../workflow/commands/types.js';
 import type { TelegramUpdate } from '../external/telegram.js';
 import { isAllowedChat, sendTelegramMessage, extractTelegramMessage, downloadTelegramFile } from '../external/telegram.js';
-import { createSession, saveMessage, setDefaultEngine } from '../db/queries.js';
+import { createSession, saveMessage, setDefaultEngine, setDefaultMode } from '../db/queries.js';
 import { transcribeBuffer } from '../services/transcriptionService.js';
 import { uploadUserfileFromBuffer, isUploadError } from '../services/userfileService.js';
 import { shouldAttachPinnedContext } from '../external/pinnedContextPolicy.js';
@@ -78,6 +78,21 @@ export const externalRoutes: FastifyPluginAsync = async (app) => {
               `Unknown engine "${arg}". Available: glm, gemini, claude, kimi`,
             );
           }
+          return;
+        }
+
+        // Handle /mode command — toggle parallel/serial (bypasses loop queue)
+        if (normalizedCommand === '/mode') {
+          await ensureStateLoaded(externalSession.session_id);
+          const current = getSessionMode(externalSession.session_id);
+          const next = current === 'serial' ? 'parallel' : 'serial';
+          setSessionMode(externalSession.session_id, next);
+          await flushState(externalSession.session_id);
+          await setDefaultMode(next);
+          const msg = next === 'parallel'
+            ? 'Parallel Mode — Neue Nachrichten starten sofort einen eigenen Loop.'
+            : 'Serial Mode — Nachrichten werden nacheinander verarbeitet.';
+          await sendTelegramMessage(extracted.chatId, msg);
           return;
         }
 

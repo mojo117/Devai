@@ -9,13 +9,8 @@ import { nanoid } from 'nanoid';
 import type {
   AgentName,
   AgentPhase,
-  DelegationDomain,
-  ScoutResult,
-  ScoutScope,
-  EscalationIssue,
   UserQuestion,
   ApprovalRequest,
-  DelegationResult,
   AgentHistoryEntry,
 } from './types.js';
 
@@ -26,7 +21,6 @@ import type {
 export type EventCategory =
   | 'agent'
   | 'tool'
-  | 'scout'
   | 'user'
   | 'inbox'
   | 'system';
@@ -74,44 +68,6 @@ export const AgentEvents = {
     type: 'agent_thinking' as const,
     agent,
     status,
-  }),
-
-  /** Agent switching to another agent */
-  switch: (sessionId: string, from: AgentName, to: AgentName, reason: string) => ({
-    ...createBaseEvent('agent', sessionId),
-    type: 'agent_switch' as const,
-    from,
-    to,
-    reason,
-  }),
-
-  /** Agent delegating task to another agent */
-  delegation: (
-    sessionId: string,
-    from: AgentName,
-    to: AgentName,
-    task: string,
-    details?: {
-      domain?: DelegationDomain;
-      objective?: string;
-      constraints?: string[];
-      expectedOutcome?: string;
-    },
-  ) => ({
-    ...createBaseEvent('agent', sessionId),
-    type: 'delegation' as const,
-    from,
-    to,
-    task,
-    ...details,
-  }),
-
-  /** Agent escalating an issue */
-  escalation: (sessionId: string, from: AgentName, issue: EscalationIssue) => ({
-    ...createBaseEvent('agent', sessionId),
-    type: 'escalation' as const,
-    from,
-    issue,
   }),
 
   /** Agent response (streaming or final) */
@@ -218,41 +174,6 @@ export const ToolEvents = {
 };
 
 // ============================================
-// SCOUT EVENTS
-// ============================================
-
-export const ScoutEvents = {
-  /** SCOUT agent started exploration */
-  start: (sessionId: string, query: string, scope: ScoutScope) => ({
-    ...createBaseEvent('scout', sessionId),
-    type: 'scout_start' as const,
-    query,
-    scope,
-  }),
-
-  /** SCOUT using a tool */
-  tool: (sessionId: string, tool: string) => ({
-    ...createBaseEvent('scout', sessionId),
-    type: 'scout_tool' as const,
-    tool,
-  }),
-
-  /** SCOUT completed exploration */
-  complete: (sessionId: string, summary: ScoutResult) => ({
-    ...createBaseEvent('scout', sessionId),
-    type: 'scout_complete' as const,
-    summary,
-  }),
-
-  /** SCOUT encountered an error */
-  error: (sessionId: string, error: string) => ({
-    ...createBaseEvent('scout', sessionId),
-    type: 'scout_error' as const,
-    error,
-  }),
-};
-
-// ============================================
 // USER EVENTS
 // ============================================
 
@@ -284,35 +205,6 @@ export const UserEvents = {
     ...createBaseEvent('user', sessionId),
     type: 'approval_request' as const,
     request,
-  }),
-};
-
-// ============================================
-// PARALLEL EXECUTION EVENTS
-// ============================================
-
-export const ParallelEvents = {
-  /** Parallel execution started */
-  start: (sessionId: string, agents: AgentName[], tasks: string[]) => ({
-    ...createBaseEvent('agent', sessionId),
-    type: 'parallel_start' as const,
-    agents,
-    tasks,
-  }),
-
-  /** Progress update from one agent */
-  progress: (sessionId: string, agent: AgentName, progress: string) => ({
-    ...createBaseEvent('agent', sessionId),
-    type: 'parallel_progress' as const,
-    agent,
-    progress,
-  }),
-
-  /** Parallel execution completed */
-  complete: (sessionId: string, results: DelegationResult[]) => ({
-    ...createBaseEvent('agent', sessionId),
-    type: 'parallel_complete' as const,
-    results,
   }),
 };
 
@@ -390,9 +282,7 @@ export const SystemEvents = {
 export type StreamEvent =
   | ReturnType<(typeof AgentEvents)[keyof typeof AgentEvents]>
   | ReturnType<(typeof ToolEvents)[keyof typeof ToolEvents]>
-  | ReturnType<(typeof ScoutEvents)[keyof typeof ScoutEvents]>
   | ReturnType<(typeof UserEvents)[keyof typeof UserEvents]>
-  | ReturnType<(typeof ParallelEvents)[keyof typeof ParallelEvents]>
   | ReturnType<(typeof InboxEvents)[keyof typeof InboxEvents]>
   | ReturnType<(typeof TodoEvents)[keyof typeof TodoEvents]>
   | ReturnType<(typeof SystemEvents)[keyof typeof SystemEvents]>;

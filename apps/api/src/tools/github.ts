@@ -252,7 +252,7 @@ export async function createPullRequest(
   // 3. Create ephemeral branch name
   const date = new Date().toISOString().slice(0, 10);
   const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
-  const branchName = `devo/${date}-${slug}`;
+  const branchName = `chapo/${date}-${slug}`;
 
   // Create branch via GitHub API
   const createBranchRes = await fetch(
@@ -320,7 +320,7 @@ export async function createPullRequest(
   }
 
   // 5. Create the PR
-  const prBody = description || `Automated PR by DEVO.\n\nChanges:\n${diffSummary.files.map((f) => `- ${f.file}`).join('\n')}`;
+  const prBody = description || `Automated PR by CHAPO.\n\nChanges:\n${diffSummary.files.map((f) => `- ${f.file}`).join('\n')}`;
   const prRes = await fetch(
     `https://api.github.com/repos/${owner}/${repo}/pulls`,
     {

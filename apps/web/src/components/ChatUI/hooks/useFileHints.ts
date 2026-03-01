@@ -71,7 +71,7 @@ export function useFileHints({
     }
   }, [input, setInput, onPinFile]);
 
-  const handleInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (fileHints.length === 0) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();

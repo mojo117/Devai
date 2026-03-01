@@ -37,13 +37,10 @@ export function parseJsonObjectFromModelOutput(content: string): Record<string, 
 }
 
 export function parseAssignedAgent(value: unknown): AgentName {
-  if (typeof value !== 'string') return 'devo';
+  if (typeof value !== 'string') return 'chapo';
 
   const normalized = value.trim().toLowerCase();
-  if (normalized === 'devo' || normalized === 'chapo' || normalized === 'scout' || normalized === 'caio') {
-    return normalized;
-  }
+  if (normalized === 'chapo') return 'chapo';
 
-  console.warn('[agents] Invalid assignedAgent from plan synthesis; defaulting to devo', { value });
-  return 'devo';
+  return 'chapo';
 }

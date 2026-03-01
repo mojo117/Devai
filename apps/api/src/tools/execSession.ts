@@ -168,12 +168,12 @@ function assertCommandAllowedForSession(command: string): void {
   }
 
   if (head === 'bash' || head === 'sh' || head === 'zsh' || head === 'fish' || head === 'pwsh' || head === 'powershell') {
-    throw new Error('Interactive shell startup is not allowed for devo_exec_session_start. Start a concrete command instead.');
+    throw new Error('Interactive shell startup is not allowed for exec_session_start. Start a concrete command instead.');
   }
 
   if ((head === 'node' || head === 'python' || head === 'python3' || head === 'ruby' || head === 'perl' || head === 'irb')) {
     if (args.length === 0 || args.includes('-i')) {
-      throw new Error(`Interactive REPL startup (${head}) is not allowed for devo_exec_session_start.`);
+      throw new Error(`Interactive REPL startup (${head}) is not allowed for exec_session_start.`);
     }
   }
 }

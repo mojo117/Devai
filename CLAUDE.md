@@ -184,21 +184,15 @@ ssh root@10.0.0.5 "pm2 status"
 
 > **Full reference:** [docs/agents.md](./docs/agents.md)
 
-DevAI uses a three-agent system orchestrated by the CHAPO Decision Loop:
+DevAI uses a single-agent architecture — **CHAPO** handles everything:
 
 | Agent | Role | Model (Primary → Fallback) | Access |
 |-------|------|-------|--------|
-| **CHAPO** | Coordinator + Assistant | ZAI GLM-5 → Anthropic Opus | Read-only + delegation + memory |
-| **DEVO** | Developer & DevOps | ZAI GLM-4.7 → Anthropic Sonnet | Full read/write + bash + SSH + git + PM2 |
-| **CAIO** | Communications & Admin | ZAI GLM-4.7 → Anthropic Sonnet | Email, notifications, TaskForge |
-| **SCOUT** | Exploration Specialist | ZAI GLM-4.7-Flash (free) | Read-only + web search |
-
-> **Note (2026-02-20):** Anthropic API credits are currently exhausted. ZAI (z.ai) is the active primary LLM provider. Only free-tier ZAI models (GLM-4.7-Flash, GLM-4.5-Flash) are confirmed working. Paid ZAI models (GLM-5, GLM-4.7) require GLM Max subscription balance — check z.ai dashboard if they fail.
+| **CHAPO** | Coordinator + Full-stack Agent | ZAI GLM-5 → Anthropic Opus | Full read/write + bash + SSH + git + memory + all tools |
 
 **Decision flow:** No separate decision engine — the LLM's `tool_calls` ARE the decisions:
 - No tool calls → **ANSWER** (respond directly)
 - `askUser` → **ASK** (pause, wait for user)
-- `delegateToDevo` / `delegateToScout` / `delegateToCaio` → **DELEGATE** (sub-loop)
 - Any other tool → **TOOL** (execute, feed result back)
 - Errors → feed back as context, never crash
 
@@ -206,8 +200,8 @@ DevAI uses a three-agent system orchestrated by the CHAPO Decision Loop:
 
 **Key files:**
 - Loop: `apps/api/src/agents/chapo-loop.ts`
-- Agents: `apps/api/src/agents/{chapo,devo,scout}.ts`
-- Prompts: `apps/api/src/prompts/{chapo,devo,scout}.ts`
+- Agent: `apps/api/src/agents/chapo.ts`
+- Prompt: `apps/api/src/prompts/chapo.ts`
 - Tools: `apps/api/src/tools/registry.ts`
 - Router: `apps/api/src/agents/router.ts`
 - Types: `apps/api/src/agents/types.ts`

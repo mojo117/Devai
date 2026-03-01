@@ -197,10 +197,10 @@ Der Scheduler läuft täglich um **08:00 UTC**.
 
 ### Scheduler-Konfiguration
 
-*Hinweis: Scheduler wird über CAIO verwaltet (nicht über System-Cron)*
+*Hinweis: Scheduler wird über CHAPO verwaltet (nicht über System-Cron)*
 
 ```bash
-# CAIO aufrufen für Scheduler-Konfiguration
+# CHAPO aufrufen für Scheduler-Konfiguration
 # Befehl: scheduler_list
 # Task: "stockpulse-historical täglich um 08:00 Uhr UTC"
 ```
@@ -470,7 +470,7 @@ Für erhöhte Geschwindigkeit:
 
 ### Contact
 
-- **Team:** DEVO, CAIO, CHAPO, SCOUT
+- **Team:** CHAPO
 - **Channel:** Telegram (Jörn)
 
 ---

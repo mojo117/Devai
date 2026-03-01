@@ -1,7 +1,7 @@
 import type { ToolDefinition } from '../registry.js';
 
 export const communicationTools: ToolDefinition[] = [
-  // TaskForge Tools (CAIO agent)
+  // TaskForge Tools
   {
     name: 'taskforge_list_tasks',
     description: 'Liste Tasks aus TaskForge auf. Verfuegbare Projekte: devai, founders-forge, taskflow, dieda, clawd. Default: devai.',
@@ -84,7 +84,7 @@ export const communicationTools: ToolDefinition[] = [
     requiresConfirmation: false,
   },
 
-  // Email Tool (CAIO agent)
+  // Email Tool
   {
     name: 'send_email',
     description: 'Sende eine E-Mail über Resend.',
@@ -101,7 +101,7 @@ export const communicationTools: ToolDefinition[] = [
     requiresConfirmation: true,
   },
 
-  // Telegram Document Tool (CAIO agent)
+  // Telegram Document Tool
   {
     name: 'telegram_send_document',
     description: 'Sende ein Dokument/eine Datei an den Benutzer via Telegram. Quellen: Dateisystem (path), Supabase Storage (fileId), oder URL.',
@@ -131,7 +131,7 @@ export const communicationTools: ToolDefinition[] = [
     requiresConfirmation: false,
   },
 
-  // Web Document Delivery Tool (CAIO agent)
+  // Web Document Delivery Tool
   {
     name: 'deliver_document',
     description: 'Stelle ein Dokument/eine Datei im Web-UI zum Download bereit. Quellen: Dateisystem (path), Supabase Storage (fileId), oder URL. Die Datei wird in Supabase Storage hochgeladen und ist über einen Download-Link im Chat verfügbar.',

@@ -1,6 +1,6 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { createSession, getMessages, listSessions, updateSessionTitle, saveMessage } from '../db/queries.js';
+import { createSession, getMessages, listSessions, updateSessionTitle, saveMessage, touchSession } from '../db/queries.js';
 import { parseOrReply400 } from './validation.js';
 
 const CreateSessionSchema = z.object({
@@ -34,6 +34,7 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
   app.get('/sessions/:id/messages', async (request, reply) => {
     const { id } = request.params as { id: string };
     try {
+      await touchSession(id).catch(() => {});
       return { messages: await getMessages(id) };
     } catch (error) {
       return reply.status(400).send({
@@ -71,6 +72,23 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
     } catch (error) {
       return reply.status(400).send({
         error: 'Failed to update session',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
+
+  app.delete('/sessions/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+      const { error } = await (await import('../db/index.js')).getSupabase()
+        .from('sessions')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      return { success: true };
+    } catch (error) {
+      return reply.status(400).send({
+        error: 'Failed to delete session',
         details: error instanceof Error ? error.message : 'Unknown error',
       });
     }

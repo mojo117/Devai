@@ -27,7 +27,7 @@ const HARDCODED_DENIED_PATHS: readonly string[] = [
   "/opt/Devai",       // Devai's own deployment — prevent self-modification
 ] as const;
 
-// Directories/files within self-inspection root that SCOUT must NOT read (secrets, runtime data)
+// Directories/files within self-inspection root that must NOT be read (secrets, runtime data)
 const SELF_INSPECTION_EXCLUDE: readonly string[] = [
   '.env',
   '.env.local',
@@ -64,7 +64,7 @@ export interface Config {
   allowedRoots: readonly string[];
   deniedPaths: readonly string[];
 
-  // Self-inspection: allows SCOUT to read Devai's own source (read-only, secrets excluded)
+  // Self-inspection: allows reading Devai's own source (read-only, secrets excluded)
   selfInspectionRoot: string;
   selfInspectionExclude: string[];
 
@@ -89,8 +89,9 @@ export interface Config {
   // Supabase
   supabaseUrl: string;
   supabaseServiceKey: string;
+  supabaseAccessToken?: string; // Management API access token for edge functions
 
-  // CAIO — TaskForge, Email, Telegram
+  // TaskForge, Email, Telegram
   taskforgeApiKeys: Record<string, string>;
   taskforgeDefaultProject: string;
   resendApiKey: string;
@@ -115,7 +116,7 @@ export interface Config {
 
   // Resilience: loop timeouts & cost caps
   loopHardTimeoutMs: number;
-  delegationTimeoutMs: number;
+
   costCapPerRunTokens: number;
 
 }
@@ -193,13 +194,14 @@ export function loadConfig(): Config {
       process.env.SUPABASE_SERVICE_ROLE_KEY ||
       process.env.SUPABASE_SERVICE_KEY ||
       "",
+    // Management API access token for edge function CRUD
+    supabaseAccessToken: process.env.DEVAI_SUPABASE_ACCESS_TOKEN || process.env.SUPABASE_ACCESS_TOKEN,
 
     dbPath: process.env.DB_PATH || resolve(process.cwd(), "../../var/devai.db"),
 
-    // Decision loop runtime tuning (legacy env names for compatibility)
-    looperMaxIterations: parseInt(process.env.LOOPER_MAX_ITERATIONS || "25", 10),
-    looperMaxConversationTokens: parseInt(process.env.LOOPER_MAX_CONVERSATION_TOKENS || "180000", 10),
-    looperMaxToolRetries: parseInt(process.env.LOOPER_MAX_TOOL_RETRIES || "3", 10),
+    looperMaxIterations: parseInt(process.env.LOOPER_MAX_ITERATIONS || "100", 10),
+    looperMaxConversationTokens: parseInt(process.env.LOOPER_MAX_CONVERSATION_TOKENS || "500000", 10),
+    looperMaxToolRetries: parseInt(process.env.LOOPER_MAX_TOOL_RETRIES || "5", 10),
     memoryRetrievalThresholds: parseNumberList(
       process.env.MEMORY_RETRIEVAL_THRESHOLDS,
       [0.5, 0.35, 0.2],
@@ -208,13 +210,11 @@ export function loadConfig(): Config {
     memoryMinHitsBeforeStop: Math.max(1, parseInt(process.env.MEMORY_MIN_HITS_BEFORE_STOP || "3", 10)),
     memoryIncludePersonalScope: process.env.MEMORY_INCLUDE_PERSONAL_SCOPE !== "false",
     contextProvenanceTags: process.env.CONTEXT_PROVENANCE_TAGS !== "false",
-    gateQuestionTtlMs: Math.max(0, parseInt(process.env.GATE_QUESTION_TTL_MS || "600000", 10)),
+    gateQuestionTtlMs: Math.max(0, parseInt(process.env.GATE_QUESTION_TTL_MS || "0", 10)),
     gateQuestionDedup: process.env.GATE_QUESTION_DEDUP !== "false",
 
-    // Resilience: loop timeouts & cost caps
-    loopHardTimeoutMs: parseInt(process.env.LOOP_HARD_TIMEOUT_MS || "720000", 10),
-    delegationTimeoutMs: parseInt(process.env.DELEGATION_TIMEOUT_MS || "720000", 10),
-    costCapPerRunTokens: parseInt(process.env.COST_CAP_PER_RUN_TOKENS || "500000", 10),
+    loopHardTimeoutMs: 0,
+    costCapPerRunTokens: 0,
 
   };
 }

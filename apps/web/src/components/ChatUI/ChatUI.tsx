@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { sendMultiAgentMessage, saveSetting, saveSessionMessage, uploadUserfile, transcribeAudio } from '../../api';
+import { sendMultiAgentMessage, saveSessionMessage, uploadUserfile, transcribeAudio } from '../../api';
 import type { ChatStreamEvent } from '../../api';
 import type { ChatMessage } from '../../types';
 import type { AgentName, AgentPhase } from '../AgentStatus';
 import type { PendingAction } from '../InlineAction';
-import type { ChatUIProps, ToolEvent, DelegationData, DelegationToolStep } from './types';
+import type { ChatUIProps, ToolEvent } from './types';
 import { upsertToolEvent } from './utils';
 import { useChatSession } from './hooks/useChatSession';
 import { usePendingActions } from './hooks/usePendingActions';
@@ -16,6 +16,15 @@ import { DropOverlay } from './DropOverlay';
 import { validateFile } from './uploadConstants';
 import { TodoCard } from '../TodoCard';
 import { getLatestArtifact, parseToolEventArtifacts } from '../PreviewPanel/artifactParser';
+
+/** uuid() requires secure context (HTTPS). Fallback for HTTP. */
+const uuid = (): string =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+      });
 
 export function ChatUI({
   projectRoot,
@@ -38,19 +47,21 @@ export function ChatUI({
   // Core state shared across sub-components
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
-  const [isLoadingInternal, setIsLoadingInternal] = useState(false);
-  const setIsLoading = (loading: boolean) => {
-    setIsLoadingInternal(loading);
-    onLoadingChange?.(loading);
-  };
+  const [isLoadingInternal, setIsLoading] = useState(false);
+  
+  // Sync loading state to parent via effect instead of wrapper function
+  useEffect(() => {
+    onLoadingChange?.(isLoadingInternal);
+  }, [isLoadingInternal, onLoadingChange]);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const [messageToolEvents, setMessageToolEvents] = useState<Record<string, ToolEvent[]>>({});
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set());
   const [currentTodos, setCurrentTodos] = useState<Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }>>([]);
-  const [delegations, setDelegations] = useState<DelegationData[]>([]);
-  const [messageDelegations, setMessageDelegations] = useState<Record<string, DelegationData[]>>({});
-  const activeDelegationRef = useRef<string | null>(null);
+  const [debugMode, setDebugMode] = useState(() => {
+    try { return localStorage.getItem('devai_debug') === 'on'; }
+    catch { return false; }
+  });
   const [retryState, setRetryState] = useState<null | {
     input: string;
     userMessage: ChatMessage;
@@ -72,8 +83,11 @@ export function ChatUI({
   const [isDragOver, setIsDragOver] = useState(false);
   const dragCounterRef = useRef(0);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const debug = import.meta.env.DEV && Boolean((window as any).__DEVAI_DEBUG);
+  // Debug flag - use type-safe window access
+  const debug = import.meta.env.DEV && 
+    typeof window !== 'undefined' && 
+    '__DEVAI_DEBUG' in window && 
+    Boolean((window as Window & { __DEVAI_DEBUG?: boolean }).__DEVAI_DEBUG);
 
   // --- Hooks ---
 
@@ -121,15 +135,6 @@ export function ChatUI({
       }
       return [];
     });
-    setDelegations(currentDels => {
-      if (currentDels.length > 0) {
-        setMessageDelegations(prev => ({
-          ...prev,
-          [messageId]: [...currentDels],
-        }));
-      }
-      return [];
-    });
   }, []);
 
   // --- Tool event persistence ---
@@ -140,9 +145,6 @@ export function ChatUI({
     if (!session.sessionId) return;
     setToolEvents([]);
     setCurrentTodos([]);
-    setDelegations([]);
-    setMessageDelegations({});
-    activeDelegationRef.current = null;
 
     // Load localStorage fallback (server events will overwrite via onEventsLoaded)
     try {
@@ -161,23 +163,27 @@ export function ChatUI({
     } catch {
       setMessageToolEvents({});
     }
-
-    try {
-      const delKey = `devai_delegations_${session.sessionId}`;
-      const storedDel = localStorage.getItem(delKey);
-      if (storedDel) {
-        const parsed = JSON.parse(storedDel) as Record<string, DelegationData[]>;
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          setMessageDelegations(parsed);
-        }
-      }
-    } catch { /* ignore */ }
   }, [session.sessionId]);
 
-  // --- Auto-scroll ---
-
+  // --- Auto-scroll with debounce to prevent performance issues ---
+  const scrollTimeoutRef = useRef<number | null>(null);
+  
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Clear any pending scroll
+    if (scrollTimeoutRef.current) {
+      window.clearTimeout(scrollTimeoutRef.current);
+    }
+    // Debounce scroll to prevent excessive calls during rapid updates
+    scrollTimeoutRef.current = window.setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      scrollTimeoutRef.current = null;
+    }, 50);
+    
+    return () => {
+      if (scrollTimeoutRef.current) {
+        window.clearTimeout(scrollTimeoutRef.current);
+      }
+    };
   }, [messages, toolEvents]);
 
   // --- Artifact detection ---
@@ -204,21 +210,6 @@ export function ChatUI({
     onArtifactDetected(null);
   }, [messages, messageToolEvents, toolEvents, onArtifactDetected]);
 
-  // --- Delegation persistence ---
-
-  useEffect(() => {
-    if (!session.sessionId) return;
-    try {
-      const key = `devai_delegations_${session.sessionId}`;
-      const filtered = Object.fromEntries(
-        Object.entries(messageDelegations).filter(([, v]) => v.length > 0)
-      );
-      if (Object.keys(filtered).length > 0) {
-        localStorage.setItem(key, JSON.stringify(filtered));
-      }
-    } catch { /* quota exceeded — silently skip */ }
-  }, [messageDelegations, session.sessionId]);
-
   // --- Event expand toggle ---
 
   const toggleEventExpanded = useCallback((eventId: string) => {
@@ -238,49 +229,19 @@ export function ChatUI({
         setActiveAgent(event.agent as AgentName);
         setAgentPhase(event.phase as AgentPhase);
         break;
-      case 'agent_switch':
-        setActiveAgent(event.to as AgentName);
-        break;
       case 'agent_thinking':
         setAgentPhase('thinking');
         setToolEvents((prev) => [
           ...prev,
           {
-            id: crypto.randomUUID(),
+            id: uuid(),
             type: 'thinking',
             result: event.status,
             agent: event.agent as AgentName | undefined,
           },
         ]);
         break;
-      case 'agent_complete': {
-        const completedAgent = (event as Record<string, unknown>).agent as AgentName | undefined;
-        if (completedAgent && completedAgent !== 'chapo' && activeDelegationRef.current) {
-          const ev = event as Record<string, unknown>;
-          const durationMs = typeof ev.durationMs === 'number' ? ev.durationMs : undefined;
-          const resultStr = typeof ev.result === 'string' ? ev.result : JSON.stringify(ev.result);
-          const backendStatus = ev.delegationStatus as string | undefined;
-          const delegationStatus = backendStatus === 'escalated' ? 'escalated' as const
-            : backendStatus === 'failed' ? 'failed' as const
-            : 'completed' as const;
-          setDelegations(prev => prev.map(d => {
-            if (d.id !== activeDelegationRef.current) return d;
-            return {
-              ...d,
-              status: delegationStatus,
-              durationMs: durationMs ?? (Date.now() - d.startTime),
-              response: resultStr,
-            };
-          }));
-          activeDelegationRef.current = null;
-        }
-        setAgentPhase('idle');
-        break;
-      }
-      case 'parallel_start':
-        setAgentPhase('executing');
-        break;
-      case 'parallel_complete':
+      case 'agent_complete':
         setAgentPhase('idle');
         break;
     }
@@ -288,90 +249,39 @@ export function ChatUI({
 
   const handleStreamEvent = (event: ChatStreamEvent) => {
     handleAgentEvent(event);
-    const eventAgent = (event.agent as AgentName | undefined) || activeAgent || undefined;
-    const type = String(event.type || '');
+    const eventAgent = event.agent || activeAgent || undefined;
 
-    switch (type) {
+    switch (event.type) {
       case 'status': {
         setToolEvents((prev) => [
           ...prev,
-          { id: crypto.randomUUID(), type: 'status', result: (event as Record<string, unknown>).status, agent: eventAgent },
+          { id: uuid(), type: 'status', result: event.status, agent: eventAgent },
         ]);
         break;
       }
       case 'tool_call': {
-        const ev = event as Record<string, unknown>;
-        const id = String(ev.id || crypto.randomUUID());
-        const name = (ev.toolName as string | undefined) || (ev.name as string | undefined);
-        const args = ev.args ?? ev.arguments;
-        upsertToolEvent(setToolEvents, id, { type: 'tool_call', name, arguments: args, agent: eventAgent });
-        if (activeDelegationRef.current) {
-          const step: DelegationToolStep = {
-            id,
-            name: name || 'tool',
-            argsPreview: typeof args === 'string' ? String(args).slice(0, 80) : JSON.stringify(args).slice(0, 80),
-          };
-          setDelegations(prev => prev.map(d =>
-            d.id === activeDelegationRef.current
-              ? { ...d, toolSteps: [...d.toolSteps, step] }
-              : d
-          ));
-        }
+        const id = event.id || uuid();
+        upsertToolEvent(setToolEvents, String(id), { type: 'tool_call', name: event.toolName, arguments: event.args ?? event.arguments, agent: eventAgent });
         break;
       }
       case 'tool_result_chunk': {
-        const ev = event as Record<string, unknown>;
-        const id = String(ev.id || crypto.randomUUID());
-        const name = (ev.toolName as string | undefined) || (ev.name as string | undefined);
-        const chunk = typeof ev.chunk === 'string' ? ev.chunk : '';
-        upsertToolEvent(setToolEvents, id, { type: 'tool_result', name, chunk, agent: eventAgent });
+        const id = event.id || uuid();
+        upsertToolEvent(setToolEvents, String(id), { type: 'tool_result', name: event.toolName, chunk: event.chunk || '', agent: eventAgent });
         break;
       }
       case 'tool_result': {
-        const ev = event as Record<string, unknown>;
-        const id = String(ev.id || crypto.randomUUID());
-        const name = (ev.toolName as string | undefined) || (ev.name as string | undefined);
-        const result = ev.result ?? { result: ev.result, success: ev.success };
-        upsertToolEvent(setToolEvents, id, { type: 'tool_result', name, result, completed: Boolean(ev.completed), agent: eventAgent });
-        if (activeDelegationRef.current) {
-          const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
-          setDelegations(prev => prev.map(d => {
-            if (d.id !== activeDelegationRef.current) return d;
-            const steps = d.toolSteps.map(s =>
-              s.id === id ? { ...s, resultPreview: resultStr.slice(0, 120), success: Boolean(ev.success ?? !ev.isError) } : s
-            );
-            return { ...d, toolSteps: steps };
-          }));
-        }
-        break;
-      }
-      case 'delegation': {
-        const ev = event as Record<string, unknown>;
-        const delId = String(ev.id || crypto.randomUUID());
-        const newDelegation: DelegationData = {
-          id: delId,
-          from: (ev.from as AgentName) || 'chapo',
-          to: (ev.to as AgentName) || 'devo',
-          task: String(ev.task || ev.objective || ''),
-          domain: ev.domain as string | undefined,
-          status: 'working',
-          startTime: Date.now(),
-          toolSteps: [],
-          prompt: String(ev.objective || ev.task || ''),
-        };
-        setDelegations(prev => [...prev, newDelegation]);
-        activeDelegationRef.current = delId;
+        const id = event.id || uuid();
+        upsertToolEvent(setToolEvents, String(id), { type: 'tool_result', name: event.toolName, result: event.result, completed: event.completed, agent: eventAgent });
         break;
       }
       case 'action_pending': {
         if (debug) console.log('[ChatUI] Stream action_pending event:', event);
-        const ev = event as Record<string, unknown>;
         const pendingAction: PendingAction = {
-          actionId: ev.actionId as string,
-          toolName: ev.toolName as string,
-          toolArgs: ev.toolArgs as Record<string, unknown>,
-          description: ev.description as string,
-          preview: ev.preview as PendingAction['preview'],
+          actionId: event.actionId,
+          toolName: event.toolName,
+          toolArgs: event.toolArgs,
+          description: event.description,
+          preview: event.preview as PendingAction['preview'],
         };
         actions.setPendingActions((prev) => {
           if (prev.some((a) => a.actionId === pendingAction.actionId)) return prev;
@@ -380,9 +290,8 @@ export function ChatUI({
         break;
       }
       case 'context_stats': {
-        if (onContextUpdate) {
-          const stats = (event as Record<string, unknown>).stats as Parameters<NonNullable<typeof onContextUpdate>>[0] | undefined;
-          if (stats) onContextUpdate(stats);
+        if (onContextUpdate && event.stats) {
+          onContextUpdate(event.stats);
         }
         break;
       }
@@ -390,7 +299,7 @@ export function ChatUI({
         setToolEvents((prev) => [
           ...prev,
           {
-            id: String(event.messageId || crypto.randomUUID()),
+            id: String(event.messageId || uuid()),
             type: 'status',
             name: 'inbox',
             result: String(event.preview || 'Message received'),
@@ -404,7 +313,7 @@ export function ChatUI({
         setToolEvents((prev) => [
           ...prev,
           {
-            id: crypto.randomUUID(),
+            id: uuid(),
             type: 'status',
             name: 'inbox',
             result: `Processing ${event.count} follow-up message(s)...`,
@@ -415,14 +324,13 @@ export function ChatUI({
         break;
       }
       case 'loop_started': {
-        const ev = event as unknown as { turnId: string; taskLabel: string };
         setToolEvents((prev) => [
           ...prev,
           {
-            id: ev.turnId || crypto.randomUUID(),
+            id: event.turnId || uuid(),
             type: 'status',
             name: 'parallel_loop',
-            result: `Parallel Loop gestartet: ${ev.taskLabel}`,
+            result: `Parallel Loop gestartet: ${event.taskLabel}`,
             completed: false,
             agent: 'chapo' as AgentName,
           },
@@ -430,14 +338,13 @@ export function ChatUI({
         break;
       }
       case 'loop_completed': {
-        const ev = event as unknown as { turnId: string; taskLabel: string };
         setToolEvents((prev) => [
           ...prev,
           {
-            id: ev.turnId || crypto.randomUUID(),
+            id: event.turnId || uuid(),
             type: 'status',
             name: 'parallel_loop',
-            result: `Loop fertig: ${ev.taskLabel}`,
+            result: `Loop fertig: ${event.taskLabel}`,
             completed: true,
             agent: 'chapo' as AgentName,
           },
@@ -445,14 +352,13 @@ export function ChatUI({
         break;
       }
       case 'mode_changed': {
-        const ev = event as unknown as { mode: string };
         setToolEvents((prev) => [
           ...prev,
           {
-            id: crypto.randomUUID(),
+            id: uuid(),
             type: 'status',
             name: 'mode',
-            result: ev.mode === 'parallel' ? 'Parallel Mode aktiviert' : 'Serial Mode aktiviert',
+            result: event.mode === 'parallel' ? 'Parallel Mode aktiviert' : 'Serial Mode aktiviert',
             completed: true,
             agent: 'chapo' as AgentName,
           },
@@ -461,9 +367,9 @@ export function ChatUI({
       }
       case 'partial_response': {
         const partialMessage: ChatMessage = {
-          id: crypto.randomUUID(),
+          id: uuid(),
           role: 'assistant',
-          content: String((event as Record<string, unknown>).message || ''),
+          content: event.message || '',
           timestamp: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, partialMessage]);
@@ -471,9 +377,27 @@ export function ChatUI({
         // Keep isLoading true — loop is still running
         break;
       }
+      case 'response': {
+        // Terminal response from a parallel loop arriving via session listener.
+        // The original request was resolved with queued:true, so this is the actual answer.
+        const msg = event.response?.message;
+        if (msg) {
+          const chatMsg: ChatMessage = {
+            id: msg.id,
+            role: msg.role as ChatMessage['role'],
+            content: msg.content,
+            timestamp: msg.timestamp,
+          };
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === chatMsg.id)) return prev;
+            return [...prev, chatMsg];
+          });
+          freezeToolEvents(chatMsg.id);
+        }
+        break;
+      }
       case 'todo_updated': {
-        const ev = event as unknown as { todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }> };
-        setCurrentTodos(ev.todos || []);
+        setCurrentTodos(event.todos || []);
         break;
       }
     }
@@ -483,15 +407,31 @@ export function ChatUI({
 
   const sendChatMessage = async (content: string) => {
     const userMessage: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: uuid(),
       role: 'user',
       content,
       timestamp: new Date().toISOString(),
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    // In parallel mode (already loading), freeze existing tool events to the
+    // previous user message that triggered them — keeps events visually
+    // associated with the prompt they belong to.
+    if (isLoadingInternal) {
+      const prevUserMsg = messages.filter((m) => m.role === 'user').pop();
+      setToolEvents((currentEvents) => {
+        if (currentEvents.length > 0 && prevUserMsg) {
+          setMessageToolEvents((mte) => ({
+            ...mte,
+            [prevUserMsg.id]: [...(mte[prevUserMsg.id] || []), ...currentEvents],
+          }));
+        }
+        return [];
+      });
+    } else {
+      setToolEvents([]);
+    }
     setIsLoading(true);
-    setToolEvents([]);
     setCurrentTodos([]);
     fileHintState.fileHints.length > 0; // clear hints via effect
     setAgentPhase('idle');
@@ -509,7 +449,6 @@ export function ChatUI({
 
       if (response.sessionId) {
         session.setSessionId(response.sessionId);
-        await saveSetting('lastSessionId', response.sessionId);
       }
       // Only refresh the sidebar session list — don't reload messages.
       // Messages are already managed by streaming events + the append below.
@@ -542,7 +481,7 @@ export function ChatUI({
       const shouldRetry = /network|fetch|timeout|503|502|504|tempor/i.test(err);
 
       const errorMessage: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: uuid(),
         role: 'assistant',
         content: shouldRetry
           ? 'Verbindung zum Server kurz unterbrochen. Du kannst die letzte Nachricht unten erneut senden.'
@@ -579,12 +518,39 @@ export function ChatUI({
     }
   }, [session.sessionId]);
 
-  const handleSetPreview = useCallback((enabled: boolean) => {
-    onSetPreview?.(enabled);
+  const handleSlashCommand = useCallback((command: string, match: RegExpMatchArray) => {
+    let content: string;
+    switch (command) {
+      case 'preview': {
+        const on = match[1].toLowerCase() === 'on';
+        onSetPreview?.(on);
+        content = on ? 'Preview pane enabled.' : 'Preview pane disabled.';
+        break;
+      }
+      case 'debug': {
+        const on = match[1].toLowerCase() === 'on';
+        setDebugMode(on);
+        try { localStorage.setItem('devai_debug', on ? 'on' : 'off'); } catch {}
+        content = on ? 'Debug mode enabled.' : 'Debug mode disabled.';
+        break;
+      }
+      case 'list':
+        content = [
+          '**Available commands:**',
+          '`/engine [glm|gemini|claude|kimi]` — Switch LLM engine or show status',
+          '`/preview on|off` — Toggle the preview panel',
+          '`/debug on|off` — Toggle debug mode (shows message & session IDs)',
+          '`/mode` — Toggle between serial and parallel mode',
+          '`/stop` — Abort all running loops',
+          '`/list` — Show this list',
+        ].join('\n');
+        break;
+      default: return;
+    }
     setMessages(prev => [...prev, {
-      id: `preview-${Date.now()}`,
+      id: `${command}-${Date.now()}`,
       role: 'system' as const,
-      content: enabled ? 'Preview pane enabled.' : 'Preview pane disabled.',
+      content,
       timestamp: new Date().toISOString(),
     }]);
   }, [onSetPreview]);
@@ -630,7 +596,7 @@ export function ChatUI({
     } catch (error) {
       const err = error instanceof Error ? error.message : 'Unknown error';
       const errorMsg: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: uuid(),
         role: 'assistant',
         content: `Error: ${err}`,
         timestamp: new Date().toISOString(),
@@ -782,8 +748,7 @@ export function ChatUI({
         onSelectSession={session.handleSelectSession}
         onRestartChat={session.handleRestartChat}
         onNewChat={session.handleNewChat}
-        delegations={delegations}
-        messageDelegations={messageDelegations}
+        debugMode={debugMode}
       />
 
       {currentTodos.length > 0 && <TodoCard todos={currentTodos} />}
@@ -814,7 +779,7 @@ export function ChatUI({
         onFileUpload={handleFileUpload}
         isTranscribing={isTranscribing}
         onTranscribe={handleTranscription}
-        onSetPreview={handleSetPreview}
+        onSlashCommand={handleSlashCommand}
       />
     </div>
   );

@@ -74,10 +74,6 @@ export {
   addPendingQuestion,
   removePendingQuestion,
   getPendingQuestions,
-  startParallelExecution,
-  addParallelResult,
-  getParallelExecution,
-  getActiveParallelExecutions,
   getStateSummary,
 } from './state-manager/sessionState.js';
 

@@ -12,11 +12,9 @@ export {
   canAgentUseTool,
 } from './router/agentAccess.js';
 
+export type { ProcessResult } from './router/requestFlow.js';
 export {
   processRequest,
   handleUserResponse,
   handleUserApproval,
 } from './router/requestFlow.js';
-
-export { spawnScout } from './router/scoutRuntime.js';
-export { spawnScout as delegateToScout } from './router/scoutRuntime.js';

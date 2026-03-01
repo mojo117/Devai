@@ -44,8 +44,8 @@ export const webTools: ToolDefinition[] = [
     requiresConfirmation: false,
   },
   {
-    name: 'scout_search_fast',
-    description: 'Fast Firecrawl search for quick orientation and source discovery.',
+    name: 'search_quick',
+    description: 'Quick web search for fast orientation and source discovery (Firecrawl). Use for finding relevant URLs and snippets.',
     parameters: {
       type: 'object',
       properties: {
@@ -81,8 +81,8 @@ export const webTools: ToolDefinition[] = [
     requiresConfirmation: false,
   },
   {
-    name: 'scout_search_deep',
-    description: 'Deep Firecrawl search with markdown extraction for evidence-rich findings.',
+    name: 'search_deep',
+    description: 'Deep web search with full-page markdown extraction for evidence-rich findings (Firecrawl). Use when you need actual page content.',
     parameters: {
       type: 'object',
       properties: {
@@ -123,8 +123,8 @@ export const webTools: ToolDefinition[] = [
     requiresConfirmation: false,
   },
   {
-    name: 'scout_site_map',
-    description: 'Map URLs of a target website using Firecrawl map endpoint.',
+    name: 'search_site_map',
+    description: 'Discover all URLs on a website (Firecrawl map). Use to understand site structure before crawling.',
     parameters: {
       type: 'object',
       properties: {
@@ -158,8 +158,8 @@ export const webTools: ToolDefinition[] = [
     requiresConfirmation: false,
   },
   {
-    name: 'scout_crawl_focused',
-    description: 'Start a bounded Firecrawl crawl job for focused domain exploration.',
+    name: 'search_crawl',
+    description: 'Crawl multiple pages on a domain with path filtering (Firecrawl). Use for multi-page content extraction.',
     parameters: {
       type: 'object',
       properties: {
@@ -203,8 +203,8 @@ export const webTools: ToolDefinition[] = [
     requiresConfirmation: false,
   },
   {
-    name: 'scout_extract_schema',
-    description: 'Extract structured JSON from URLs using Firecrawl extract endpoint.',
+    name: 'search_extract',
+    description: 'Extract structured JSON data from URLs using a schema (Firecrawl). Use for prices, specs, structured data.',
     parameters: {
       type: 'object',
       properties: {
@@ -231,8 +231,8 @@ export const webTools: ToolDefinition[] = [
     requiresConfirmation: false,
   },
   {
-    name: 'scout_research_bundle',
-    description: 'Run a bundled Firecrawl research pass (fast + deep), merge/dedupe findings, and return confidence-ranked evidence.',
+    name: 'search_research',
+    description: 'Comprehensive research: runs quick + deep search, merges and dedupes findings, returns confidence-ranked evidence (Firecrawl).',
     parameters: {
       type: 'object',
       properties: {

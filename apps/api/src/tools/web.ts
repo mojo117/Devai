@@ -2,7 +2,7 @@
  * Web Tools - Search and Fetch
  *
  * Provides web search via Perplexity API and URL content fetching.
- * Used by SCOUT agent for research tasks.
+ * Used for research tasks.
  */
 
 import {
@@ -125,7 +125,7 @@ export async function webFetch(
     const response = await fetch(parsedUrl.toString(), {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'DevAI-Scout/1.0 (Research Bot)',
+        'User-Agent': 'DevAI/1.0 (Research Bot)',
         Accept: 'text/html,application/json,text/plain,*/*',
       },
       redirect: 'follow',

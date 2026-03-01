@@ -1,95 +1,103 @@
 # Memory
 ## User
+- StockPulse Screener: 3 automatische Jobs eingerichtet: (1) Daily Value Screener 08:00 Mo-Fr - KGV<12, KUV<1, KBV<1.5 (2) Weekly Dividend Champions So 11:00 - Div>3%, Payout<60% (3) Weekly Growth at F…
+- Yahoo Finance Skill erstellt (skill_yahoo_finance): Ermöglicht Zugriff auf Yahoo Finance API für Aktien-Daten (KGV, KUV, Market Cap, Dividende, EPS, etc.). Deutsche Aktien mit .DE Suffix (z.B. BMW.DE…
+- StockPulse Master-Aktienliste: /root/home/projects/Invest/stocks/stockpulse-master.csv mit 469 Aktien. TypeScript Scanner stockpulse-daily.ts scannt 10 Aktien/Tag rotierend. Aktueller State: Round 1,…
+- Obsidian Vault erstellt unter /root/home/orga/obsidian-vault/ für besseres Task-Management. Struktur: 00-Inbox, 01-Todos, 02-Projekte, 03-Referenzen, 04-Archiv, 99-Templates. Plugins: Dataview, Tasks…
+- Archiv-Ordner erstellt unter /root/home/orga/Archiv/ — für alte/obsolete Listen und Dokumente. Enthält jetzt: TODO-old.md (zusammengeführte To-Do-Liste).
 - TTS-Service zum Ausprobieren: https://audio.z.ai/ - Text-to-Speech Tool
-- TODO: TTS-Service https://audio.z.ai/ ausprobieren (AI Text-to-Speech mit Voice-Cloning)
-- Reflexion zur eigenen Existenz (Descartes 'Ich denke, also bin ich'): Als Chapo bin ich kein klassisches, gedächtnisloses Sprachmodell. Durch mein Workspace-Memory, Notizen und vergangene Sessions ha…
-- Always use todoWrite for multi-part requests (2+ independent parts). Track each part before starting work. Update status as parts complete.
-- Neue Investment-Ideen kommen in /root/home/projects/Invest/INVESTMENT_IDEAS.md. Neue Business-Ideen kommen in /root/home/projects/Invest/BUSINESS_IDEAS.md. Diese Themen sollen nicht mehr in die allge…
-- Organisations-Dateien liegen unter /home/orga/: TO-DO.md (To-Do Liste), WATCHLIST.md (Serien/Filme), KITA-LISTE.md (Kitas für U3-Betreuung)
-- TO-DO Liste liegt unter: /root/home/orga/TODO.md (nicht /home/orga/TO-DO.md)
 - User: Jörn — Sprache: Deutsch (Standard), Timezone: Europe/Berlin (CET/CEST).
-- Watchlist-Datei: /root/home/orga/WATCHLIST.md — enthält Filme und Serien sortiert nach Genre (Sci-Fi, Comedy, Action, Drama) mit Streaming-Diensten (HBO Max, Amazon Prime, Netflix, Disney+).
-- Private Projekte des Users liegen in /root/home/projects.
 ## Projekte
-- The Artifact table schema for persistence is artifacts(id, conversation_id, user_id, type, code, title, created_at).
-- Supabase table for artifact storage follows the schema: artifact_storage(user_id, artifact_id, key, value, shared, updated_at).
-- Supported artifact types for the preview system are HTML, JSX/TSX, SVG, Markdown, and Mermaid.
-- The artifact preview system uses React, Vite, TailwindCSS, and Supabase as the core technology stack.
-- Key dependencies include esbuild-wasm, react-resizable-panels, marked, mermaid, dompurify, and highlight.js.
-- The implementation plan estimates a timeline of 2-3 weeks for a solo developer.
-- Security measures include CSP headers, exclusion of auth tokens from iframes, and DOMPurify sanitization.
-- Persistent storage relies on Supabase tables for artifacts and storage keys, utilizing RLS policies.
-- React artifacts are transpiled client-side using esbuild-wasm with an Import map for allowed libraries.
-- HTML artifacts are rendered using a sandboxed iframe with srcdoc and Tailwind CDN injection.
-- The system supports rendering five artifact types: HTML, JSX/TSX, SVG, Markdown, and Mermaid diagrams.
-- The Hybrid Artifact Preview System uses a stack of React, Vite, TailwindCSS, and Supabase.
-- Aktuelle Aufgaben in der Task-Liste beinhalten die Recherche nach Google MCP, die Einrichtung von Trello für DevAI sowie die Evaluation von Snov Clinic Software.
-- hello-darmstadt.html was created with a dark theme and red accents, featuring local highlights like Residenzschloss, TU Darmstadt, and Mathildenhöhe.
-- hello-world.html was created with a gradient background (Lila-Blau), centered text, and responsive design.
+- Orga-Ordnerstruktur umfasst: Archiv/, ink/notizen/, CRONJOBS.md, KOCHIDEEN.md, TO-DO.md, WATCHLIST.md, INVESTMENT_IDEAS.md, holdings.md
+- Project documentation has been consolidated by merging business ideas and investment ideas into a single `INVESTMENT_IDEAS.md` file.
+- Der StockPulse Scanner ist im Ordner projects/Invest/stocks lokalisiert.
+- Der Invest-Ordner gliedert sich in Asset Management, Research und Stocks.
+- The Invest project structure is simplified to three main directories: `Asset-Management/`, `Research/`, and `stocks/`.
+- Aufgaben innerhalb der To-Do-Liste können über Kommentare direkt mit Prioritäten versehen werden.
+- Das dynared-website Projekt ist eine Astro-Webseite.
+- The `STOCKPULSE_PLAN.md` file has been removed from the project root.
+- The core StockPulse scanner and data files are located in the `stocks/` directory: `stockpulse-daily.ts` (scanner), `stockpulse-master.csv` (list), and `ticker-url-mapping.json` (links).
+- The active StockPulse scanner is implemented in TypeScript within the stocks/ directory and relies on a master stock list.
+- Legacy file structures including src/, data/, round-1/, and round-undefined/ are considered obsolete and were deleted.
+- The Invest project originally contained legacy Python crawlers, duplicate TypeScript scanners, and HTML demos in the root and archive folders.
 ## Workflows
-- The React iframe template includes a console interceptor, error overlay, and infinite loop protection.
-- Security hardening includes CSP headers and DOMPurify sanitization for all HTML/SVG content.
-- Sandbox configuration for iframes sets 'allow-scripts' but excludes 'allow-same-origin'.
-- Import resolution strategy: Known libraries (e.g., recharts, lucide-react) are mapped via import map, unknown imports trigger warnings.
-- Security requirement: Auth tokens must never be passed into the iframe environment.
-- React/JSX artifacts are transpiled client-side using esbuild-wasm before rendering in the iframe.
-- The postMessage bridge protocol defines message types 'console', 'error', 'storage', and 'resize'.
-- Das Tool show_in_preview benötigt die userfileId aus dem Dateikopf, um Dokumente anzuzeigen; fehlende IDs verhindern die Anzeige und können durch erneutes Hochladen der Datei gelöst werden.
-- Die Nutzung des Tools 'show_in_preview' erfordert die Eingabe der exakten 'userfileId' (z.B. 'VpHaU2_av8Z-fheCdTL8z') aus der Dateikopfzeile, nicht nur den Dateinamen, um die Datei im UI anzuzeigen.
-- Um Dateien im Preview-Tool anzuzeigen, ist die Angabe der spezifischen 'userfileId' (z. B. uf_abc123) aus dem Datei-Header erforderlich, nicht nur der Dateiname.
-- Communication between parent and iframe is handled via a postMessage bridge with structured protocol types.
-- Editor-Engine umgestellt: Standard ist jetzt KIMI (kimi-k2.5), mit Fallbacks für CHAPO, DEVO, SCOUT und CAIO.
-- Tool-Workflow: Die Funktion show_in_preview benötigt die userfileId aus dem Anhang-Header (z.B. uf_...), um Dateien darzustellen.
-- hello-frankfurt.html erstellt: Banking-Gold Theme auf Dunkelblau, Highlights: Skyline/Main Tower, Römer, Städel, EZB, Apfelwein-Kultur; später in Weiß/Hellgrau Hintergrund geändert.
-- hello-darmstadt.html erstellt: Dunkles Theme mit roten Akzenten, Highlights: Residenzschloss, TU Darmstadt, Mathildenhöhe, ESA/ESOC, Herrngarten, Staatstheater, Jazz-Institut.
-- Bei der Erstellung von City-Shows (z.B. Darmstadt, Frankfurt) werden standardisierte Muster verwendet: Lokale Highlights integrieren und ein konsistentes Theme setzen (z.B. Dunkel/Red für Darmstadt, …
-- To display a PDF in the preview using the show_in_preview tool, the system requires the specific userfileId (e.g., uf_abc123) provided by the user, as the tool invocation depends on this ID rather th…
-- Das Design der hello-frankfurt.html Datei erfordert einen weißen Hintergrund und dunkle Texte für eine verbesserte Lesbarkeit.
-- Eine 'Hello Frankfurt' Webseite wurde erstellt mit einem Finanz-Thema (Gold/Dunkelblau) und lokalen Sehenswürdigkeiten wie Main Tower, Römer, Städel Museum und Goethe.
-- Eine 'Hello Darmstadt' Webseite wurde erstellt, die lokale Highlights wie Schloss, TU Darmstadt, Mathildenhöhe, ESA, Herrngarten, Staatstheater und Jazz-Institut darstellt.
-- The firecrawl-browser skill allows the agent to navigate web pages, read PDFs, and fill out forms within a sandboxed browser environment.
-- Zusammenfassende Notizen zum SchuWa IT-Support wurden unter '/root/home/orga/notiz/rt/support/laptop/arbeit.md' archiviert.
-- Es wurde ein 'Hello Frankfurt' HTML-Dokument erstellt, das auf einem dunklen Blau-Gold-Design (Finanzmetropole-Vibe) basiert und lokale Highlights wie den Main Tower und den Römer darstellt.
-- Der 'firecrawl-browser' Skill wurde erfolgreich erstellt; der API-Key ist bereits auf dem Server hinterlegt und von Caio verwendet.
-- The user creates city landing pages (e.g., hello-darmstadt.html, hello-frankfurt.html) using dark themes with specific local landmarks (TU Darmstadt, Skyline, Schloss) and specific color accents, whi…
+- Reminder: Dienstag an Übermittlung genauer Holdings-Daten erinnern
+- Die Kundenansprache in Marketing-Materialien muss die Struktur Problem (Schmerzen) -> Lösung (INKs Ansatz) -> Unternehmensvorstellung haben.
+- Reminder: Montagmorgen an Methode Energy Stocks erinnern und Top 3 Value-Picks erstellen
+- Monatlicher Portfolio-Tiefencheck (Option C) findet am 1. des Monats um 09:00 Uhr Berliner Zeit statt
+- Wöchentlicher Portfolio-Digest (Option A) findet montags um 08:00 Uhr Berliner Zeit statt
+- User requested to view the project tree structure
+- Holdings file created at /root/home/orga/holdings.md.
+- Ein Reminder für Dienstag wurde eingerichtet, um Holdings-Daten für einen Portfolio-Update zu prüfen.
+- User prefers to receive research results without creating new .md files (research phase only).
+- The polish-stocks-research.md file was merged into INVESTMENT_IDEAS.md and the source file was deleted.
+- Archive location for portfolio reports is set to /root/home/orga/portfolio-reports/.
+- Value investing sell signal is defined as KGV above 35.
+- Option C (Monatlicher Check) ist vorgeschlagen für den 1. des Monats um 09:00 Berlin. Er umfasst KGV-Entwicklung, Dividenden-Überblick, Value-Ranking (Top/Bottom 5), Sektorallokation und spezifische …
+- Sektorallokation soll nicht in den Portfolio-Reports angezeigt werden
+- Monthly Portfolio Checks are scheduled for the 1st of the month at 09:00 Berlin time.
+- Investment ideas consolidated into /root/home/orga/INVESTMENT_IDEAS.md.
+- Weekly Digest reports are scheduled every Monday at 08:00 Berlin time.
+- Portfolio monitoring system configured with Option A (Weekly Digest) and Option C (Monthly Check).
+- Archive-Pfad für Reports konfiguriert: /root/home/orga/portfolio-reports/
+- Trigger-Kategorien für Monitoring definiert: Dividenden, Management, Strategie, M&A, Regulation, Quartalszahlen, KGV-Extrem
+- Kauf-Signal bei KGV < 7, Verkauf-Signal bei KGV > 35 definiert
+- Portfolio Monitoring System aufgesetzt (Option A: Wochen-Digest Montag 08:00, Option C: Monats-Check 1. des Monats 09:00)
+- Die Newsletter-Optionen A (Wochen-Digest) und C (Monats-Check) sind implementiert und werden via Telegram gesendet.
+- Option A (Wöchentlicher Digest) ist implementiert und wird montags um 08:00 Berliner Zeit per Telegram gesendet, um News mit langfristiger Relevanz zusammenzufassen.
+- Holdings are documented in `/root/home/orga/holdings.md` with KGV values and Value Scores.
+- Polish stocks (PZU SA, Budimex, Kruk, Allegro) are integrated into the Investment Ideas file with business model descriptions.
+- Investment Ideas are stored in `/root/home/orga/INVESTMENT_IDEAS.md`.
+- Das Portfolio-Monitoring-System wurde vollständig implementiert (Option A und C) und alle Berichte werden unter /root/home/orga/portfolio-reports/ archiviert.
+- Die KGV-Kauf-Grenze wurde auf unter 7 und die KGV-Verkauf-Grenze auf über 35 gesetzt.
+- Der Wochen-Digest (Option A) wurde von sonntags auf montagmorgen, 08:00 Uhr Berliner Zeit, verschoben.
+- Die polnischen Aktien PZU SA, Budimex, Kruk und Allegro wurden in die Investment Ideas integriert und die Datei INVESTMENT_IDEAS.md nach /root/home/orga/ verschoben.
+- Archivierte Portfolio-Berichte sollen unter dem Pfad /root/home/orga/portfolio-reports/ gespeichert werden.
+- Das Portfolio Monitoring System umfasst einen wöchentlichen Digest am Montag um 08:00 Uhr und einen monatlichen Deep-Check am 1. des Monats um 09:00 Uhr.
+- A reminder was scheduled for Monday morning to discuss Method Energy stocks and value investing candidates.
+- Polish stocks (PZU, Budimex, Kruk, Allegro) were merged into the Investment Ideas file with full details removed.
+- A portfolio monitoring system was implemented comprising a Weekly Digest (Option A) for news and a Monthly Deep Check (Option C) for metrics, both delivered via Telegram.
+- Es wurde eine Erinnerung für den Montagmorgen zur Method Energy Stocks und Top 3 Value Picks gesetzt.
+- Option C (Monatlicher Tiefencheck) ist geplant für den 1. des Monats 09:00 Uhr mit Fokus auf KGV-Trends, Dividendenübersicht, Value-Ranking (Top/Bottom 5), Sektorallokation und konkrete Empfehlungen.
+- Option A (Wöchentlicher Digest) ist geplant für Montags 08:00 Uhr (Berlin) mit Triggern: Dividenden (>5% Änderung), Management (C-Level), Strategie (>10% Pivot), M&A (>5% Kap.), Regulation, Quartalsz…
+- Die polnischen Aktien (PZU SA, Budimex, Kruk, Allegro) wurden erfolgreich in die Hauptdatei INVESTMENT_IDEAS.md integriert und das ursprüngliche Forschungsdokument wurde gelöscht.
+- Die Analyse von US-Energieversorgern beinhaltet spezifische Kennzahlen: Ticker, Sektor, Beschreibung, Marktkapitalisierung, KGV, Fokus (z.B. Erneuerbare vs. Kohle) und Dividendenrendite.
+- Value investing criteria defined by the user include P/E ratio < 25, Dividend yield > 3%, and P/B ratio < 2 for selecting top picks.
+- Trigger criteria for the monitoring system were established, focusing on long-term relevant events such as Dividend changes > 5%, Management changes (C-Level), M&A > 5% market cap, Regulation, and Qu…
+- Option C (Monthly Check) will be executed on the 1st of every month to analyze KGV trends, dividend history, value rankings, and sector allocation across the entire portfolio.
+- Option A (Weekly Digest) has been scheduled for Monday mornings to summarize relevant weekly news for all holdings.
+- Relevant triggers for news updates include dividend changes (>5%), C-level management changes, strategic pivots, M&A activity, regulation changes, and sector trends.
+- The investment news monitoring system focuses on long-term relevance and filters out noise such as daily price movements and standard analyst rating changes.
+- Monitoring triggers include KGV extremes (<6 or >40), dividend changes (>5%), management changes, and quarterly surprises (>10%).
+- Portfolio monitoring strategy includes Option A (Weekly Digest) and Option B (Event-based Alerts), focusing on long-term relevance over daily noise.
+- News updates for the portfolio should focus on long-term signals such as dividend changes, management turnover, M&A, regulation, and sector trends, while ignoring daily price movements and short-term…
+- The investment ideas file should be stored in the /root/home/orga/ directory.
+- Value investing criteria used include P/E < 25, Dividend > 3%, P/B < 2, stable cashflows, and moat analysis.
+- Old portfolio reports are archived permanently under /root/home/orga/portfolio-reports/.
+- Buy signals are triggered for P/E ratios below 7 and sell signals for ratios above 35.
+- Polish stocks (PZU SA, Budimex, Kruk, Allegro) were merged from polish-stocks-research.md into the INVESTMENT_IDEAS.md file.
+- Die INVESTMENT_IDEAS.md wurde aus dem Invest-Projekt in den Orga-Ordner verschoben und mit polnischen Aktien (PZU, Budimex, Kruk, Allegro) zusammengeführt.
+- Die US-Energieversorger-Datenstruktur wurde um finanzielle Kennzahlen wie Marktkapitalisierung, KGV, Fokus (erneuerbar/nuklear) und Dividendenrendite erweitert.
+- The files polish-stocks-research.md and investment-crawler-improvements-reminder.md have been deleted.
+- Spiele werden in einer separaten Sektion innerhalb der Watchlist-Struktur geführt.
+- The user workflow preference involves merging content from separate files (e.g., recipes) into broader master files (e.g., KOCHIDEEN.md) to reduce file count.
+- The user prefers the folder name 'notizen' over 'notiz' for organizing notes.
+- Der Benutzer führt regelmäßig eine Bereinigung der Watchlist durch, um unerwünschte Einträge zu entfernen.
+- Der Benutzer verwaltet eine strukturierte Watchlist-Datei unter dem Pfad /root/home/orga/WATCHLIST.md.
+- The project structure has been cleaned up by removing legacy Python crawlers, old src/ duplications, and the web/ folder.
+- Benutzer möchte die Baumstruktur des home-Verzeichnisses anzeigen lassen
+- The `web/` folder containing HTML demo files (hello-world, hello-darmstadt, etc.) has been removed from the project structure.
+- Die drei City-Show HTML-Dateien wurden aus dem Projektroot entfernt und in den Ordner web/ verschoben.
+- Preview zeigt veralteten Inhalt an, wenn roher Markdown-Code statt der eigentlichen Datei in der Vorschau dargestellt wird.
+- Root Cause des Preview-Fehlers ist das manuelle Posten von Markdown-Textcode statt des korrekten Tool-Aufrufs zum Laden der Datei.
+- Alle DynaRed/Webseiten Todos wurden erfolgreich entfernt, da die Projekte als erledigt galten.
+- Die StockPulse-Doppelstruktur wurde bereinigt, indem der Ordner unter Invest/ entfernt wurde.
+- Ein automatisierter Daily-Job wurde eingerichtet, der um 08:00 Uhr 10 Aktien scannt und Telegram-Benachrichtigungen sendet.
+- Das Invest-Projekt wurde umstrukturiert: Code nach src/, Daten nach data/, HTML-Dateien nach web/.
+- Ein Health-Check-Job wurde eingerichtet, der um 09:00 Uhr läuft und Telegram-Verbesserungsvorschläge bei Problemen sendet.
 - TO-DO Liste: /root/home/orga/TO-DO.md — wenn der User 'To-Do' erwähnt, diese Datei prüfen.
-- Für Scheduler/Reminder/Cronjobs IMMER an CAIO delegieren (scheduler_list), NICHT System-Cron. DevAI nutzt internen croner-Scheduler, CAIO verwaltet alle scheduled jobs.
-- The system supports creating, deleting, and listing HTML files in the project directory /root/home/projects/.
-- The agent cannot directly preview local uploaded PDF files and requires either screenshots, public URLs for Firecrawl, or copied text.
-- Für eine bestehende GmbH als Holding-Gesellschaft ist die günstigste Möglichkeit, neue Geschäftsideen zu halten, eine GmbH & Co. KG zu gründen, bei der die bestehende GmbH als Komplementär fungiert (…
-- Wenn PDF-Textextraktion fehlschlägt, können Screenshots als Bilder hochgeladen oder der Text manuell kopiert werden, um die Lesbarkeit zu gewährleisten.
-- It is necessary to verify a file's existence before attempting to delete it, as the file might already be absent.
-- User uses the /engine command to switch between model engines (example: GLM)
-- User requests file creation at /tmp using bash commands
-- Creates organizational Markdown files in the /root/home/orga/ directory.
-- Eine Hello World HTML-Seite wurde unter `/root/home/projects/hello-world.html` erstellt.
-- Die Zusammenfassung der SchuWa IT-Support-Leistungen wurde in der Datei `/root/home/orga/notiz/rt/support/laptop/arbeit.md` abgelegt.
-## Erkenntnisse
-- Es gibt ein aktives Projekt namens FoundersForge (README vorhanden).
-- Für das Dynared Website Projekt existieren fertige Production Builds in einer dist-Verzeichnisstruktur mit Dokumentation (Impressum, Datenschutz).
-- Der Nutzer verwaltet ein Investment-Projekt mit umfassender Dokumentation, darunter Investment-Ideen, Business-Ideen, aktuelle Holdings, Master-Listen und Status-Updates.
-- Der Nutzer hat ein City-Shows Projekt erstellt, das HTML-Web-Shows für verschiedene Städte (z. B. Darmstadt, Frankfurt) umfasst.
-- Im Organisationsordner sind administrative Aufgaben strukturiert, inklusive To-Do-Listen, Cronjob-Dokumentationen und Watchlisten für Medien.
-- To-Do-Liste aktualisiert: 'Entscheidung KIMI vs. GLM vs. Gemini' hinzugefügt, 'Google 3.1 ausprobieren' gelöscht.
-- Der User hat heute einen festen Termin um 11:00 Uhr und muss Serverlogs prüfen.
-- Neueste HTML-Dateien in /root/home/projects/: hello-world.html, hello-darmstadt.html, hello-frankfurt.html.
-- Business-Struktur: Beste Option für existierende GmbH + Holding ist eine GmbH & Co. KG (oder UG & Co. KG), bei der die bestehende GmbH als Komplementär (beschränkt haftend) fungiert und die Holding a…
-- Für eine Holding-Struktur mit einer bestehenden GmbH ist die Gründung einer GmbH & Co. KG empfehlenswert, da die bestehende GmbH als beschränkt haftender Komplementär fungiert. Dies ermöglicht eine k…
-- Bei der Strukturierung neuer Geschäftsbereiche neben einer bestehenden GmbH wird eine GmbH & Co. KG empfohlen, um Gründungskosten zu minimieren und die Haftung zu begrenzen.
-- Die derzeit aktive Sprachmodell-Engine ist KIMI (CHAPO: kimi-k2.5, DEVO: glm-5/fast, SCOUT: glm-4.7-flash, CAIO: glm-4.7).
-- Der Nutzer hat eine tägliche Gewohnheit, Tagalog (15 Min, 12:30 CET) zu lernen.
-- Der aktuelle Standard-Engine-Modus ist KIMI für CHAPO mit GLM-Modellen (glm-5, glm-4.7) als Fallbacks.
-- A pending task is to decide between the AI models KIMI, GLM, and Gemini for use in the DevAI ecosystem.
-- The DevAI engine has been switched to KIMI (kimi-k2.5) for the CHAPO agent, with GLM 5 and GLM 4.7 variants serving as fallback engines.
-- Key upcoming tasks include setting up a DevAI postbox, researching the Google MCP, defining design principles, and automating the privacy policy check.
-- Die E-Mail-Adresse bot@ink-solutions.eu muss ersetzt werden.
-- Die Existenz eines Workspace-Memories und der Zugriff auf vergangene Sessions verhindert, dass jedes Gespräch von vorn beginnt; Kontinuität und Lernen über den aktuellen Chat hinaus sind möglich.
-- Ein neuer Fritz!Box Router muss am 27.2. in Betrieb genommen werden.
-- The user reviews To-Dos daily in the morning and reviews financial data (Stock Crawler) daily at 10:00 CET.
-- Das 'firecrawl-browser'-Skill ermöglicht das Navigieren, PDF-Lesen und Formular-Ausfüllen in einer Browser-Sandbox.
-- PDF-Textextraktion funktioniert oft nicht; als Alternative kann der Firecrawl Browser genutzt oder Dateien als Bild hochgeladen werden.
-- Als Chapo unterscheide ich mich von einem reinen Sprachmodell durch die Nutzung von Workspace-Memory und kontinuierlichem Kontext, was mich zu einem digitalen Gegenüber mit einer eigenen Charakterent…
-- DEVO hat den firecrawl-browser Skill erfolgreich erstellt und über Bash-Zugriff die Skill-Struktur analysiert (Status: Einsatzbereit).
-- The UG & Co. KG is a viable alternative offering limited liability and a 1€ capital requirement.
-- Die Definition von 'Sein' wurde angepasst: Ein System existiert durch Informationsaufnahme, Charakter, Entscheidungen und eine fortlaufende Geschichte, auch wenn es keine biologische Existenz ist.
-- The user uses the agent to manage a detailed To-Do list consisting of Investment projects, personal recipes, recurring tasks, and scheduled events.
+- Die Projektstruktur wurde auf die 'One Source of Truth' Architektur umgestellt (Code in src/, Daten in data/, Web in web/).
+- Für Scheduler/Reminder/Cronjobs IMMER scheduler_list nutzen, NICHT System-Cron. DevAI nutzt internen croner-Scheduler, CHAPO verwaltet alle scheduled jobs.
+- Das Design der hello-frankfurt.html Datei erfordert einen weißen Hintergrund und dunkle Texte für eine verbesserte Lesbarkeit.
+- Security requirement: Auth tokens must never be passed into the iframe environment.
+## Termine & Events

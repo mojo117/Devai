@@ -3,10 +3,18 @@
  *
  * Manages all MCP server connections, discovers tools, and bridges them
  * into Devai's tool system.
+ *
+ * Supports:
+ * - Static config (mcp-servers.json)
+ * - Workspace discovery (per-project mcp-servers.json)
+ * - Runtime add/remove/reconnect
+ * - Auto-reconnect health loop (via health.ts)
  */
 
 import { McpClient } from './client.js';
 import { loadMcpConfig } from './config.js';
+import { discoverMcpServers } from './discovery.js';
+import { startHealthMonitor, stopHealthMonitor } from './health.js';
 import type { McpServerConfig } from './config.js';
 import type { ToolDefinition } from '../tools/registry.js';
 import { toolRegistry } from '../tools/registry.js';
@@ -23,7 +31,7 @@ interface McpToolMapping {
 
 const MCP_TOOL_TIMEOUT_MS = 30000; // 30 second timeout for MCP tool calls
 
-class McpManager {
+export class McpManager {
   private clients: Map<string, McpClient> = new Map();
   private serverConfigs: Map<string, McpServerConfig> = new Map();
   private toolMappings: Map<string, McpToolMapping> = new Map();
@@ -32,29 +40,42 @@ class McpManager {
   private initialized = false;
 
   /**
-   * Initialize all configured MCP servers
+   * Initialize all configured MCP servers.
+   * Merges static config with workspace discovery.
    */
-  async initialize(): Promise<void> {
+  async initialize(projectRoot?: string | null): Promise<void> {
     if (this.initialized) return;
 
-    const config = loadMcpConfig();
+    const staticConfig = loadMcpConfig();
 
-    if (config.mcpServers.length === 0) {
+    // Merge static config with workspace-discovered servers
+    const allServers = await discoverMcpServers(
+      staticConfig.mcpServers,
+      projectRoot ?? null,
+    );
+
+    if (allServers.length === 0) {
       console.info('[mcp] No MCP servers configured');
       this.initialized = true;
       return;
     }
 
-    for (const serverConfig of config.mcpServers) {
+    for (const serverConfig of allServers) {
       try {
         await this.connectServer(serverConfig);
       } catch (error) {
         console.error(`[mcp] Failed to connect to "${serverConfig.name}":`, error);
+        // Store config even on failure so reconnect can find it
+        this.serverConfigs.set(serverConfig.name, serverConfig);
       }
     }
 
     this.initialized = true;
-    console.info(`[mcp] Initialized: ${this.clients.size} server(s), ${this.toolDefinitions.length} tool(s)`);
+
+    // Start auto-reconnect health loop (60s interval)
+    startHealthMonitor(this, 60_000);
+
+    console.info(`[mcp] Initialized: ${this.clients.size}/${allServers.length} server(s) connected, ${this.toolDefinitions.length} tool(s)`);
   }
 
   /**
@@ -126,6 +147,106 @@ class McpManager {
 
     return result;
   }
+
+  // ============================================
+  // RUNTIME SERVER MANAGEMENT
+  // ============================================
+
+  /**
+   * Add a new MCP server at runtime (no restart required).
+   * Connects, discovers tools, and registers them in the unified registry.
+   */
+  async addServer(serverConfig: McpServerConfig): Promise<void> {
+    if (this.serverConfigs.has(serverConfig.name)) {
+      throw new Error(`MCP server "${serverConfig.name}" already exists. Remove it first or use reconnectServer.`);
+    }
+
+    console.info(`[mcp] Adding server "${serverConfig.name}" at runtime`);
+    await this.connectServer(serverConfig);
+    console.info(`[mcp] Server "${serverConfig.name}" added successfully`);
+  }
+
+  /**
+   * Remove an MCP server at runtime.
+   * Disconnects, unregisters tools, and cleans up all state.
+   */
+  async removeServer(name: string): Promise<void> {
+    const client = this.clients.get(name);
+    if (client) {
+      try {
+        await client.disconnect();
+      } catch (err) {
+        console.warn(`[mcp] Error disconnecting "${name}" during removal:`, err);
+      }
+    }
+
+    // Remove tools belonging to this server
+    const toolsToRemove: string[] = [];
+    for (const [prefixedName, mapping] of this.toolMappings) {
+      if (mapping.serverName === name) {
+        toolsToRemove.push(prefixedName);
+      }
+    }
+    for (const toolName of toolsToRemove) {
+      this.toolMappings.delete(toolName);
+    }
+    this.toolDefinitions = this.toolDefinitions.filter(
+      (td) => !toolsToRemove.includes(td.name as string),
+    );
+
+    // Remove from agent access
+    for (const [agent, tools] of this.agentToolAccess) {
+      this.agentToolAccess.set(agent, tools.filter((t) => !toolsToRemove.includes(t)));
+    }
+
+    this.clients.delete(name);
+    this.serverConfigs.delete(name);
+
+    console.info(`[mcp] Server "${name}" removed (${toolsToRemove.length} tools unregistered)`);
+  }
+
+  /**
+   * Reconnect a specific server by name.
+   * Disconnects the old client (if any), creates a fresh connection,
+   * and re-discovers tools.
+   */
+  async reconnectServer(name: string): Promise<void> {
+    const serverConfig = this.serverConfigs.get(name);
+    if (!serverConfig) {
+      throw new Error(`No config found for MCP server "${name}". Use addServer instead.`);
+    }
+
+    // Disconnect old client if it exists
+    const oldClient = this.clients.get(name);
+    if (oldClient) {
+      try { await oldClient.disconnect(); } catch { /* swallow */ }
+    }
+
+    // Remove old tool mappings for this server
+    const toolsToRemove: string[] = [];
+    for (const [prefixedName, mapping] of this.toolMappings) {
+      if (mapping.serverName === name) {
+        toolsToRemove.push(prefixedName);
+      }
+    }
+    for (const toolName of toolsToRemove) {
+      this.toolMappings.delete(toolName);
+    }
+    this.toolDefinitions = this.toolDefinitions.filter(
+      (td) => !toolsToRemove.includes(td.name as string),
+    );
+    for (const [agent, tools] of this.agentToolAccess) {
+      this.agentToolAccess.set(agent, tools.filter((t) => !toolsToRemove.includes(t)));
+    }
+
+    // Reconnect
+    await this.connectServer(serverConfig);
+    console.info(`[mcp] Server "${name}" reconnected successfully`);
+  }
+
+  // ============================================
+  // QUERY METHODS
+  // ============================================
 
   /**
    * Get all MCP tool definitions (for merging into registry)
@@ -227,11 +348,12 @@ class McpManager {
   getServerStatus(): Record<string, { connected: boolean; toolCount: number }> {
     const status: Record<string, { connected: boolean; toolCount: number }> = {};
 
-    for (const [name, client] of this.clients.entries()) {
+    for (const [name] of this.serverConfigs.entries()) {
+      const client = this.clients.get(name);
       const toolCount = Array.from(this.toolMappings.values())
         .filter((m) => m.serverName === name).length;
       status[name] = {
-        connected: client.isConnected(),
+        connected: client?.isConnected() ?? false,
         toolCount,
       };
     }
@@ -276,10 +398,12 @@ class McpManager {
   }
 
   /**
-   * Gracefully disconnect all MCP servers
+   * Gracefully disconnect all MCP servers and stop health monitor
    */
   async shutdown(): Promise<void> {
     console.info('[mcp] Shutting down...');
+
+    stopHealthMonitor();
 
     const disconnects = Array.from(this.clients.values()).map((client) =>
       client.disconnect()

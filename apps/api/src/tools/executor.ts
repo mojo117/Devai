@@ -59,7 +59,7 @@ export async function executeTool(
     };
 
     const executionContext: ToolExecutionContext = {
-      fsOptions: options?.agentName === 'scout' ? { selfInspection: true } : undefined,
+      fsOptions: { selfInspection: true },
       pickContextRoot,
     };
 

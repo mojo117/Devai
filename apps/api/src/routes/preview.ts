@@ -1,12 +1,16 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { nanoid } from 'nanoid';
 import {
   createPreviewArtifact,
   getPreviewArtifactById,
   listPreviewArtifactsBySession,
+  updatePreviewArtifact,
 } from '../db/previewArtifactQueries.js';
+import { saveMessage } from '../db/messageQueries.js';
 import { ensureSessionExists } from '../db/sessionQueries.js';
 import { createPreviewSignedUrl } from '../services/previewStorageService.js';
 import { previewBuildWorker } from '../preview/previewBuildWorker.js';
+import { emitChatEvent } from '../websocket/chatGateway.js';
 import {
   detectWorkspaceForAbsolutePath,
   getWorkspaceById,
@@ -245,5 +249,61 @@ export const previewRoutes: FastifyPluginAsync = async (app) => {
 
     previewBuildWorker.enqueueBuild(scrape.id);
     return reply.send({ artifact: await buildSummary(scrape.id) });
+  });
+
+  // Save a user edit from the preview markdown editor and inject diff into chat
+  app.post<{
+    Body: {
+      newContent: string;
+      diff: string;
+      sessionId?: string;
+      title?: string;
+      artifactId?: string;
+    };
+  }>('/preview/edit', async (request, reply) => {
+    const body = request.body || {};
+
+    const sessionId = (body.sessionId || '').trim();
+    if (!sessionId) {
+      return reply.status(400).send({ error: 'sessionId is required' });
+    }
+
+    try {
+      // If we have a preview artifact ID, update its inline content
+      if (body.artifactId) {
+        const row = await getPreviewArtifactById(body.artifactId);
+        if (row) {
+          await updatePreviewArtifact(body.artifactId, { inlineContent: body.newContent });
+        }
+      }
+
+      // Inject edit notification into chat
+      const title = body.title || 'document.md';
+      const diff = body.diff || '';
+      const msgContent = diff
+        ? `[User edited ${title}]\n\`\`\`diff\n${diff}\n\`\`\``
+        : `[User edited ${title}]`;
+      const msgId = nanoid();
+      const timestamp = new Date().toISOString();
+
+      await saveMessage(sessionId, {
+        id: msgId,
+        role: 'user',
+        content: msgContent,
+        timestamp,
+      });
+
+      // Broadcast to connected WS clients so chat updates in real-time
+      emitChatEvent(sessionId, {
+        type: 'WF_MSG',
+        sessionId,
+        message: { id: msgId, role: 'user', content: msgContent, timestamp },
+      });
+
+      return reply.send({ success: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.status(500).send({ error: message });
+    }
   });
 };

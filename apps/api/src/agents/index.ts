@@ -1,7 +1,7 @@
 /**
  * Agents Module
  *
- * Exports all multi-agent system components.
+ * Exports all agent system components.
  */
 
 // Types
@@ -10,27 +10,16 @@ export type {
   AgentRole,
   AgentCapabilities,
   AgentDefinition,
-  DelegationTask,
-  EscalationIssue,
   UserQuestion,
   ApprovalRequest,
   QualificationResult,
   AgentHistoryEntry,
-  ParallelExecution,
   ConversationState,
   AgentStreamEvent,
-  // SCOUT types
-  ScoutScope,
-  ScoutConfidence,
-  ScoutResult,
-  WebFinding,
-  ScoutStreamEvent,
 } from './types.js';
 
 // Agent Definitions
 export { CHAPO_AGENT, CHAPO_META_TOOLS } from './chapo.js';
-export { DEVO_AGENT, DEVO_META_TOOLS } from './devo.js';
-export { SCOUT_AGENT, SCOUT_META_TOOLS } from './scout.js';
 
 // State Management
 export {
@@ -51,10 +40,6 @@ export {
   addPendingQuestion,
   removePendingQuestion,
   getPendingQuestions,
-  startParallelExecution,
-  addParallelResult,
-  getParallelExecution,
-  getActiveParallelExecutions,
   setOriginalRequest,
   setQualificationResult,
   addGatheredFile,
@@ -71,16 +56,14 @@ export {
 } from './stateManager.js';
 
 // Router
-export { processRequest, spawnScout } from './router.js';
+export { processRequest } from './router.js';
 
 // Event System
 export {
   // Event factories
   AgentEvents,
   ToolEvents,
-  ScoutEvents,
   UserEvents,
-  ParallelEvents,
   SystemEvents,
   // Types
   type EventCategory,

@@ -4,7 +4,7 @@ import type { AgentName } from '../types.js';
 export type PlanStepStatus = 'todo' | 'doing' | 'done' | 'blocked';
 
 const PLAN_STEP_STATUSES = new Set<PlanStepStatus>(['todo', 'doing', 'done', 'blocked']);
-const PLAN_STEP_OWNERS = new Set<AgentName>(['chapo', 'devo', 'scout', 'caio']);
+const PLAN_STEP_OWNERS = new Set<AgentName>(['chapo']);
 
 export interface ChapoPlanStep {
   id: string;

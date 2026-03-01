@@ -23,6 +23,7 @@ export interface ToolEventLike {
   type: string;
   name?: string;
   arguments?: unknown;
+  result?: unknown;
 }
 
 const SUPPORTED_TYPES: Record<string, Artifact['type']> = {
@@ -61,6 +62,11 @@ const WRITE_TOOLS = new Set([
   'fs_write_file',
   'create_text_file',
   'writeFile',
+]);
+
+/** Tool names that edit existing files (no full content in args) */
+const EDIT_TOOLS = new Set([
+  'fs_edit',
 ]);
 
 /** Mime-type prefix → artifact type (order matters — specific before generic) */
@@ -117,7 +123,34 @@ export function parseToolEventArtifacts(events: ToolEventLike[]): Artifact[] {
   const artifacts: Artifact[] = [];
 
   for (const ev of events) {
-    if (ev.type !== 'tool_call' || !ev.name) continue;
+    if (!ev.name) continue;
+
+    // Handle tool_result events from edit tools (content must be fetched)
+    if (ev.type === 'tool_result' && EDIT_TOOLS.has(ev.name)) {
+      const res = ev.result as Record<string, unknown> | null;
+      const filePath = String(res?.path ?? '');
+      if (!filePath) continue;
+
+      const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase();
+      const type = FILE_EXT_MAP[ext];
+      if (!type) continue;
+
+      const fileName = filePath.split('/').pop() || filePath;
+
+      artifacts.push({
+        id: djb2Hash(`${filePath}\n${Date.now()}`),
+        type,
+        language: type === 'webapp' ? ext.slice(1) || 'ts' : type,
+        content: undefined,
+        title: fileName,
+        filePath,
+        sourceKind: 'tool_event',
+      });
+      continue;
+    }
+
+    // Only process tool_call events from here on
+    if (ev.type !== 'tool_call') continue;
 
     const args = ev.arguments as Record<string, unknown> | null;
     if (!args) continue;
@@ -128,11 +161,24 @@ export function parseToolEventArtifacts(events: ToolEventLike[]): Artifact[] {
       const filename = args.filename as string | undefined;
       const mimeType = args.mimeType as string | undefined;
       const userfileId = args.userfileId as string | undefined;
-      if (!signedUrl) continue;
+      const inlineContent = args.content as string | undefined;
+      if (!signedUrl && !inlineContent) continue;
 
-      // Resolve artifact type from mime type
+      // Check filename first for markdown (most reliable)
+      const isMarkdown = filename && (filename.endsWith('.md') || filename.endsWith('.markdown'));
+      
+      // For markdown files, require inline content - skip if missing
+      // This allows code block parsing to pick up the content instead
+      if (isMarkdown && !inlineContent) {
+        console.log(`[artifactParser] Skipping show_in_preview for ${filename} - no inline content, code block parser will handle it`);
+        continue;
+      }
+
+      // Resolve artifact type
       let artifactType: Artifact['type'] = 'html';
-      if (mimeType) {
+      if (isMarkdown) {
+        artifactType = 'markdown';
+      } else if (mimeType) {
         for (const [prefix, type] of MIME_TYPE_MAP) {
           if (mimeType === prefix || mimeType.startsWith(prefix)) {
             artifactType = type;
@@ -142,18 +188,19 @@ export function parseToolEventArtifacts(events: ToolEventLike[]): Artifact[] {
       }
 
       artifacts.push({
-        id: djb2Hash(userfileId || signedUrl),
+        id: djb2Hash(userfileId || signedUrl || inlineContent || ''),
         type: artifactType,
         language: artifactType,
         title: filename || 'Preview',
         sourceKind: 'tool_event',
-        remote: {
+        content: inlineContent,
+        remote: signedUrl ? {
           id: userfileId || djb2Hash(signedUrl),
           status: 'ready',
           signedUrl,
           mimeType,
           type: artifactType,
-        },
+        } : undefined,
       });
       continue;
     }

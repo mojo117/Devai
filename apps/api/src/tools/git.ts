@@ -175,14 +175,14 @@ export async function gitPush(
     );
   }
 
-  // Safety check: Devai repo must use PRs, not direct push
+  // Safety check: Devai repo may only push to dev (never main/staging)
   const remotes = await git.getRemotes(true);
   const isDevaiRepo = remotes.some((r) =>
     r.refs?.push?.includes('mojo117/Devai') || r.refs?.fetch?.includes('mojo117/Devai')
   );
-  if (isDevaiRepo) {
+  if (isDevaiRepo && targetBranch !== 'dev') {
     throw new Error(
-      'Direct push to Devai repo is not allowed. Use github_createPR to create a pull request instead.'
+      `Direct push to Devai ${targetBranch} is not allowed. Push to dev branch only.`
     );
   }
 

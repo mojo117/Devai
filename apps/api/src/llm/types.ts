@@ -46,8 +46,12 @@ export interface GenerateRequest {
   toolsEnabled?: boolean;
   tools?: ToolDefinition[];
   maxTokens?: number;
-  /** Models to try on the same provider before falling back cross-provider. */
   sameProviderFallbacks?: string[];
+  thinkingEnabled?: boolean;
+  kimiSearchEnabled?: boolean;
+  webSearchEnabled?: boolean;
+  /** OpenAI-compatible tool_choice: 'auto' | 'required' | 'none' */
+  toolChoice?: 'auto' | 'required' | 'none';
 }
 
 export interface ToolCall {
@@ -65,6 +69,8 @@ export interface GenerateResponse {
   usage?: {
     inputTokens: number;
     outputTokens: number;
+    /** Cached prompt tokens (if provider supports prompt caching) */
+    cachedTokens?: number;
   };
 }
 

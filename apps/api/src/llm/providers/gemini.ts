@@ -63,7 +63,7 @@ export class GeminiProvider implements LLMProviderAdapter {
       contents,
       tools,
       generationConfig: {
-        maxOutputTokens: request.maxTokens || 4096,
+        maxOutputTokens: request.maxTokens || 16384,
       },
     });
 

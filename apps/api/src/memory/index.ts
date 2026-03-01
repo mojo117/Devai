@@ -4,6 +4,7 @@ export { compactMessages } from './compaction.js';
 export { runDecay, searchMemories } from './memoryStore.js';
 export { generateEmbedding } from './embeddings.js';
 export type { MemoryCandidate, StoredMemory, MemoryType, MemoryPriority, MemorySource } from './types.js';
-export { getActiveTopics, upsertTopic, runRecentTopicDecay } from './recentFocus.js';
+export { getActiveTopics, upsertTopic, runRecentTopicDecay, deactivateTopic, incrementSessionCount } from './recentFocus.js';
 export type { RecentTopic } from './recentFocus.js';
 export { tagCurrentWork, cleanupSession } from './topicTagger.js';
+export { extractTurnEpisode, extractToolEpisode, promoteMaturedTopics, getMemoriesByTimeRange } from './episodicExtraction.js';

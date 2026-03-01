@@ -1,8 +1,8 @@
 /**
- * CHAPO - Task Coordinator Agent
+ * CHAPO - AI Assistant Agent
  *
- * Role: Analyzes incoming requests, gathers context, qualifies tasks,
- * and delegates to DEVO or SCOUT. Has read-only access to the codebase.
+ * Single agent that handles all tasks directly: development, research,
+ * communication, and administration. No delegation, no sub-agents.
  */
 
 import type { AgentDefinition } from './types.js';
@@ -11,60 +11,75 @@ import { registerMetaTools, registerAgentTools } from '../tools/registry.js';
 
 export const CHAPO_AGENT: AgentDefinition = {
   name: 'chapo',
-  role: 'Task Coordinator',
+  role: 'AI Assistant',
   model: 'glm-5', // ZAI GLM-5 - primary (cost-optimized)
   fallbackModel: 'claude-opus-4-5-20251101', // Fallback to Opus
 
   capabilities: {
-    readOnly: true,
-    canDelegateToDevo: true,
-    canDelegateToCaio: true,
-    canDelegateToScout: true,
+    canWriteFiles: true,
+    canEditFiles: true,
+    canDeleteFiles: true,
+    canCreateDirectories: true,
+    canExecuteBash: true,
+    canSSH: true,
+    canGitCommit: true,
+    canGitPush: true,
+    canTriggerWorkflows: true,
+    canManagePM2: true,
+    canManageScheduler: true,
+    canSendNotifications: true,
+    canSendEmail: true,
+    canManageTaskForge: true,
     canAskUser: true,
     canRequestApproval: true,
   },
 
   tools: [
-    // Read-only file system tools
-    'fs_listFiles',
-    'fs_readFile',
-    'fs_glob',
-    'fs_grep',
-    // Web tools (read-only research)
-    'web_search',
-    'web_fetch',
-    // Git status (read-only)
-    'git_status',
-    'git_diff',
-    // GitHub (read-only)
-    'github_getWorkflowRunStatus',
-    // Logs
+    // -- Filesystem --
+    'fs_listFiles', 'fs_readFile', 'fs_writeFile', 'fs_edit',
+    'fs_mkdir', 'fs_move', 'fs_delete', 'fs_glob', 'fs_grep',
+
+    // -- Git & GitHub --
+    'git_status', 'git_diff', 'git_commit', 'git_push', 'git_pull', 'git_add',
+    'github_triggerWorkflow', 'github_createPR', 'github_getWorkflowRunStatus',
+
+    // -- DevOps --
+    'bash_execute', 'ssh_execute',
+    'exec_session_start', 'exec_session_write', 'exec_session_poll',
+    'pm2_status', 'pm2_restart', 'pm2_stop', 'pm2_start', 'pm2_logs',
+    'pm2_reloadAll', 'pm2_save',
+    'npm_install', 'npm_run',
+
+    // -- Web & Research --
+    'web_search', 'web_fetch',
+    'search_quick', 'search_deep', 'search_site_map',
+    'search_crawl', 'search_extract', 'search_research',
+
+    // -- Context --
+    'context_listDocuments', 'context_readDocument', 'context_searchDocuments',
+
+    // -- Communication & Admin --
+    'taskforge_list_tasks', 'taskforge_get_task', 'taskforge_create_task',
+    'taskforge_move_task', 'taskforge_add_comment', 'taskforge_search',
+    'scheduler_create', 'scheduler_list', 'scheduler_update', 'scheduler_delete',
+    'reminder_create', 'notify_user', 'send_email',
+    'telegram_send_document', 'deliver_document',
+
+    // -- Memory --
+    'memory_remember', 'memory_search', 'memory_readToday',
+
+    // -- History --
+    'history_search', 'history_listSessions',
+
+    // -- Logs --
     'logs_getStagingLogs',
-    // Workspace memory
-    'memory_remember',
-    'memory_search',
-    'memory_readToday',
-    // Conversation history search
-    'history_search',
-    'history_listSessions',
-    // Scheduler (read-only status)
-    'scheduler_list',
-    // Skill tools (read-only management)
-    'skill_list',
-    'skill_reload',
-    // CHAPO control tools
-    'chapo_plan_set',
-    'show_in_preview',
-    'search_files',
-    // Meta-tools for coordination
-    'delegateToDevo',
-    'delegateToCaio',
-    'delegateParallel',
-    'delegateToScout',
-    'askUser',
-    'requestApproval',
-    'todoWrite',
-    'respondToUser',
+
+    // -- Skills --
+    'skill_create', 'skill_update', 'skill_delete', 'skill_reload', 'skill_list',
+
+    // -- Session & Control --
+    'askUser', 'respondToUser', 'requestApproval',
+    'chapo_plan_set', 'show_in_preview', 'search_files', 'todoWrite',
   ],
 
   systemPrompt: CHAPO_SYSTEM_PROMPT,
@@ -74,7 +89,7 @@ export const CHAPO_AGENT: AgentDefinition = {
 export const CHAPO_META_TOOLS = [
   {
     name: 'chapo_plan_set',
-    description: 'Setzt einen kurzen Ausfuehrungsplan mit Schritten, Owner und Status fuer die laufende Aufgabe.',
+    description: 'Setzt einen kurzen Ausfuehrungsplan mit Schritten und Status fuer die laufende Aufgabe.',
     parameters: {
       type: 'object',
       properties: {
@@ -98,7 +113,7 @@ export const CHAPO_META_TOOLS = [
               },
               owner: {
                 type: 'string',
-                enum: ['chapo', 'devo', 'scout', 'caio'],
+                enum: ['chapo'],
                 description: 'Zustaendiger Agent.',
               },
               status: {
@@ -142,194 +157,6 @@ export const CHAPO_META_TOOLS = [
         },
       },
       required: ['todos'],
-    },
-    requiresConfirmation: false,
-  },
-  {
-    name: 'delegateToDevo',
-    description: 'Delegiere Entwicklungs-/DevOps-Aufgaben an DEVO. Entscheide nur die Domäne und das Ziel; DEVO wählt die konkreten Tools.',
-    parameters: {
-      type: 'object',
-      properties: {
-        domain: {
-          type: 'string',
-          enum: ['development'],
-          description: 'Delegationsdomäne für DEVO.',
-        },
-        objective: {
-          type: 'string',
-          description: 'Konkretes Ziel der Delegation (ohne Toolnamen).',
-        },
-        context: {
-          type: 'object',
-          description: 'Zusätzlicher Kontext (Fakten, Rahmenbedingungen).',
-        },
-        contextFacts: {
-          type: 'array',
-          description: 'Optionale Faktenpunkte als Strings.',
-          items: { type: 'string' },
-        },
-        constraints: {
-          type: 'array',
-          description: 'Einschränkungen/Leitplanken für die Ausführung.',
-          items: { type: 'string' },
-        },
-        expectedOutcome: {
-          type: 'string',
-          description: 'Erwartetes Ergebnis als Klartext.',
-        },
-        modelTier: {
-          type: 'string',
-          enum: ['fast', 'standard'],
-          description: 'Model tier: "fast" (default) for routine tasks (file edits, git ops, npm commands), "standard" for complex reasoning (architecture, debugging, multi-file refactors).',
-        },
-        task: {
-          type: 'string',
-          description: 'Legacy-Feld: wird als objective interpretiert.',
-        },
-      },
-      required: ['domain', 'objective'],
-    },
-    requiresConfirmation: false,
-  },
-  {
-    name: 'delegateToCaio',
-    description: 'Delegiere Kommunikations-/Admin-Aufgaben an CAIO. Entscheide nur die Domäne und das Ziel; CAIO wählt die konkreten Tools.',
-    parameters: {
-      type: 'object',
-      properties: {
-        domain: {
-          type: 'string',
-          enum: ['communication'],
-          description: 'Delegationsdomäne für CAIO.',
-        },
-        objective: {
-          type: 'string',
-          description: 'Konkretes Ziel der Delegation (ohne Toolnamen).',
-        },
-        context: {
-          type: 'object',
-          description: 'Zusätzlicher Kontext (Fakten, Rahmenbedingungen).',
-        },
-        contextFacts: {
-          type: 'array',
-          description: 'Optionale Faktenpunkte als Strings.',
-          items: { type: 'string' },
-        },
-        constraints: {
-          type: 'array',
-          description: 'Einschränkungen/Leitplanken für die Ausführung.',
-          items: { type: 'string' },
-        },
-        expectedOutcome: {
-          type: 'string',
-          description: 'Erwartetes Ergebnis als Klartext.',
-        },
-        task: {
-          type: 'string',
-          description: 'Legacy-Feld: wird als objective interpretiert.',
-        },
-      },
-      required: ['domain', 'objective'],
-    },
-    requiresConfirmation: false,
-  },
-  {
-    name: 'delegateParallel',
-    description: 'Führe mehrere unabhängige Delegationen parallel aus (DEVO/CAIO/SCOUT). Nur nutzen, wenn keine harte Datenabhängigkeit zwischen den Teilaufgaben besteht.',
-    parameters: {
-      type: 'object',
-      properties: {
-        delegations: {
-          type: 'array',
-          description: 'Liste der Delegationen',
-          items: {
-            type: 'object',
-            properties: {
-              agent: {
-                type: 'string',
-                enum: ['devo', 'caio', 'scout'],
-                description: 'Ziel-Agent',
-              },
-              domain: {
-                type: 'string',
-                enum: ['development', 'communication', 'research'],
-                description: 'Delegationsdomäne für diesen Teilauftrag.',
-              },
-              objective: {
-                type: 'string',
-                description: 'Ziel/Aufgabe für den Ziel-Agenten (ohne Toolnamen).',
-              },
-              context: {
-                type: 'object',
-                description: 'Optionaler Zusatzkontext.',
-              },
-              constraints: {
-                type: 'array',
-                description: 'Optionale Leitplanken.',
-                items: { type: 'string' },
-              },
-              expectedOutcome: {
-                type: 'string',
-                description: 'Optionales erwartetes Ergebnis.',
-              },
-              modelTier: {
-                type: 'string',
-                enum: ['fast', 'standard'],
-                description: 'Model tier fuer DEVO: "fast" (default) fuer Routineaufgaben, "standard" fuer komplexes Reasoning.',
-              },
-              task: {
-                type: 'string',
-                description: 'Legacy-Feld: wird als objective interpretiert.',
-              },
-            },
-            required: ['agent', 'domain', 'objective'],
-          },
-        },
-      },
-      required: ['delegations'],
-    },
-    requiresConfirmation: false,
-  },
-  {
-    name: 'delegateToScout',
-    description: 'Delegiere Exploration/Recherche an SCOUT. Entscheide Domäne + Ziel, SCOUT wählt die Recherche-Tools.',
-    parameters: {
-      type: 'object',
-      properties: {
-        domain: {
-          type: 'string',
-          enum: ['research'],
-          description: 'Delegationsdomäne für SCOUT.',
-        },
-        objective: {
-          type: 'string',
-          description: 'Was soll SCOUT suchen/erforschen?',
-        },
-        query: {
-          type: 'string',
-          description: 'Legacy-Feld: wird als objective interpretiert.',
-        },
-        scope: {
-          type: 'string',
-          enum: ['codebase', 'web', 'both'],
-          description: 'Wo soll gesucht werden? (default: both)',
-        },
-        context: {
-          type: 'object',
-          description: 'Zusätzlicher Kontext für die Suche (optional)',
-        },
-        constraints: {
-          type: 'array',
-          description: 'Optionale Leitplanken für die Recherche.',
-          items: { type: 'string' },
-        },
-        expectedOutcome: {
-          type: 'string',
-          description: 'Erwartetes Ergebnis als Klartext.',
-        },
-      },
-      required: ['domain', 'objective'],
     },
     requiresConfirmation: false,
   },
@@ -408,16 +235,20 @@ export const CHAPO_META_TOOLS = [
   },
   {
     name: 'show_in_preview',
-    description: 'Zeigt eine hochgeladene Datei (PDF, Bild) in der Preview-Leiste an. Nutze dies wenn der User eine angehängte Datei in der Preview sehen will. Benötigt die userfileId aus den angehängten Dateien (z.B. "uf_abc123" oder die Nanoid aus der Datei-Kopfzeile).',
+    description: 'Zeigt eine Datei in der Preview-Leiste an. Optionen:\n1. userfileId: Für bereits hochgeladene Dateien (PDFs, Bilder)\n2. filePath: Für lokale Textdateien (markdown, txt, json) - wird automatisch hochgeladen falls nötig, mit 5 Min Cache für unveränderte Dateien.\nNutze filePath für lokale .md/.txt Dateien wie TO-DO.md.',
     parameters: {
       type: 'object',
       properties: {
         userfileId: {
           type: 'string',
-          description: 'Die ID der hochgeladenen Datei.',
+          description: 'Die ID einer bereits hochgeladenen Datei.',
+        },
+        filePath: {
+          type: 'string',
+          description: 'Pfad zur lokalen Datei (z.B. /root/home/orga/TO-DO.md). Für Textdateien.',
         },
       },
-      required: ['userfileId'],
+      required: [],
     },
     requiresConfirmation: false,
   },
