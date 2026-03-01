@@ -1319,3 +1319,17 @@ export async function triggerPreviewScrape(id: string): Promise<{ artifact: Prev
     headers: withAuthHeaders(),
   });
 }
+
+export async function savePreviewEdit(
+  artifactId: string,
+  payload: { newContent: string; diff: string; sessionId?: string },
+): Promise<{ success: boolean; savedTo: string }> {
+  return fetchJson<{ success: boolean; savedTo: string }>(
+    `${API_BASE}/preview/artifacts/${encodeURIComponent(artifactId)}/edit`,
+    {
+      method: 'POST',
+      headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload),
+    },
+  );
+}

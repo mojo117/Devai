@@ -1,12 +1,16 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { nanoid } from 'nanoid';
 import {
   createPreviewArtifact,
   getPreviewArtifactById,
   listPreviewArtifactsBySession,
+  updatePreviewArtifact,
 } from '../db/previewArtifactQueries.js';
+import { saveMessage } from '../db/messageQueries.js';
 import { ensureSessionExists } from '../db/sessionQueries.js';
 import { createPreviewSignedUrl } from '../services/previewStorageService.js';
 import { previewBuildWorker } from '../preview/previewBuildWorker.js';
+import { emitChatEvent } from '../websocket/chatGateway.js';
 import {
   detectWorkspaceForAbsolutePath,
   getWorkspaceById,
@@ -245,5 +249,61 @@ export const previewRoutes: FastifyPluginAsync = async (app) => {
 
     previewBuildWorker.enqueueBuild(scrape.id);
     return reply.send({ artifact: await buildSummary(scrape.id) });
+  });
+
+  // Edit artifact inline content and inject diff into chat
+  app.post<{
+    Params: { id: string };
+    Body: { newContent: string; diff: string; sessionId?: string };
+  }>('/preview/artifacts/:id/edit', async (request, reply) => {
+    const id = request.params.id;
+    const body = request.body || {};
+
+    if (!body.newContent && body.newContent !== '') {
+      return reply.status(400).send({ error: 'newContent is required' });
+    }
+
+    const row = await getPreviewArtifactById(id);
+    if (!row) {
+      return reply.status(404).send({ error: 'Artifact not found' });
+    }
+
+    const sessionId = (body.sessionId || row.session_id || '').trim();
+    if (!sessionId) {
+      return reply.status(400).send({ error: 'sessionId is required' });
+    }
+
+    try {
+      // Update artifact inline content
+      await updatePreviewArtifact(id, { inlineContent: body.newContent });
+
+      // Inject edit notification into chat
+      const title = row.title || 'document.md';
+      const diff = body.diff || '';
+      const msgContent = diff
+        ? `[User edited ${title}]\n\`\`\`diff\n${diff}\n\`\`\``
+        : `[User edited ${title}]`;
+      const msgId = nanoid();
+      const timestamp = new Date().toISOString();
+
+      await saveMessage(sessionId, {
+        id: msgId,
+        role: 'user',
+        content: msgContent,
+        timestamp,
+      });
+
+      // Broadcast to connected WS clients
+      emitChatEvent(sessionId, {
+        type: 'WF_MSG',
+        sessionId,
+        message: { id: msgId, role: 'user', content: msgContent, timestamp },
+      });
+
+      return reply.send({ success: true, savedTo: 'database' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.status(500).send({ error: message });
+    }
   });
 };

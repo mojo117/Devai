@@ -527,6 +527,10 @@ function App() {
                 <PreviewPanel
                   artifact={currentArtifact}
                   onScrapeFallback={handleScrapeFallback}
+                  sessionId={chatSessionState?.sessionId ?? undefined}
+                  onContentEdited={(newContent) => {
+                    setCurrentArtifact(prev => prev ? { ...prev, content: newContent } : prev);
+                  }}
                 />
               </Panel>
             </PanelGroup>
@@ -608,6 +612,10 @@ function App() {
               <PreviewPanel
                 artifact={currentArtifact}
                 onScrapeFallback={handleScrapeFallback}
+                sessionId={chatSessionState?.sessionId ?? undefined}
+                onContentEdited={(newContent) => {
+                  setCurrentArtifact(prev => prev ? { ...prev, content: newContent } : prev);
+                }}
               />
             </div>
           </div>
