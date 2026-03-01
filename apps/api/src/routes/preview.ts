@@ -251,34 +251,34 @@ export const previewRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({ artifact: await buildSummary(scrape.id) });
   });
 
-  // Edit artifact inline content and inject diff into chat
+  // Save a user edit from the preview markdown editor and inject diff into chat
   app.post<{
-    Params: { id: string };
-    Body: { newContent: string; diff: string; sessionId?: string };
-  }>('/preview/artifacts/:id/edit', async (request, reply) => {
-    const id = request.params.id;
+    Body: {
+      newContent: string;
+      diff: string;
+      sessionId?: string;
+      title?: string;
+      artifactId?: string;
+    };
+  }>('/preview/edit', async (request, reply) => {
     const body = request.body || {};
 
-    if (!body.newContent && body.newContent !== '') {
-      return reply.status(400).send({ error: 'newContent is required' });
-    }
-
-    const row = await getPreviewArtifactById(id);
-    if (!row) {
-      return reply.status(404).send({ error: 'Artifact not found' });
-    }
-
-    const sessionId = (body.sessionId || row.session_id || '').trim();
+    const sessionId = (body.sessionId || '').trim();
     if (!sessionId) {
       return reply.status(400).send({ error: 'sessionId is required' });
     }
 
     try {
-      // Update artifact inline content
-      await updatePreviewArtifact(id, { inlineContent: body.newContent });
+      // If we have a preview artifact ID, update its inline content
+      if (body.artifactId) {
+        const row = await getPreviewArtifactById(body.artifactId);
+        if (row) {
+          await updatePreviewArtifact(body.artifactId, { inlineContent: body.newContent });
+        }
+      }
 
       // Inject edit notification into chat
-      const title = row.title || 'document.md';
+      const title = body.title || 'document.md';
       const diff = body.diff || '';
       const msgContent = diff
         ? `[User edited ${title}]\n\`\`\`diff\n${diff}\n\`\`\``
@@ -293,14 +293,14 @@ export const previewRoutes: FastifyPluginAsync = async (app) => {
         timestamp,
       });
 
-      // Broadcast to connected WS clients
+      // Broadcast to connected WS clients so chat updates in real-time
       emitChatEvent(sessionId, {
         type: 'WF_MSG',
         sessionId,
         message: { id: msgId, role: 'user', content: msgContent, timestamp },
       });
 
-      return reply.send({ success: true, savedTo: 'database' });
+      return reply.send({ success: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.status(500).send({ error: message });

@@ -52,18 +52,24 @@ export function PreviewPanel({
 
   const handleSave = useCallback(async (newContent: string) => {
     if (!artifact || !editableContent) return;
+    const title = artifact.title || 'document.md';
+    const diff = computeUnifiedDiff(editableContent, newContent, title);
+
+    // Update local state immediately so preview shows new content
+    onContentEdited?.(newContent);
+    setEditableContent(newContent);
+    setEditing(false);
+
+    // Persist to backend (non-blocking — UI already updated)
     setSaving(true);
     try {
-      const diff = computeUnifiedDiff(editableContent, newContent, artifact.title || 'document.md');
-      const artifactId = artifact.remote?.id || artifact.id;
-      await savePreviewEdit(artifactId, {
+      await savePreviewEdit({
         newContent,
         diff,
         sessionId,
+        title,
+        artifactId: artifact.remote?.id,
       });
-      onContentEdited?.(newContent);
-      setEditableContent(newContent);
-      setEditing(false);
     } catch (err) {
       console.error('[PreviewPanel] Save failed:', err);
     } finally {

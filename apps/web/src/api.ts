@@ -1321,11 +1321,16 @@ export async function triggerPreviewScrape(id: string): Promise<{ artifact: Prev
 }
 
 export async function savePreviewEdit(
-  artifactId: string,
-  payload: { newContent: string; diff: string; sessionId?: string },
-): Promise<{ success: boolean; savedTo: string }> {
-  return fetchJson<{ success: boolean; savedTo: string }>(
-    `${API_BASE}/preview/artifacts/${encodeURIComponent(artifactId)}/edit`,
+  payload: {
+    newContent: string;
+    diff: string;
+    sessionId?: string;
+    title?: string;
+    artifactId?: string;
+  },
+): Promise<{ success: boolean }> {
+  return fetchJson<{ success: boolean }>(
+    `${API_BASE}/preview/edit`,
     {
       method: 'POST',
       headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
