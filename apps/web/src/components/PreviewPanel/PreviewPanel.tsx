@@ -80,15 +80,15 @@ export function PreviewPanel({
   return (
     <div className="h-full flex flex-col bg-devai-card border-l border-devai-border">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-devai-border shrink-0">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-devai-accent/20 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
           {artifact ? (
             <>
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-devai-surface text-devai-accent border border-devai-border">
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-devai-accent/10 text-devai-accent border border-devai-accent/30 shrink-0">
                 {editing ? 'EDITING' : (remote?.type || artifact.type).toUpperCase()}
               </span>
               {artifact.title && (
-                <span className="text-xs text-devai-text-secondary truncate max-w-[200px]">
+                <span className="text-xs text-devai-accent/80 truncate max-w-[200px]">
                   {artifact.title}
                 </span>
               )}
@@ -100,10 +100,10 @@ export function PreviewPanel({
               )}
             </>
           ) : (
-            <span className="text-xs text-devai-text-muted font-mono">Preview</span>
+            <span className="text-xs text-devai-accent/50 font-mono">Preview</span>
           )}
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
           {editing ? (
             <>
               <button
@@ -119,7 +119,7 @@ export function PreviewPanel({
                   if (content !== null) handleSave(content);
                 }}
                 disabled={saving}
-                className="text-[11px] px-2 py-1 rounded border border-devai-accent/60 bg-devai-accent/10 text-devai-accent hover:bg-devai-accent/20 disabled:opacity-50 transition-colors"
+                className="text-[11px] px-2 py-1 rounded border border-devai-accent/60 bg-devai-accent/15 text-devai-accent hover:bg-devai-accent/25 disabled:opacity-50 transition-colors"
               >
                 {saving ? 'Saving...' : 'Save'}
               </button>
@@ -127,9 +127,12 @@ export function PreviewPanel({
           ) : isEditableMarkdown ? (
             <button
               onClick={handleEditClick}
-              className="text-[11px] px-2 py-1 rounded border border-devai-border text-devai-text-secondary hover:text-devai-accent hover:border-devai-accent/40 transition-colors"
+              className="p-1.5 rounded border border-devai-accent/30 text-devai-accent/70 hover:text-devai-accent hover:border-devai-accent/50 hover:bg-devai-accent/10 transition-colors"
+              title="Edit markdown"
             >
-              Edit
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              </svg>
             </button>
           ) : null}
         </div>
