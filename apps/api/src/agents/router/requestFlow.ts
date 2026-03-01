@@ -22,6 +22,11 @@ import {
 } from './requestUtils.js';
 import type { SendEventFn } from './shared.js';
 
+export interface ProcessResult {
+  answer: string;
+  isError: boolean;
+}
+
 /**
  * Main entry point: Process a user request through the agent system
  */
@@ -32,7 +37,7 @@ export async function processRequest(
   projectRoot: string | null,
   sendEvent: SendEventFn,
   parallelTurnId?: string,
-): Promise<string> {
+): Promise<ProcessResult> {
   await stateManager.ensureStateLoaded(sessionId);
   const traceId = nanoid(12);
   // Default to empty array if not provided
@@ -45,14 +50,14 @@ export async function processRequest(
   const pendingApprovals = gateState.pendingApprovals ?? [];
   if (decision !== null && pendingApprovals.length > 0) {
     const latest = pendingApprovals[pendingApprovals.length - 1];
-    return handleUserApproval(sessionId, latest.approvalId, decision, sendEvent);
+    return { answer: await handleUserApproval(sessionId, latest.approvalId, decision, sendEvent), isError: false };
   }
 
   // If we're waiting for the user to answer a clarification question, treat the next message as the answer.
   const pendingQuestions = gateState.pendingQuestions ?? [];
   if (gateState.currentPhase === 'waiting_user' && pendingQuestions.length > 0) {
     const latestQ = pendingQuestions[pendingQuestions.length - 1];
-    return handleUserResponse(sessionId, latestQ.questionId, getTextContent(userMessage), sendEvent);
+    return { answer: await handleUserResponse(sessionId, latestQ.questionId, getTextContent(userMessage), sendEvent), isError: false };
   }
 
   // Fallback: if state was lost (restart) but the last assistant prompt was a "continue?" gate,
@@ -75,16 +80,16 @@ export async function processRequest(
         sessionId,
         source: 'chat.explicit_remember',
       });
-      return `Notiert. Gespeichert in ${saved.daily.filePath}.`;
+      return { answer: `Notiert. Gespeichert in ${saved.daily.filePath}.`, isError: false };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      return `Ich konnte die Notiz nicht speichern: ${message}`;
+      return { answer: `Ich konnte die Notiz nicht speichern: ${message}`, isError: true };
     }
   }
 
   // Slash commands — safety-net in case the fast-path in commandHandlers didn't catch them
   const slashResult = await tryHandleSlashCommand(sessionId, getTextContent(userMessage));
-  if (slashResult !== null) return slashResult;
+  if (slashResult !== null) return { answer: slashResult, isError: false };
 
   // Keep the last actual request for approval/resume flows.
   stateManager.setOriginalRequest(sessionId, getTextContent(userMessage));
@@ -113,12 +118,13 @@ export async function processRequest(
       maxIterations: 30,
     }, traceId, parallelTurnId);
     const loopResult = await loop.run(userMessage, history);
+    const isError = loopResult.status === 'error';
 
-    if (loopResult.status === 'error') {
+    if (isError) {
       stateManager.setPhase(sessionId, 'error');
     }
 
-    return loopResult.answer;
+    return { answer: loopResult.answer, isError };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error(`[trace:${traceId}] ChapoLoop crashed, attempting recovery:`, errorMessage);
@@ -145,7 +151,7 @@ export async function processRequest(
         errorHistory,
       );
       if (recovery.status !== 'error') {
-        return recovery.answer;
+        return { answer: recovery.answer, isError: false };
       }
     } catch (recoveryErr) {
       console.error('[agents] Recovery loop also failed:', recoveryErr);
@@ -165,7 +171,7 @@ export async function processRequest(
 
     sendEvent({ type: 'error', agent: state.activeAgent, error: errorMessage });
 
-    return `Fehler aufgetreten: ${errorMessage}\n\nBitte hilf mir, dieses Problem zu lösen.`;
+    return { answer: `Fehler aufgetreten: ${errorMessage}\n\nBitte hilf mir, dieses Problem zu lösen.`, isError: true };
   }
 }
 
@@ -194,13 +200,8 @@ export async function handleUserResponse(
   if (turnMismatch || expired) {
     const history = await loadRecentConversationHistory(sessionId);
     const projectRoot = getProjectRootFromState(sessionId);
-    return processRequest(
-      sessionId,
-      answer,
-      history,
-      projectRoot,
-      sendEvent,
-    );
+    const result = await processRequest(sessionId, answer, history, projectRoot, sendEvent);
+    return result.answer;
   }
 
   const historyAgent: AgentName = 'chapo';
@@ -226,13 +227,14 @@ export async function handleUserResponse(
   if (state) {
     const history = await loadRecentConversationHistory(sessionId);
     const projectRoot = getProjectRootFromState(sessionId);
-    return processRequest(
+    const result = await processRequest(
       sessionId,
       `${state.taskContext.originalRequest}\n\nZusätzliche Info: ${answer}`,
       history,
       projectRoot,
       sendEvent,
     );
+    return result.answer;
   }
 
   return 'Session nicht gefunden.';
@@ -268,13 +270,14 @@ export async function handleUserApproval(
   if (state) {
     const history = await loadRecentConversationHistory(sessionId);
     const projectRoot = getProjectRootFromState(sessionId);
-    return processRequest(
+    const result = await processRequest(
       sessionId,
       state.taskContext.originalRequest,
       history,
       projectRoot,
       sendEvent,
     );
+    return result.answer;
   }
 
   return 'Session nicht gefunden.';

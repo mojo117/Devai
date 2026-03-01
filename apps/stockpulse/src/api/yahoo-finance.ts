@@ -3,7 +3,7 @@
  * Yahoo Finance API Wrapper für StockPulse
  * Liefert KGV (PE-Ratio), KUV (PS-Ratio) und aktuellen Kurs
  * 
- * Version: 2.0 - Kompatibel mit yahoo-finance2 v3.x
+ * Version: 3.0 - Mit Retry-Logic und Error Handling
  */
 
 // @ts-nocheck
@@ -21,6 +21,13 @@ export interface StockMetrics {
   marketCap: number | null;
   currency: string | null;
   error?: string;
+  retries?: number;
+}
+
+interface RetryConfig {
+  maxRetries: number;
+  baseDelay: number;    // ms
+  maxDelay: number;     // ms
 }
 
 // ============================================================================
@@ -31,6 +38,13 @@ const { default: YahooFinance } = require('yahoo-finance2');
 
 // Singleton Instance
 let yahooFinanceInstance = null;
+
+// Default retry config
+const DEFAULT_RETRY_CONFIG: RetryConfig = {
+  maxRetries: 3,
+  baseDelay: 500,
+  maxDelay: 5000,
+};
 
 function getYahooFinance() {
   if (!yahooFinanceInstance) {
@@ -57,67 +71,87 @@ function tickerToYahooSymbol(ticker) {
 
 /**
  * Ruft KGV, KUV und Preis von Yahoo Finance ab
+ * Mit automatischer Retry-Logic bei Fehlern
  */
-async function getStockMetrics(symbol) {
+async function getStockMetrics(symbol, retryConfig: RetryConfig = DEFAULT_RETRY_CONFIG) {
   const ticker = symbol.replace('.DE', '');
   const yahoo = getYahooFinance();
   
-  try {
-    // Rate limiting - kleine Pause um Yahoo nicht zu überlasten
-    await delay(100);
-    
-    // Hole quoteSummary für fundamentale Daten
-    const summary = await yahoo.quoteSummary(symbol, {
-      modules: ['defaultKeyStatistics', 'financialData', 'price', 'summaryDetail']
-    });
-    
-    // Extrahiere PE-Ratio (KGV) - bevorzuge forwardPE
-    const peRatio = summary.defaultKeyStatistics?.forwardPE 
-      || summary.defaultKeyStatistics?.trailingPE 
-      || summary.summaryDetail?.forwardPE
-      || summary.summaryDetail?.trailingPE
-      || null;
-    
-    // Extrahiere PS-Ratio (KUV) - aus summaryDetail!
-    const psRatio = summary.summaryDetail?.priceToSalesTrailing12Months 
-      || summary.defaultKeyStatistics?.priceToSalesTrailing12Months 
-      || null;
-    
-    // Extrahiere Preis
-    const price = summary.financialData?.currentPrice 
-      || summary.price?.regularMarketPrice 
-      || null;
-    
-    // Extrahiere Market Cap
-    const marketCap = summary.financialData?.marketCap 
-      || null;
-    
-    // Extrahiere Währung
-    const currency = summary.price?.currency || null;
-    
-    return {
-      ticker,
-      yahooSymbol: symbol,
-      peRatio: peRatio ? roundTo(peRatio, 2) : null,
-      psRatio: psRatio ? roundTo(psRatio, 2) : null,
-      price: price ? roundTo(price, 2) : null,
-      marketCap,
-      currency,
-    };
-    
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Unknown error';
-    return {
-      ticker,
-      yahooSymbol: symbol,
-      peRatio: null,
-      psRatio: null,
-      price: null,
-      marketCap: null,
-      currency: null,
-      error: msg,
-    };
+  let lastError: string | null = null;
+  
+  for (let attempt = 0; attempt <= retryConfig.maxRetries; attempt++) {
+    try {
+      // Rate limiting - exponential backoff
+      const delayMs = attempt === 0 ? 100 : Math.min(
+        retryConfig.baseDelay * Math.pow(2, attempt - 1),
+        retryConfig.maxDelay
+      );
+      await delay(delayMs);
+      
+      // Hole quoteSummary für fundamentale Daten
+      const summary = await yahoo.quoteSummary(symbol, {
+        modules: ['defaultKeyStatistics', 'financialData', 'price', 'summaryDetail']
+      });
+      
+      // Extrahiere PE-Ratio (KGV) - bevorzuge forwardPE
+      const peRatio = summary.defaultKeyStatistics?.forwardPE 
+        || summary.defaultKeyStatistics?.trailingPE 
+        || summary.summaryDetail?.forwardPE
+        || summary.summaryDetail?.trailingPE
+        || null;
+      
+      // Extrahiere PS-Ratio (KUV) - aus summaryDetail!
+      const psRatio = summary.summaryDetail?.priceToSalesTrailing12Months 
+        || summary.defaultKeyStatistics?.priceToSalesTrailing12Months 
+        || null;
+      
+      // Extrahiere Preis
+      const price = summary.financialData?.currentPrice 
+        || summary.price?.regularMarketPrice 
+        || null;
+      
+      // Extrahiere Market Cap
+      const marketCap = summary.financialData?.marketCap 
+        || null;
+      
+      // Extrahiere Währung
+      const currency = summary.price?.currency || null;
+      
+      return {
+        ticker,
+        yahooSymbol: symbol,
+        peRatio: peRatio ? roundTo(peRatio, 2) : null,
+        psRatio: psRatio ? roundTo(psRatio, 2) : null,
+        price: price ? roundTo(price, 2) : null,
+        marketCap,
+        currency,
+        retries: attempt > 0 ? attempt : undefined,
+      };
+      
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : 'Unknown error';
+      
+      // Don't retry on 404 (symbol not found)
+      if (lastError.includes('404') || lastError.includes('Not Found')) {
+        break;
+      }
+      
+      console.log(`   ⚠️ Versuch ${attempt + 1}/${retryConfig.maxRetries + 1} fehlgeschlagen: ${lastError}`);
+    }
   }
+  
+  // All retries failed
+  return {
+    ticker,
+    yahooSymbol: symbol,
+    peRatio: null,
+    psRatio: null,
+    price: null,
+    marketCap: null,
+    currency: null,
+    error: lastError || 'Unknown error',
+    retries: retryConfig.maxRetries,
+  };
 }
 
 // ============================================================================

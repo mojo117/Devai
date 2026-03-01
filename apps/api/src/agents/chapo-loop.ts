@@ -503,8 +503,8 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
     // Loop exhaustion — deliver whatever we have so far
     console.warn(`${trace}[chapo-loop] Loop exhausted after ${this.iteration} iterations, delivering last answer`);
     return {
-      answer: this.lastContent || 'Maximale Iterationen erreicht. Bitte erneut versuchen oder die Aufgabe aufteilen.',
-      status: 'completed' as const,
+      answer: this.lastContent || 'Maximum iterations reached. Please try again or break the task into smaller parts.',
+      status: 'error' as const,
       totalIterations: this.iteration,
     };
   }

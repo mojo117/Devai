@@ -233,7 +233,7 @@ const start = async () => {
         });
 
         try {
-          const result = await processRequest(
+          const { answer } = await processRequest(
             sessionId,
             instruction,
             history,
@@ -244,11 +244,11 @@ const start = async () => {
           await saveMessage(sessionId, {
             id: nanoid(),
             role: 'assistant',
-            content: result,
+            content: answer,
             timestamp: now(),
           });
 
-          return result;
+          return answer;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           await saveMessage(sessionId, {
@@ -310,16 +310,16 @@ const start = async () => {
         timestamp: new Date().toISOString(),
       });
 
-      const result = await processRequest(sessionId, instruction, history, null, () => {});
+      const { answer } = await processRequest(sessionId, instruction, history, null, () => {});
 
       await saveMessage(sessionId, {
         id: nanoid(),
         role: 'assistant',
-        content: result,
+        content: answer,
         timestamp: new Date().toISOString(),
       });
 
-      return result;
+      return answer;
     });
 
     // Internal maintenance jobs run through scheduler framework (cron + retry + telemetry).

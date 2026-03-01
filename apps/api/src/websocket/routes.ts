@@ -14,7 +14,7 @@ import { commandDispatcher, mapWsMessageToCommand } from '../workflow/commands/d
 const WS_RATE_LIMIT_MAX_MESSAGES = 120;
 const WS_RATE_LIMIT_WINDOW_MS = 60_000;
 const WS_HEARTBEAT_INTERVAL_MS = 30_000;
-const WS_HEARTBEAT_TIMEOUT_MS = 95_000;
+const WS_HEARTBEAT_TIMEOUT_MS = 180_000;
 
 /** Send a message only if the socket is still open.  Returns false on failure. */
 function safeSend(socket: WebSocket, data: unknown): boolean {

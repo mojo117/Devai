@@ -1,40 +1,70 @@
-import yahooFinance from 'yahoo-finance2';
-
 export async function execute(args: { ticker: string; metrics?: string[] }, ctx: any) {
   const { ticker, metrics } = args;
   
   try {
-    // Get quote summary with financial data
-    const quoteSummary = await yahooFinance.quoteSummary(ticker, {
-      modules: ['price', 'summaryDetail', 'defaultKeyStatistics', 'financialData']
+    // Direct Yahoo Finance API call via fetch
+    const modules = 'price,summaryDetail,defaultKeyStatistics,financialData';
+    const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=${modules}`;
+    
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; DevAI/1.0)',
+      }
     });
     
-    const price = quoteSummary.price;
-    const summary = quoteSummary.summaryDetail;
-    const keyStats = quoteSummary.defaultKeyStatistics;
-    const financials = quoteSummary.financialData;
+    if (!response.ok) {
+      return { 
+        success: false, 
+        error: `Yahoo Finance API error: ${response.status}`,
+        ticker 
+      };
+    }
+    
+    const data = await response.json();
+    
+    if (!data.quoteSummary?.result?.[0]) {
+      return { 
+        success: false, 
+        error: 'No data returned from Yahoo Finance',
+        ticker 
+      };
+    }
+    
+    const quoteSummary = data.quoteSummary.result[0];
+    const price = quoteSummary.price || {};
+    const summary = quoteSummary.summaryDetail || {};
+    const keyStats = quoteSummary.defaultKeyStatistics || {};
+    const financials = quoteSummary.financialData || {};
+    
+    // Helper to extract numeric value from Yahoo's {raw, fmt} format
+    const getValue = (field: any): number | null => {
+      if (field === null || field === undefined) return null;
+      if (typeof field === 'number') return field;
+      if (typeof field === 'object' && 'raw' in field) return field.raw;
+      return null;
+    };
     
     const result: Record<string, any> = {
       ticker: ticker,
-      name: price?.shortName || price?.longName || 'N/A',
-      exchange: price?.exchange || 'N/A',
-      currency: price?.currency || 'USD',
-      price: price?.regularMarketPrice || null,
-      priceChange: price?.regularMarketChange || null,
-      priceChangePercent: price?.regularMarketChangePercent || null,
-      peRatio: keyStats?.trailingPE || summary?.trailingPE || null,
-      forwardPE: keyStats?.forwardPE || null,
-      psRatio: keyStats?.priceToSalesTrailing12Months || keyStats?.priceToSales || null,
-      pbRatio: keyStats?.priceToBook || null,
-      marketCap: price?.marketCap || summary?.marketCap || null,
-      dividendYield: summary?.dividendYield || null,
-      eps: keyStats?.trailingEps || financials?.netIncomeToCommon || null,
-      revenue: financials?.totalRevenue || null,
-      profitMargin: financials?.profitMargins || null,
-      fiftyTwoWeekLow: summary?.fiftyTwoWeekLow || null,
-      fiftyTwoWeekHigh: summary?.fiftyTwoWeekHigh || null,
-      volume: price?.regularMarketVolume || summary?.volume || null,
-      avgVolume: summary?.averageVolume || null,
+      name: price.shortName || price.longName || 'N/A',
+      exchange: price.exchange || 'N/A',
+      currency: price.currency || 'USD',
+      price: getValue(price.regularMarketPrice),
+      priceChange: getValue(price.regularMarketChange),
+      priceChangePercent: getValue(price.regularMarketChangePercent),
+      peRatio: getValue(keyStats.trailingPE) || getValue(summary.trailingPE),
+      forwardPE: getValue(keyStats.forwardPE),
+      psRatio: getValue(keyStats.priceToSalesTrailing12Months) || getValue(keyStats.priceToSales),
+      pbRatio: getValue(keyStats.priceToBook),
+      marketCap: getValue(price.marketCap) || getValue(summary.marketCap),
+      dividendYield: getValue(summary.dividendYield),
+      eps: getValue(keyStats.trailingEps),
+      revenue: getValue(financials.totalRevenue),
+      profitMargin: getValue(financials.profitMargins),
+      fiftyTwoWeekLow: getValue(summary.fiftyTwoWeekLow),
+      fiftyTwoWeekHigh: getValue(summary.fiftyTwoWeekHigh),
+      volume: getValue(price.regularMarketVolume) || getValue(summary.volume),
+      avgVolume: getValue(summary.averageVolume),
     };
     
     // Filter to requested metrics if specified

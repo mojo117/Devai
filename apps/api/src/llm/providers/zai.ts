@@ -70,6 +70,9 @@ export class ZAIProvider implements LLMProviderAdapter {
     // GLM-5 thinking mode: enable extended reasoning for complex tasks
     const useThinking = request.thinkingEnabled && model === 'glm-5';
     const useWebSearch = request.webSearchEnabled && model.startsWith('glm-');
+    // Validate and sanitize message sequence before sending to ZAI
+    this.validateMessageSequence(messages);
+
     const createParams: Record<string, unknown> = {
       model,
       max_tokens: request.maxTokens || 16384,
@@ -217,11 +220,11 @@ export class ZAIProvider implements LLMProviderAdapter {
       // Only inject reasoning_content when thinking is active for this request.
       // Cross-provider fallback disables thinking, so stale reasoning_content
       // from a different provider won't leak into the message history.
+      // When thinking IS active but no reasoning_content was stored, inject a
+      // minimal placeholder to satisfy APIs that require it on every tool-call message.
       if (thinkingActive) {
         const reasoningContent = message.toolCalls[0]?.providerMetadata?.reasoning_content as string | undefined;
-        if (reasoningContent) {
-          assistantMsg.reasoning_content = reasoningContent;
-        }
+        assistantMsg.reasoning_content = reasoningContent || 'Analyzing the request.';
       }
       messages.push(assistantMsg as unknown as OpenAI.ChatCompletionMessageParam);
       return;
@@ -256,6 +259,47 @@ export class ZAIProvider implements LLMProviderAdapter {
         role: message.role as 'user' | 'assistant',
         content: getTextContent(message.content),
       });
+    }
+  }
+
+  /**
+   * Validate and fix common message sequence issues that cause ZAI 400 errors.
+   * Logs warnings for debugging and removes orphaned tool messages.
+   */
+  private validateMessageSequence(messages: OpenAI.ChatCompletionMessageParam[]): void {
+    // Collect valid tool_call IDs from assistant messages
+    const validToolCallIds = new Set<string>();
+    for (const msg of messages) {
+      if (msg.role === 'assistant' && 'tool_calls' in msg && msg.tool_calls) {
+        for (const tc of msg.tool_calls) {
+          validToolCallIds.add(tc.id);
+        }
+      }
+    }
+
+    // Remove orphaned tool messages whose tool_call_id doesn't match any assistant tool_call
+    let removed = 0;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role === 'tool' && 'tool_call_id' in msg) {
+        if (!validToolCallIds.has(msg.tool_call_id)) {
+          messages.splice(i, 1);
+          removed++;
+        }
+      }
+    }
+
+    if (removed > 0) {
+      console.warn(`[zai] Removed ${removed} orphaned tool message(s) from conversation`);
+    }
+
+    // Log message structure for diagnostics if it looks suspicious
+    const roles = messages.map((m) => m.role);
+    for (let i = 0; i < roles.length; i++) {
+      if (roles[i] === 'tool' && (i === 0 || roles[i - 1] === 'user' || roles[i - 1] === 'system')) {
+        console.warn('[zai] Suspicious message sequence — tool message not preceded by assistant:', roles.join(','));
+        break;
+      }
     }
   }
 

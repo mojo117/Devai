@@ -2,12 +2,25 @@
 /**
  * StockPulse Daily Scanner - Yahoo Finance API Version
  * Scannt 10 Aktien pro Tag via Yahoo Finance API
+ * 
+ * Version: 3.0 - Mit Logging, Historical Data und Alert System
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { getStockMetrics } = require('./src/api/yahoo-finance');
+const { log: loggerLog } = require('./src/utils/logger');
+const { addHistoricalEntry, analyzeKGVTrend, analyzeKUVTrend } = require('./src/utils/historical-tracker');
+const { checkAlerts, sendAlerts, formatAlertsForTelegram, DEFAULT_CONFIG } = require('./src/utils/alert-system');
+
+// Simple logger wrapper
+const logger = {
+  debug: (msg: string, data?: any) => loggerLog('DEBUG', 'SCANNER', msg, data),
+  info: (msg: string, data?: any) => loggerLog('INFO', 'SCANNER', msg, data),
+  warn: (msg: string, data?: any) => loggerLog('WARN', 'SCANNER', msg, data),
+  error: (msg: string, data?: any) => loggerLog('ERROR', 'SCANNER', msg, data),
+};
 
 // ============================================================================
 // KONFIGURATION
@@ -34,10 +47,14 @@ interface ScannerState {
 interface ScanResult {
   ticker: string;
   isin: string;
+  name: string;
   kgv: string;
   kuv: string;
   price: string;
   source: 'yahoo' | 'fallback';
+  trendKGV?: 'improving' | 'worsening' | 'stable' | 'unknown';
+  trendKUV?: 'improving' | 'worsening' | 'stable' | 'unknown';
+  alert?: boolean;
   error?: string;
 }
 
@@ -124,7 +141,7 @@ async function scanStocks(count: number = STOCKS_PER_DAY): Promise<ScanResult[]>
   
   // Check if already scanned today
   if (state.lastScanDate === today && state.scannedToday >= STOCKS_PER_DAY) {
-    console.log(`✅ Bereits ${state.scannedToday} Aktien heute gescannt.`);
+    logger.info('SCANNER', `Bereits ${state.scannedToday} Aktien heute gescannt`);
     return [];
   }
   
@@ -146,6 +163,7 @@ async function scanStocks(count: number = STOCKS_PER_DAY): Promise<ScanResult[]>
   
   // Get stocks to scan
   const results: ScanResult[] = [];
+  const allAlerts: any[] = [];
   let scanned = 0;
   let idx = state.lastScannedIndex;
   
@@ -155,19 +173,19 @@ async function scanStocks(count: number = STOCKS_PER_DAY): Promise<ScanResult[]>
     const name = rows[idx][1] || '';
     
     if (!ticker) {
-      console.log(`⚠️ Ungültige Zeile ${idx} (kein Ticker)`);
+      logger.warn('SCANNER', `Ungültige Zeile ${idx} (kein Ticker)`);
       idx++;
       continue;
     }
     
     // Check if already scanned in this round
     if (rows[idx][datumColIdx] && rows[idx][datumColIdx] !== '') {
-      console.log(`⏭️ ${ticker} bereits in Round ${currentRound} gescannt`);
+      logger.debug('SCANNER', `${ticker} bereits in Round ${currentRound} gescannt`);
       idx++;
       continue;
     }
     
-    console.log(`📊 Scanne ${ticker} (${isin}) via Yahoo Finance...`);
+    logger.info('SCANNER', `Scanne ${ticker} (${isin}) via Yahoo Finance...`);
     
     try {
       // Yahoo Finance API Call
@@ -175,13 +193,12 @@ async function scanStocks(count: number = STOCKS_PER_DAY): Promise<ScanResult[]>
       const metrics = await getStockMetrics(symbol);
       
       if (metrics.error) {
-        console.log(`   ⚠️ Yahoo Fehler: ${metrics.error}`);
-        
-        // TODO: Fallback auf Firecrawl/Scraping
+        logger.warn('SCANNER', `Yahoo Fehler für ${ticker}: ${metrics.error}`);
         
         results.push({
           ticker,
           isin,
+          name,
           kgv: 'N/A',
           kuv: 'N/A',
           price: 'N/A',
@@ -203,25 +220,59 @@ async function scanStocks(count: number = STOCKS_PER_DAY): Promise<ScanResult[]>
         rows[idx][kuvColIdx] = kuv;
         rows[idx][datumColIdx] = today;
         
+        // Add to historical data
+        addHistoricalEntry(
+          ticker,
+          isin,
+          name,
+          metrics.peRatio,
+          metrics.psRatio,
+          metrics.price,
+          'yahoo'
+        );
+        
+        // Analyze trends
+        const trendKGV = analyzeKGVTrend(ticker);
+        const trendKUV = analyzeKUVTrend(ticker);
+        
+        // Check for alerts
+        const alerts = checkAlerts(
+          ticker,
+          isin,
+          name,
+          metrics.peRatio,
+          metrics.psRatio,
+          metrics.price
+        );
+        
+        if (alerts.length > 0) {
+          allAlerts.push(...alerts);
+        }
+        
         results.push({
           ticker,
           isin,
+          name,
           kgv,
           kuv,
           price,
           source: 'yahoo',
+          trendKGV,
+          trendKUV,
+          alert: alerts.length > 0,
         });
         
-        console.log(`   ✅ KGV: ${kgv}, KUV: ${kuv}, Preis: ${price} ${metrics.currency || 'EUR'}`);
+        logger.info('SCANNER', `✅ ${ticker}: KGV=${kgv}, KUV=${kuv}, Preis=${price} ${metrics.currency || 'EUR'}`);
       }
       
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : 'Unknown error';
-      console.log(`   ❌ Fehler: ${msg}`);
+      logger.error('SCANNER', `Fehler bei ${ticker}: ${msg}`);
       
       results.push({
         ticker,
         isin,
+        name,
         kgv: 'N/A',
         kuv: 'N/A',
         price: 'N/A',
@@ -239,7 +290,7 @@ async function scanStocks(count: number = STOCKS_PER_DAY): Promise<ScanResult[]>
   
   // Check if round is complete
   if (idx >= rows.length) {
-    console.log(`\n🎉 Round ${currentRound} abgeschlossen! Starte Round ${currentRound + 1}`);
+    logger.info('SCANNER', `🎉 Round ${currentRound} abgeschlossen! Starte Round ${currentRound + 1}`);
     idx = 0;
     state.round = currentRound + 1;
     
@@ -254,6 +305,12 @@ async function scanStocks(count: number = STOCKS_PER_DAY): Promise<ScanResult[]>
   state.lastScanDate = today;
   state.scannedToday = state.lastScanDate === today ? state.scannedToday + scanned : scanned;
   saveState(state);
+  
+  // Send alerts if any
+  if (allAlerts.length > 0) {
+    logger.info('SCANNER', `🚨 ${allAlerts.length} Alert(s) generiert`);
+    // Alerts werden geloggt, Telegram-Send kann später hinzugefügt werden
+  }
   
   return results;
 }
@@ -274,33 +331,39 @@ async function main() {
     state.scannedToday = 0;
     state.lastScanDate = '';
     saveState(state);
-    console.log('⚠️ Force Mode: Täglicher Zähler zurückgesetzt');
+    logger.info('SCANNER', 'Force Mode: Täglicher Zähler zurückgesetzt');
   }
   
-  console.log('🚀 StockPulse Daily Scanner (Yahoo Finance API)');
-  console.log(`   Modus: ${isTest ? 'TEST (3 Aktien)' : 'DAILY (10 Aktien)'}`);
-  console.log('');
+  logger.info('SCANNER', '🚀 StockPulse Daily Scanner (Yahoo Finance API v3.0)');
+  logger.info('SCANNER', `Modus: ${isTest ? 'TEST (3 Aktien)' : 'DAILY (10 Aktien)'}`);
   
   const results = await scanStocks(count);
   
   if (results.length > 0) {
     console.log('\n📊 ERGEBNISSE:');
-    console.log('─'.repeat(60));
-    console.log('Ticker | KGV     | KUV    | Preis  | Quelle');
-    console.log('─'.repeat(60));
+    console.log('─'.repeat(80));
+    console.log('Ticker | KGV     | KUV    | Preis  | Trend KGV | Trend KUV | Alert');
+    console.log('─'.repeat(80));
     
     for (const r of results) {
       const ticker = r.ticker.padEnd(6);
       const kgv = r.kgv.padEnd(7);
       const kuv = r.kuv.padEnd(6);
       const price = r.price.padEnd(6);
-      console.log(`${ticker} | ${kgv} | ${kuv} | ${price} | ${r.source}`);
+      const trendKGV = (r.trendKGV || '-').substring(0, 10).padEnd(10);
+      const trendKUV = (r.trendKUV || '-').substring(0, 10).padEnd(10);
+      const alert = r.alert ? '🚨' : '-';
+      console.log(`${ticker} | ${kgv} | ${kuv} | ${price} | ${trendKGV} | ${trendKUV} | ${alert}`);
     }
     
-    console.log('─'.repeat(60));
+    console.log('─'.repeat(80));
     
     const success = results.filter(r => r.kgv !== 'N/A').length;
+    const alerts = results.filter(r => r.alert).length;
     console.log(`✅ ${success}/${results.length} Aktien erfolgreich gescannt`);
+    if (alerts > 0) {
+      console.log(`🚨 ${alerts} Alert(s) generiert!`);
+    }
   }
 }
 

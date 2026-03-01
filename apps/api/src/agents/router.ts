@@ -12,6 +12,7 @@ export {
   canAgentUseTool,
 } from './router/agentAccess.js';
 
+export type { ProcessResult } from './router/requestFlow.js';
 export {
   processRequest,
   handleUserResponse,

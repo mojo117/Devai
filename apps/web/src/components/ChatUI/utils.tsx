@@ -1,43 +1,24 @@
+import { useMemo } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
+import DOMPurify from 'dompurify';
+import { marked } from 'marked';
 import type { ToolEvent, ToolEventUpdate } from './types';
 
 export function renderMessageContent(content: string) {
-  // Sanitize content: strip HTML tags before markdown-like rendering.
-  // We intentionally keep this dependency-free so typecheck works in lean environments.
-  const clean = content.replace(/<[^>]*>/g, '');
-  // Simple markdown-like rendering for bold, code blocks, and inline code
-  const parts = clean.split(/(```[\s\S]*?```|\*\*.*?\*\*|`[^`]+`)/g);
+  return <MarkdownMessage content={content} />;
+}
+
+function MarkdownMessage({ content }: { content: string }) {
+  const html = useMemo(() => {
+    const raw = marked.parse(content, { async: false, gfm: true, breaks: true }) as string;
+    return DOMPurify.sanitize(raw);
+  }, [content]);
 
   return (
-    <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-      {parts.map((part, i) => {
-        // Code block
-        if (part.startsWith('```') && part.endsWith('```')) {
-          const codeContent = part.slice(3, -3);
-          // Strip optional language identifier from first line
-          const firstNewline = codeContent.indexOf('\n');
-          const code = firstNewline > -1 ? codeContent.slice(firstNewline + 1) : codeContent;
-          return (
-            <pre key={i} className="bg-devai-bg border border-devai-border rounded-lg p-3 my-2 text-xs overflow-x-auto font-mono text-devai-text-secondary">
-              {code}
-            </pre>
-          );
-        }
-        // Bold
-        if (part.startsWith('**') && part.endsWith('**')) {
-          return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>;
-        }
-        // Inline code
-        if (part.startsWith('`') && part.endsWith('`') && !part.startsWith('```')) {
-          return (
-            <code key={i} className="bg-devai-bg border border-devai-border rounded px-1.5 py-0.5 text-xs font-mono text-devai-accent">
-              {part.slice(1, -1)}
-            </code>
-          );
-        }
-        return <span key={i}>{part}</span>;
-      })}
-    </div>
+    <div
+      className="prose-chat text-sm leading-relaxed break-words"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   );
 }
 

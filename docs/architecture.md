@@ -3,7 +3,7 @@ Last updated 2026-02-27
 
 This document describes the architecture of DevAI, including the CHAPO Decision Loop and the single-agent system.
 
-**Navigation:** [Overview](#overview) · [Project Structure](#project-structure) · [CHAPO Loop](#chapo-decision-loop) · [Memory](#memory-architecture) · [Prompts](#prompt-architecture) · [Request Flow](#request-flow) · [Streaming](#streaming-protocol) · [Tools](#tool-registry) · [Security](#security) · [API](#api-endpoints) · [Frontend](#frontend-integration)
+**Navigation:** [Overview](#overview) · [Project Structure](#project-structure) · [CHAPO Loop](#chapo-decision-loop) · [Memory](#memory-architecture) · [Prompts](#prompt-architecture) · [Request Flow](#request-flow) · [Streaming](#streaming-protocol) · [Tools](#tool-registry) · [Security](#security) · [API](#api-endpoints) · [Frontend](#frontend-integration) · [Clawd Backup](#clawd-backup-system)
 
 ---
 
@@ -828,3 +828,84 @@ handleEvent(event: AgentStreamEvent) {
 - `ChatUI`: Main chat interface with WebSocket streaming. Input stays unlocked during processing (multi-message support).
 - `AgentStatus`: Shows CHAPO's current state
 - `AgentHistory`: Detailed history with tool calls and results
+
+---
+
+## Clawd Backup System
+
+The Clawd server (10.0.0.5) automatically backs up `/root/home` to Supabase Storage every hour.
+
+### Architecture
+
+```
+Clawd (10.0.0.5)
+    |
+    | /root/home (294MB source)
+    |      |
+    |      v
+    |  tar.gz + incremental snapshot
+    |      |
+    |      v
+    |  Split into 45MB chunks (if >45MB)
+    |      |
+    |      v
+    +---> Supabase Storage bucket: clawd-backups
+              |
+              +-- Full backup: clawd-home-YYYYMMDD_HHMM.tar.gz.part001, .part002, ...
+              +-- Incremental: clawd-home-YYYYMMDD_HHMM.tar.gz (small, changes only)
+              +-- Retention: 14 days (336 backups)
+```
+
+### Components
+
+| File | Purpose |
+|------|---------|
+| `/root/.config/backup-supabase.env` | Supabase credentials (600 permissions) |
+| `/root/scripts/backup-home-to-supabase.sh` | Backup script (chunking + incremental) |
+| `/root/scripts/restore-from-supabase.sh` | Restore script |
+| `/root/.backup-snapshot` | GNU tar incremental snapshot file |
+| `/etc/systemd/system/clawd-backup.timer` | Hourly systemd timer |
+| `/etc/systemd/system/clawd-backup.service` | systemd service unit |
+
+### Backup Behavior
+
+1. **First run**: Full backup (~112MB) → split into 3 chunks → upload to Supabase
+2. **Subsequent runs**: Incremental backup (only changed files) → usually <1MB → single file upload
+3. **Chunking**: Archives >45MB are split to avoid Supabase's 50MB limit
+4. **Retention**: 336 backups (14 days at hourly intervals)
+5. **Cleanup**: Old backups deleted automatically based on base filename
+
+### Restore
+
+```bash
+# Restore latest to /tmp/restore
+/root/scripts/restore-from-supabase.sh /tmp/restore
+
+# Restore specific backup (YYYYMMDD_HHMM format)
+/root/scripts/restore-from-supabase.sh /tmp/restore 20260228_1741
+```
+
+### Supabase Configuration
+
+- **Project**: DevAI Supabase (`zzmvofskibpffcxbukuk.supabase.co`)
+- **Bucket**: `clawd-backups` (private)
+- **Auth**: Service role key from `DEVAI_SUPABASE_SERVICE_ROLE_KEY`
+
+### Monitoring
+
+```bash
+# Check timer status
+ssh root@10.0.0.5 "systemctl status clawd-backup.timer"
+
+# View recent logs
+ssh root@10.0.0.5 "journalctl -u clawd-backup.service -n 50"
+
+# List backups in Supabase
+curl -s -X POST "https://zzmvofskibpffcxbukuk.supabase.co/storage/v1/object/list/clawd-backups" \
+  -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"prefix":"","sortBy":{"column":"name","order":"desc"}}' | jq '.[].name'
+
+# Run manual backup
+ssh root@10.0.0.5 "/root/scripts/backup-home-to-supabase.sh"
+```

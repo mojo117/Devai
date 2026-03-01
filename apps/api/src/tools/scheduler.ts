@@ -10,6 +10,8 @@ import {
   getDefaultNotificationChannel,
 } from '../db/schedulerQueries.js';
 import { schedulerService } from '../scheduler/schedulerService.js';
+import { sendTelegramMessage } from '../external/telegram.js';
+import { config } from '../config.js';
 import type { ToolExecutionResult } from './executor.js';
 
 export async function schedulerCreate(
@@ -227,25 +229,45 @@ export async function reminderCreate(
 
 export async function notifyUser(
   message: string,
-  _channel?: string,
+  channel?: string,
 ): Promise<ToolExecutionResult> {
-  // The actual sending is handled by the notifier callback in schedulerService.
-  // This tool is a simple wrapper that CHAPO can call.
   try {
-    // For now, we log and return success. The actual notification sending
-    // will be wired up when Telegram/external messaging is implemented (Phases 5-7).
-    console.log(`[notify_user] ${message} (channel: ${_channel || 'default'})`);
+    // Resolve target chat ID: explicit channel arg → DB default → config fallback
+    let chatId = channel?.trim() || '';
+    let platform = 'telegram';
+
+    if (!chatId || !/^\d+$/.test(chatId)) {
+      const defaultChannel = await getDefaultNotificationChannel();
+      if (defaultChannel?.external_chat_id) {
+        chatId = defaultChannel.external_chat_id;
+        platform = defaultChannel.platform || 'telegram';
+      } else if (config.telegramAllowedChatId) {
+        // Fallback: use the first allowed chat ID from config
+        chatId = config.telegramAllowedChatId.split(/[,\s;]+/)[0].trim();
+      }
+    }
+
+    if (!chatId) {
+      return { success: false, error: 'No notification channel configured. Set a default channel or provide a chat ID.' };
+    }
+
+    if (platform !== 'telegram') {
+      return { success: false, error: `Unsupported notification platform: ${platform}` };
+    }
+
+    await sendTelegramMessage(chatId, message);
+    console.log(`[notify_user] Sent to Telegram chat ${chatId}`);
 
     return {
       success: true,
       result: {
-        message: 'Notification queued',
-        content: message,
-        channel: _channel || 'default',
+        message: 'Notification sent via Telegram',
+        chatId,
       },
     };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
+    console.error(`[notify_user] Failed:`, errMsg);
     return { success: false, error: `Failed to send notification: ${errMsg}` };
   }
 }
