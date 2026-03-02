@@ -100,6 +100,7 @@ export class StreamProjection implements Projection {
     emitChatEvent(event.sessionId, {
       ...streamEvent,
       requestId: event.requestId,
+      sessionId: event.sessionId,
     });
   }
 }

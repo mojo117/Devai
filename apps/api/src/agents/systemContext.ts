@@ -145,7 +145,7 @@ export async function warmMemoryRetrievalForSession(
     const lines = memories
       .slice(0, 5)
       .map((m) => `- [${m.namespace}] ${m.content}`);
-    const block = `## Relevant Memories (vector search)\n${lines.join('\n')}`;
+    const block = `## Relevant Memories (may be stale — verify with tools before citing)\n${lines.join('\n')}`;
     stateManager.setGatheredInfo(sessionId, 'memoryRetrievalBlock', block);
   } catch (err) {
     console.warn('[systemContext] Memory retrieval failed:', err instanceof Error ? err.message : err);

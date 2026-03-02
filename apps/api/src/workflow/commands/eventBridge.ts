@@ -137,9 +137,12 @@ export async function emitTerminalResponse(
   isError: boolean,
 ): Promise<void> {
   // 1. Emit WS response event directly (StreamProjection skips WF_COMPLETED/WF_FAILED)
+  // sessionId must be at top level so the frontend's session listener dispatch can route it
+  // (parallel loop responses arrive after the original requestId was already resolved)
   emitChatEvent(sessionId, {
     type: 'response',
     requestId: ctx.requestId,
+    sessionId,
     response: {
       message: responseMessage,
       pendingActions,
@@ -167,6 +170,7 @@ export async function persistAndEmitTerminalResponse(params: {
   responseMessage: ChatMessage;
   collectedToolEvents: CollectedToolEvent[];
   isError: boolean;
+  skipUserMessage?: boolean;
 }): Promise<void> {
   const {
     ctx,
@@ -175,9 +179,12 @@ export async function persistAndEmitTerminalResponse(params: {
     responseMessage,
     collectedToolEvents,
     isError,
+    skipUserMessage,
   } = params;
 
-  await saveMessage(sessionId, userMessage);
+  if (!skipUserMessage) {
+    await saveMessage(sessionId, userMessage);
+  }
   await saveMessage(
     sessionId,
     responseMessage,

@@ -57,6 +57,30 @@ export async function searchMemories(
       }
     }
 
+    // Enrich with created_at and source (not returned by match_memories RPC)
+    if (unique.length > 0) {
+      const ids = unique.map((m) => m.id);
+      const { data: extraData, error: extraError } = await supabase
+        .from('devai_memories')
+        .select('id, created_at, source')
+        .in('id', ids);
+
+      if (!extraError && extraData) {
+        const extraById = new Map(
+          (extraData as Array<{ id: string; created_at: string; source: string }>).map(
+            (row) => [row.id, row],
+          ),
+        );
+        for (const mem of unique) {
+          const extra = extraById.get(mem.id);
+          if (extra) {
+            mem.created_at = extra.created_at;
+            mem.source = extra.source as StoredMemory['source'];
+          }
+        }
+      }
+    }
+
     // Sort by similarity * strength descending
     unique.sort((a, b) => b.similarity * b.strength - a.similarity * a.strength);
 

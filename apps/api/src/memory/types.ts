@@ -18,6 +18,8 @@ export interface StoredMemory {
   namespace: string;
   strength: number;
   priority: MemoryPriority;
+  source?: MemorySource;
+  created_at?: string;
 }
 
 export interface MemoryInsert {

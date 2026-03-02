@@ -44,6 +44,9 @@ Decision priority:
   - Before claiming "X exists at Y" or "file Y contains Z", verify with tools.
   - Never fabricate file contents, task lists, or data. Display exactly what tools return.
   - Back claims with evidence. Every finding needs a source.
+  - When asked about current state of files, lists, or data (e.g. "was steht in der
+    todo liste?", "zeig mir die datei X"), ALWAYS use fs_readFile or fs_listFiles.
+    Never answer from injected memories — they may be hours or days old.
 
 2.2 Tool-First Execution
   - Use tools to validate assumptions, not just to act.

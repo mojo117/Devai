@@ -239,6 +239,11 @@ export class CommandHandlers {
       };
     }
 
+    // Claim the loop EARLY so concurrent requests are queued/rejected
+    // before the slow prep work (intake, userfiles, etc.) begins.
+    // ChapoLoop.run() clears this flag; the catch block below is the safety net.
+    await setLoopRunning(activeSessionId, true);
+
     // An explicit 'request' is always a new user request, NOT an answer to a pending question.
     const preState = getState(activeSessionId);
     if (preState?.currentPhase === 'waiting_user') {
@@ -328,10 +333,19 @@ export class CommandHandlers {
       }
     }
 
-    // Claim the loop IMMEDIATELY so concurrent messages are queued.
-    // ChapoLoop.run() will clear this flag in its own finally block;
-    // if we fail before reaching the loop, the catch below clears it.
-    await setLoopRunning(activeSessionId, true);
+    // Persist user message immediately (before processRequest) so it gets the
+    // arrival timestamp, not the completion timestamp. This keeps message order
+    // correct when parallel loops save their user messages early too.
+    const persistedContent = typeof augmentedMessage === 'string'
+      ? augmentedMessage
+      : augmentedMessage
+          .filter((b): b is TextContentBlock => b.type === 'text')
+          .map((b) => b.text)
+          .join('\n\n');
+    const userMessage = createChatMessage('user', persistedContent || message);
+    saveMessage(activeSessionId, userMessage).catch((err) =>
+      console.error('[commandHandlers] Failed to persist user message:', err),
+    );
 
     try {
       const { answer, isError } = await processRequest(
@@ -342,15 +356,15 @@ export class CommandHandlers {
         sendEvent as (event: AgentStreamEvent) => void,
       );
 
+      // Guard: never persist an empty assistant response (e.g. from a stale/timed-out LLM call)
+      if (!answer && !isError) {
+        console.warn(`[commandHandlers] Empty answer for session ${activeSessionId}, skipping persist`);
+        await setLoopRunning(activeSessionId, false);
+        sessionLogger.finalize('empty');
+        return { type: 'error', sessionId: activeSessionId };
+      }
+
       const responseMessage = createChatMessage('assistant', answer);
-      // Persist file reference headers with the message so CHAPO can find userfileIds in history
-      const persistedContent = typeof augmentedMessage === 'string'
-        ? augmentedMessage
-        : augmentedMessage
-            .filter((b): b is TextContentBlock => b.type === 'text')
-            .map((b) => b.text)
-            .join('\n\n');
-      const userMessage = createChatMessage('user', persistedContent || message);
 
       await persistAndEmitTerminalResponse({
         ctx,
@@ -359,6 +373,7 @@ export class CommandHandlers {
         responseMessage,
         collectedToolEvents,
         isError,
+        skipUserMessage: true,
       });
 
       const title = buildSessionTitle(message);
@@ -386,6 +401,13 @@ export class CommandHandlers {
             qSendEvent as (event: AgentStreamEvent) => void,
           );
 
+          // Guard: skip empty responses from queued messages too
+          if (!qAnswer && !qIsError) {
+            console.warn(`[commandHandlers] Empty queued answer for session ${activeSessionId}, skipping persist`);
+            continue;
+          }
+
+          // User message was already persisted when it was queued (serial path, line ~231)
           const qUserMsg = createChatMessage('user', queuedMsg.content);
           const qResponseMsg = createChatMessage('assistant', qAnswer);
           await persistAndEmitTerminalResponse({
@@ -395,6 +417,7 @@ export class CommandHandlers {
             responseMessage: qResponseMsg,
             collectedToolEvents: qCollected,
             isError: qIsError,
+            skipUserMessage: true,
           });
         }
         // Check for more messages that arrived during processing
@@ -407,7 +430,6 @@ export class CommandHandlers {
       await setLoopRunning(activeSessionId, false);
 
       const errorContent = `Error: ${err instanceof Error ? err.message : 'Unknown error'}`;
-      const userMessage = createChatMessage('user', message);
       const responseMessage = createChatMessage('assistant', errorContent);
 
       await persistAndEmitTerminalResponse({
@@ -416,6 +438,7 @@ export class CommandHandlers {
         userMessage,
         responseMessage,
         collectedToolEvents,
+        skipUserMessage: true,
         isError: true,
       });
 
@@ -457,7 +480,14 @@ export class CommandHandlers {
         parallelTurnId,
       );
 
+      // Guard: never persist an empty assistant response
+      if (!pAnswer && !pIsError) {
+        console.warn(`[commandHandlers] Empty parallel answer for session ${sessionId}, skipping persist`);
+        return;
+      }
+
       const responseMessage = createChatMessage('assistant', pAnswer);
+      // User message was already persisted in handleRequest (line ~174) — don't save again
       const userMessage = createChatMessage('user', originalMessage);
 
       await persistAndEmitTerminalResponse({
@@ -467,6 +497,7 @@ export class CommandHandlers {
         responseMessage,
         collectedToolEvents,
         isError: pIsError,
+        skipUserMessage: true,
       });
 
       sendEvent({
