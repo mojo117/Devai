@@ -29,6 +29,7 @@ function App() {
   const [chatSessionState, setChatSessionState] = useState<ChatSessionState | null>(null);
   const [sessionCommand, setSessionCommand] = useState<ChatSessionCommandEnvelope | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
 
   // Preview toggle backed by localStorage
   const [previewEnabled, setPreviewEnabled] = useState(() => {
@@ -441,27 +442,29 @@ function App() {
                 })
               )}
             </select>
+
+            {/* Desktop: inline buttons */}
             <button
               onClick={() => issueSessionCommand({ type: 'restart' })}
               disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState?.hasMessages}
-              className="flex items-center gap-1 bg-devai-card border border-devai-border rounded-lg px-2 py-1 text-xs text-devai-text-secondary hover:text-devai-text hover:border-devai-border-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="hidden md:flex items-center gap-1 bg-devai-card border border-devai-border rounded-lg px-2 py-1 text-xs text-devai-text-secondary hover:text-devai-text hover:border-devai-border-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               title="Restart session"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h5M20 20v-5h-5M5.5 15.5A7.5 7.5 0 0112 4.5c2.76 0 5.2 1.49 6.5 3.72M18.5 8.5A7.5 7.5 0 0112 19.5c-2.76 0-5.2-1.49-6.5-3.72" />
               </svg>
-              <span className="hidden md:inline">Restart</span>
+              <span>Restart</span>
             </button>
             <button
               onClick={() => issueSessionCommand({ type: 'new' })}
               disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState}
-              className="flex items-center gap-1 bg-devai-card border border-devai-border rounded-lg px-2 py-1 text-xs text-devai-text-secondary hover:text-devai-text hover:border-devai-border-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="hidden md:flex items-center gap-1 bg-devai-card border border-devai-border rounded-lg px-2 py-1 text-xs text-devai-text-secondary hover:text-devai-text hover:border-devai-border-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               title="New session"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
-              <span className="hidden md:inline">New</span>
+              <span>New</span>
             </button>
             <button
               onClick={() => {
@@ -470,14 +473,69 @@ function App() {
                 }
               }}
               disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState?.sessionId}
-              className="flex items-center gap-1 bg-devai-card border border-devai-border rounded-lg px-2 py-1 text-xs text-red-400 hover:text-red-300 hover:border-red-400/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="hidden md:flex items-center gap-1 bg-devai-card border border-devai-border rounded-lg px-2 py-1 text-xs text-red-400 hover:text-red-300 hover:border-red-400/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               title="Delete session"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
               </svg>
-              <span className="hidden md:inline">Delete</span>
+              <span>Delete</span>
             </button>
+
+            {/* Mobile: overflow menu */}
+            <div className="relative md:hidden">
+              <button
+                onClick={() => setSessionMenuOpen(o => !o)}
+                className="flex items-center justify-center bg-devai-card border border-devai-border rounded-lg p-1.5 text-devai-text-secondary hover:text-devai-text hover:border-devai-border-light transition-colors"
+                title="Session actions"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01" />
+                </svg>
+              </button>
+              {sessionMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-50" onClick={() => setSessionMenuOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-50 bg-devai-card border border-devai-border rounded-lg shadow-lg py-1 min-w-[140px]">
+                    <button
+                      onClick={() => { issueSessionCommand({ type: 'restart' }); setSessionMenuOpen(false); }}
+                      disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState?.hasMessages}
+                      className="flex items-center gap-2 w-full px-3 py-2 text-xs text-devai-text-secondary hover:text-devai-text hover:bg-devai-surface disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h5M20 20v-5h-5M5.5 15.5A7.5 7.5 0 0112 4.5c2.76 0 5.2 1.49 6.5 3.72M18.5 8.5A7.5 7.5 0 0112 19.5c-2.76 0-5.2-1.49-6.5-3.72" />
+                      </svg>
+                      Restart
+                    </button>
+                    <button
+                      onClick={() => { issueSessionCommand({ type: 'new' }); setSessionMenuOpen(false); }}
+                      disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState}
+                      className="flex items-center gap-2 w-full px-3 py-2 text-xs text-devai-text-secondary hover:text-devai-text hover:bg-devai-surface disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      New
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (window.confirm('Delete this session? This cannot be undone.')) {
+                          issueSessionCommand({ type: 'delete' });
+                        }
+                        setSessionMenuOpen(false);
+                      }}
+                      disabled={chatLoading || chatSessionState?.sessionsLoading || !chatSessionState?.sessionId}
+                      className="flex items-center gap-2 w-full px-3 py-2 text-xs text-red-400 hover:text-red-300 hover:bg-devai-surface disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                      Delete
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           {/* Right: Status + Controls */}
