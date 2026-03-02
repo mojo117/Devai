@@ -34,7 +34,7 @@ export const ENGINE_PROFILES: Record<EngineName, EngineProfile> = {
     },
   },
   gemini: {
-    chapo: { model: 'gemini-3.1-pro-preview', fastModel: 'kimi-k2.5', fallbackModel: 'kimi-k2.5' },
+    chapo: { model: 'gemini-3.1-pro-preview', fastModel: 'gemini-2.5-flash', fallbackModel: 'gemini-2.5-flash', sameProviderFallback: 'gemini-2.5-pro' },
   },
   claude: {
     chapo: { model: 'claude-opus-4-5-20251101', fastModel: 'kimi-k2.5', fallbackModel: 'kimi-k2.5' },

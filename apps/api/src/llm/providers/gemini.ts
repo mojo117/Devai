@@ -25,7 +25,7 @@ export class GeminiProvider implements LLMProviderAdapter {
     const client = this.getClient();
 
     const model = client.getGenerativeModel({
-      model: request.model || 'gemini-2.0-flash',
+      model: request.model || 'gemini-3.1-pro-preview',
       systemInstruction: request.systemPrompt,
     });
 
@@ -186,9 +186,10 @@ export class GeminiProvider implements LLMProviderAdapter {
   listModels(): string[] {
     return [
       'gemini-3.1-pro-preview',
+      'gemini-2.5-pro',
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite',
       'gemini-2.0-flash',
-      'gemini-1.5-pro',
-      'gemini-1.5-flash',
     ];
   }
 }
