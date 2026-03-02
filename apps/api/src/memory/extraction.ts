@@ -21,6 +21,17 @@ Jedes Element im Array hat folgende Felder:
 - "source": Einer von "user_stated" (User hat es gesagt), "error_resolution" (Fehler wurde gelöst), "pattern" (wiederkehrendes Muster erkannt), "discovery" (neue Entdeckung)
 - "priority": Einer von "highest" (User-Korrekturen, kritische Fehler), "high" (wichtige Learnings), "medium" (nützlich), "low" (nice-to-know)
 
+Typ-Klassifikation — WICHTIG:
+- "semantic": Fakten, Konfigurationen, Einstellungen, Systembeschreibungen, Regeln, Präferenzen.
+  Beispiele: "DevAI nutzt Supabase als Datenbank", "KGV < 7 ist Kauf-Signal", "Jörn arbeitet in CET"
+- "episodic": Zeitgebundene Ereignisse, Entscheidungen, Meetings, Deadlines, Erinnerungen.
+  Beispiele: "Am 15.03. Meeting mit Investor", "Portfolio-Report erstellt", "Deadline: v2 bis März"
+- "procedural": NUR echte Schritt-für-Schritt-Anleitungen, die beschreiben WIE man etwas TUT.
+  Beispiele: "Deploy-Workflow: 1. git push dev 2. Mutagen sync 3. Preview prüfen"
+  NICHT procedural: "Das System nutzt PM2 für Prozesse" (= semantic), "Portfolio wird montags geprüft" (= episodic)
+
+Im Zweifel: semantic > episodic > procedural. Procedural ist der seltenste Typ.
+
 Regeln:
 - User-Korrekturen haben IMMER "highest" Priorität und source "user_stated"
 - Filtere Smalltalk, Begrüßungen und irrelevante Konversation heraus

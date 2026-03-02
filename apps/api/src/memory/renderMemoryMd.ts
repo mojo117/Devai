@@ -54,22 +54,17 @@ export function mapNamespaceToCategory(
 ): MemoryCategory | null {
   const ns = normalizeNamespacePrefix(namespace);
 
-  // Procedural memories always map to Workflows, regardless of namespace
-  if (memoryType === 'procedural') {
-    return 'Workflows';
-  }
-
-  // persona/* → null (identity lives in SOUL.md)
+  // 1. persona/* → null (identity lives in SOUL.md)
   if (ns === 'persona' || ns.startsWith('persona/')) {
     return null;
   }
 
-  // devai/user, personal → User
+  // 2. devai/user, personal → User (regardless of type)
   if (ns === 'devai/user' || ns === 'personal') {
     return 'User';
   }
 
-  // devai/project/*, devai/global, architecture → Projekte
+  // 3. devai/project/*, devai/global, architecture → Projekte (regardless of type)
   if (
     ns === 'devai/global' ||
     ns === 'architecture' ||
@@ -78,15 +73,17 @@ export function mapNamespaceToCategory(
     return 'Projekte';
   }
 
-  // devai/episodic/* with episodic type → Termine & Events
-  if (
-    (ns === 'devai/episodic' || ns.startsWith('devai/episodic/')) &&
-    memoryType === 'episodic'
-  ) {
+  // 4. devai/episodic/* → Termine & Events (any type, not just episodic)
+  if (ns === 'devai/episodic' || ns.startsWith('devai/episodic/')) {
     return 'Termine & Events';
   }
 
-  // Everything else → Erkenntnisse
+  // 5. Procedural type (only when no specific namespace matched) → Workflows
+  if (memoryType === 'procedural') {
+    return 'Workflows';
+  }
+
+  // 6. Everything else → Erkenntnisse
   return 'Erkenntnisse';
 }
 
@@ -202,14 +199,12 @@ export async function renderMemoryMd(workspaceRoot?: string): Promise<string> {
     });
   }
 
-  // 3. Deduplicate within each category (>90% text overlap → keep higher strength)
+  // 3. Deduplicate across all categories (>75% text overlap → keep higher strength)
   const deduplicated: CategorizedEntry[] = [];
 
   for (const entry of entries) {
     const isDuplicate = deduplicated.some(
-      (existing) =>
-        existing.category === entry.category &&
-        textOverlap(existing.content, entry.content) > 0.9,
+      (existing) => textOverlap(existing.content, entry.content) > 0.75,
     );
     if (!isDuplicate) {
       deduplicated.push(entry);

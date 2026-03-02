@@ -126,13 +126,17 @@ describe('mapNamespaceToCategory', () => {
     expect(mapNamespaceToCategory('Personal', 'episodic')).toBe('User');
   });
 
-  it('maps procedural memories to Workflows regardless of namespace', () => {
-    expect(mapNamespaceToCategory('devai/global', 'procedural')).toBe('Workflows');
-    expect(mapNamespaceToCategory('personal', 'procedural')).toBe('Workflows');
+  it('maps procedural memories to Workflows only for unrecognized namespaces', () => {
+    // Namespace wins over procedural type:
+    expect(mapNamespaceToCategory('devai/global', 'procedural')).toBe('Projekte');
+    expect(mapNamespaceToCategory('personal', 'procedural')).toBe('User');
+    expect(mapNamespaceToCategory('devai/project/klyde', 'procedural')).toBe('Projekte');
+    expect(mapNamespaceToCategory('devai/episodic/meetings', 'procedural')).toBe('Termine & Events');
+    // Persona still filtered:
+    expect(mapNamespaceToCategory('persona/role', 'procedural')).toBeNull();
+    // Only unrecognized namespace → Workflows:
     expect(mapNamespaceToCategory('random/namespace', 'procedural')).toBe('Workflows');
-    expect(mapNamespaceToCategory('devai/project/klyde', 'procedural')).toBe('Workflows');
-    // Even persona namespace yields Workflows for procedural
-    expect(mapNamespaceToCategory('persona/role', 'procedural')).toBe('Workflows');
+    expect(mapNamespaceToCategory('devai/general', 'procedural')).toBe('Workflows');
   });
 
   it('maps project/global/architecture namespaces to Projekte', () => {
@@ -150,8 +154,8 @@ describe('mapNamespaceToCategory', () => {
     expect(mapNamespaceToCategory('devai/episodic/deadlines', 'episodic')).toBe('Termine & Events');
     expect(mapNamespaceToCategory('DEVAI/EPISODIC/Events', 'episodic')).toBe('Termine & Events');
     expect(mapNamespaceToCategory('/devai//episodic/', 'episodic')).toBe('Termine & Events');
-    // Non-episodic type in devai/episodic namespace falls through to Erkenntnisse
-    expect(mapNamespaceToCategory('devai/episodic', 'semantic')).toBe('Erkenntnisse');
+    // Any type in devai/episodic namespace → Termine & Events
+    expect(mapNamespaceToCategory('devai/episodic', 'semantic')).toBe('Termine & Events');
   });
 
   it('maps everything else to Erkenntnisse', () => {
@@ -233,8 +237,8 @@ describe('renderMemoryMd', () => {
     mockSupabaseData.rows = [
       makeRow('1', 'Jörn, Deutsch, CET/CEST', { namespace: 'devai/user', strength: 1 }),
       makeRow('2', 'DevAI hat 41 Tasks', { namespace: 'devai/project/devai', strength: 0.9 }),
-      makeRow('3', 'Scheduler: IMMER vor Senden pruefen', {
-        namespace: 'devai/global',
+      makeRow('3', 'Deploy: 1. git push 2. sync 3. verify', {
+        namespace: 'workflows/deploy',
         memory_type: 'procedural',
         strength: 0.8,
       }),
@@ -256,7 +260,7 @@ describe('renderMemoryMd', () => {
     expect(written).toContain('## Projekte');
     expect(written).toContain('- DevAI hat 41 Tasks');
     expect(written).toContain('## Workflows');
-    expect(written).toContain('- Scheduler: IMMER vor Senden pruefen');
+    expect(written).toContain('- Deploy: 1. git push 2. sync 3. verify');
     expect(written).toContain('## Erkenntnisse');
     expect(written).toContain('- taskforge_list_tasks war truncated');
   });
@@ -274,7 +278,7 @@ describe('renderMemoryMd', () => {
     expect(written).toContain('Jörn is the admin');
   });
 
-  it('deduplicates entries with >90% text overlap, keeping higher strength', async () => {
+  it('deduplicates entries with >75% text overlap, keeping higher strength', async () => {
     mockSupabaseData.rows = [
       makeRow('1', 'Jörn bevorzugt deutsche Antworten und arbeitet in CET', {
         namespace: 'devai/user',
@@ -353,7 +357,7 @@ describe('renderMemoryMd', () => {
     mockSupabaseData.rows = [
       makeRow('4', 'An insight', { namespace: 'tools', strength: 0.5 }),
       makeRow('1', 'User info', { namespace: 'devai/user', strength: 1 }),
-      makeRow('3', 'A workflow', { namespace: 'devai/global', memory_type: 'procedural', strength: 0.7 }),
+      makeRow('3', 'A workflow', { namespace: 'random/ns', memory_type: 'procedural', strength: 0.7 }),
       makeRow('2', 'A project note', { namespace: 'devai/project/x', strength: 0.9 }),
     ];
 
@@ -384,6 +388,27 @@ describe('renderMemoryMd', () => {
     expect(written).not.toContain('## Workflows');
     expect(written).not.toContain('## Termine & Events');
     expect(written).not.toContain('## Erkenntnisse');
+  });
+
+  it('deduplicates across categories', async () => {
+    mockSupabaseData.rows = [
+      makeRow('1', 'Portfolio Monitoring System aufgesetzt', {
+        namespace: 'devai/project/invest',
+        strength: 1.0,
+      }),
+      makeRow('2', 'Portfolio Monitoring System wurde aufgesetzt', {
+        namespace: 'devai/general',
+        memory_type: 'procedural',
+        strength: 0.8,
+      }),
+    ];
+
+    await renderMemoryMd('/mock/workspace');
+
+    const written = mockWriteFile.mock.calls[0][1] as string;
+    const bullets = written.split('\n').filter((l) => l.startsWith('- '));
+    expect(bullets).toHaveLength(1);
+    expect(bullets[0]).toContain('Portfolio Monitoring System aufgesetzt');
   });
 
   it('ensures workspace directory exists before writing', async () => {
