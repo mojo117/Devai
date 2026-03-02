@@ -188,7 +188,7 @@ export function parseToolEventArtifacts(events: ToolEventLike[]): Artifact[] {
       }
 
       artifacts.push({
-        id: djb2Hash(userfileId || signedUrl || inlineContent || ''),
+        id: djb2Hash((userfileId || signedUrl || '') + '|' + (inlineContent || '')),
         type: artifactType,
         language: artifactType,
         title: filename || 'Preview',

@@ -43,6 +43,7 @@ export function ChatUI({
   onSetPreview,
   previewEnabled: _previewEnabled,
   onArtifactDetected,
+  onFileModified,
 }: ChatUIProps) {
   // Core state shared across sub-components
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -272,6 +273,12 @@ export function ChatUI({
       case 'tool_result': {
         const id = event.id || uuid();
         upsertToolEvent(setToolEvents, String(id), { type: 'tool_result', name: event.toolName, result: event.result, completed: event.completed, agent: eventAgent });
+        // Notify parent when a file-modifying tool completes successfully
+        if (onFileModified && (event.toolName === 'fs_edit' || event.toolName === 'fs_writeFile' || event.toolName === 'fs_write_file')) {
+          const res = event.result as Record<string, unknown> | null;
+          const filePath = String(res?.path ?? '');
+          if (filePath) onFileModified(filePath);
+        }
         break;
       }
       case 'action_pending': {

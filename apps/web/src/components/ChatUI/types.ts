@@ -61,4 +61,6 @@ export interface ChatUIProps {
   previewEnabled?: boolean;
   /** Called when an artifact is detected in chat messages. */
   onArtifactDetected?: (artifact: Artifact | null) => void;
+  /** Called when a file is modified via fs_edit or fs_writeFile tool. */
+  onFileModified?: (filePath: string) => void;
 }

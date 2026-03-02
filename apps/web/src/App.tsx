@@ -280,6 +280,27 @@ function App() {
     setAgentPhase(phase);
   }, []);
 
+  // Auto-refresh preview when a displayed file is modified by fs_edit/fs_writeFile
+  const handleFileModified = useCallback((filePath: string) => {
+    setCurrentArtifact((prev) => {
+      if (!prev) return prev;
+      const fileName = filePath.split('/').pop() || '';
+      if (prev.title !== fileName) return prev;
+      // Trigger content re-fetch by clearing content (effect in detectedArtifact will handle it)
+      // For inline-content artifacts (show_in_preview), we fetch directly
+      readProjectFile(filePath)
+        .then((res) => {
+          setCurrentArtifact((cur) =>
+            cur && cur.title === fileName
+              ? { ...cur, content: res.content, id: cur.id + '_' + Date.now() }
+              : cur,
+          );
+        })
+        .catch((err) => console.warn('[App] Failed to refresh preview after file edit:', err));
+      return prev;
+    });
+  }, []);
+
   // Fetch health when authenticated (retry silently on failure — the ●/○ indicator shows status)
   useEffect(() => {
     if (!auth.isAuthed) return;
@@ -519,6 +540,7 @@ function App() {
                     onArtifactDetected={setDetectedArtifact}
                     onSetPreview={setPreviewEnabled}
                     previewEnabled={previewEnabled}
+                    onFileModified={handleFileModified}
                   />
                 </div>
               </Panel>
@@ -554,6 +576,7 @@ function App() {
                 onArtifactDetected={setDetectedArtifact}
                 onSetPreview={setPreviewEnabled}
                 previewEnabled={previewEnabled}
+                onFileModified={handleFileModified}
               />
             </div>
           </div>
@@ -578,6 +601,7 @@ function App() {
               onArtifactDetected={setDetectedArtifact}
               onSetPreview={setPreviewEnabled}
               previewEnabled={previewEnabled}
+              onFileModified={handleFileModified}
             />
           </div>
           {/* Right-edge arrow — always visible on mobile when there's an artifact */}
