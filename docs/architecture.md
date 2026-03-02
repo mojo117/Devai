@@ -425,6 +425,93 @@ devai/episodic/promoted        -> Promoted recurring topics
 - **Table**: `devai_memories` with pgvector HNSW index
 - **RPC**: `match_memories()` for scoped similarity search, `get_memories_by_timerange()` for temporal retrieval
 
+### Extraction Pipeline (Session-End)
+
+When a WebSocket session disconnects with 3+ messages, `triggerSessionEndExtraction()` runs:
+
+```
+Conversation text (all messages concatenated)
+      |
+      v
+Phase 1: extractMemoryCandidates()          [extraction.ts]
+      |  GLM-4.7-Flash + EXTRACTION_PROMPT
+      |  Returns: MemoryCandidate[] with { content, type, namespace, source, priority }
+      |
+      v
+Phase 2: deduplicateAndStore()               [extraction.ts]
+      |  For each candidate:
+      |    1. findSimilarMemories() -- vector search within same namespace (threshold 0.8)
+      |    2. similarity > 0.95 → SKIP (already known)
+      |    3. similarity 0.8-0.95 → UPDATE (supersede old, insert new)
+      |    4. no match → ADD (insert new with embedding)
+      |
+      v
+Phase 3: renderMemoryMd()                    [renderMemoryMd.ts]
+      |  Fire-and-forget: regenerate workspace/memory.md from DB
+      v
+Done
+```
+
+**EXTRACTION_PROMPT** instructs GLM to classify each learning with:
+- **type**: `semantic` (facts/config) > `episodic` (events/decisions) > `procedural` (step-by-step guides only)
+- **namespace**: hierarchical path (e.g. `devai/project/taskforge/deployment`)
+- **source**: `user_stated` | `error_resolution` | `pattern` | `discovery`
+- **priority**: `highest` (user corrections) | `high` | `medium` | `low`
+
+### memory.md Rendering
+
+`renderMemoryMd()` generates `workspace/memory.md` from the database. This file is human-readable and injected into workspace context.
+
+**Pipeline:**
+1. Fetch all valid memories (`is_valid = true`) sorted by `strength DESC`
+2. Categorize via `mapNamespaceToCategory(namespace, type)` -- namespace-first routing
+3. Deduplicate across all categories (>75% bigram text overlap → keep higher strength)
+4. Group by category, truncate entries (max 200 chars each)
+5. Write markdown with budget limit (12,000 chars total)
+
+**Category mapping** (namespace-first, type as fallback):
+
+| Namespace | Category |
+|-----------|----------|
+| `persona/*` | *(filtered out -- identity lives in SOUL.md)* |
+| `devai/user`, `personal` | **User** |
+| `devai/project/*`, `devai/global`, `architecture` | **Projekte** |
+| `devai/episodic/*` | **Termine & Events** |
+| Any namespace + `type=procedural` | **Workflows** |
+| Everything else | **Erkenntnisse** |
+
+Namespace always wins over type for specific prefixes. Only unrecognized namespaces fall through to the type-based Workflows/Erkenntnisse catch-all.
+
+### Retrieval (Per-Turn)
+
+At the start of each CHAPO turn, `warmMemoryRetrievalForSession()` runs:
+
+1. Generate embedding for user's query (OpenAI text-embedding-3-small)
+2. Multi-pass vector search across namespaces with fallback thresholds: `[0.5, 0.35, 0.2]`
+3. Rank results: `score = similarity × strength × sourceWeight × agePenalty`
+4. Deduplicate by token overlap (75% threshold)
+5. Return top results, inject into system prompt as `[CTX kind="memory_retrieval"]` block
+
+**Source weights**: `user_stated: 1.3`, `error_resolution: 1.1`, `pattern: 1.1`, `episodic_*: 0.6`, default: `1.0`
+
+**Age penalty** (episodic only): `max(0.3, 1.0 - 0.05 × daysSince)` -- full weight for 1 day, 30% floor after ~14 days.
+
+### Strength Decay
+
+Daily job applies Ebbinghaus decay: `strength *= 0.95^days_since_access`
+
+- Memories below `strength < 0.05` are pruned (`is_valid = false`)
+- `highest` priority memories are never pruned
+- Access reinforcement: each retrieval bumps `access_count` and resets `last_accessed_at`
+
+### Memory Tools
+
+| Tool | Purpose |
+|------|---------|
+| `memory_remember` | Save a note to daily file + Supabase (source: `user_stated`, priority: `high`) |
+| `memory_search` | Text search across daily workspace files |
+| `memory_readToday` | Read today's daily memory file |
+
 ### Loading (System Prompt)
 
 When the loop starts, `warmSystemContextForSession()` loads:
