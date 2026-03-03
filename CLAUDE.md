@@ -10,9 +10,27 @@
 | **Preview URL** | https://devai.klyde.tech |
 | **Branch** | `dev` (NEVER push to main/staging directly) |
 | **Sync** | Mutagen (~200-500ms hot-reload) |
-| **Dev Port** | 3008 |
+| **Dev Ports** | 3008 (frontend), 3009 (API) |
 
 **Default:** work on branch `dev` in this worktree (`/opt/Klyde/projects/Devai`). Only switch branches or work on Clawd worktrees if the user explicitly asks.
+
+## Devai vs Loki
+
+Devai and Loki share the same core architecture but serve different purposes:
+
+| Aspect | Devai (this project) | Loki |
+|--------|---------------------|------|
+| **Purpose** | Personal AI dev assistant (single user) | Multi-tenant SaaS AI platform |
+| **Agent** | CHAPO | LOKI |
+| **Primary Model** | GLM-5 (ZAI) | Kimi K2.5 (Moonshot) |
+| **Auth** | Custom JWT (single user) | Supabase Auth + RLS (multi-tenant) |
+| **Skills** | Dynamic skills system (7+ plugins) | Custom skill plugins |
+| **Docker Mode** | No | Yes (per-user sandboxed containers) |
+| **Runtime** | Clawd (46.225.162.103) | Baso (77.42.90.193) |
+| **Path** | `/opt/Klyde/projects/Devai` | `/opt/Klyde/projects/Loki` |
+| **Workspace** | SOUL.md, USER.md, AGENTS.md, daily memory | SOUL.md, memory |
+
+Loki was forked from Devai and refactored for multi-tenancy. Both codebases evolve independently — features may be developed in either project first, then ported to the other.
 
 ## How This Works
 
@@ -180,31 +198,70 @@ ssh root@10.0.0.5 "pm2 status"
 
 **Access from code:** `apps/api/src/db/index.ts` (Supabase client), `apps/api/src/db/queries.ts` (queries)
 
-## Multi-Agent System (CHAPO Decision Loop)
+## CHAPO Agent System (ChapoLoop Decision Loop)
 
 > **Full reference:** [docs/agents.md](./docs/agents.md)
 
 DevAI uses a single-agent architecture — **CHAPO** handles everything:
 
-| Agent | Role | Model (Primary → Fallback) | Access |
+| Agent | Role | Model (Primary -> Fallback) | Access |
 |-------|------|-------|--------|
-| **CHAPO** | Coordinator + Full-stack Agent | ZAI GLM-5 → Anthropic Opus | Full read/write + bash + SSH + git + memory + all tools |
+| **CHAPO** | Coordinator + Full-stack Agent | ZAI GLM-5 -> Anthropic Opus | Full read/write + bash + SSH + git + memory + all tools |
 
-**Decision flow:** No separate decision engine — the LLM's `tool_calls` ARE the decisions:
-- No tool calls → **ANSWER** (respond directly)
-- `askUser` → **ASK** (pause, wait for user)
-- Any other tool → **TOOL** (execute, feed result back)
-- Errors → feed back as context, never crash
+**Decision flow (ChapoLoop):** No separate decision engine — the LLM's `tool_calls` ARE the decisions:
+- No tool calls -> **ANSWER** (respond directly)
+- `askUser` -> **ASK** (pause, wait for user)
+- Any other tool -> **TOOL** (execute, feed result back)
+- Errors -> feed back as context, never crash
 
 **Design principle — trust the model:** Don't add coded validators, regex checks, or heuristic guardrails for things the LLM can handle through its prompt. If an agent should behave a certain way, tell it in the prompt — don't build code to police its output. Code-level checks are only for things outside the model's control (token limits, API errors, network failures).
 
 **Key files:**
-- Loop: `apps/api/src/agents/chapo-loop.ts`
-- Agent: `apps/api/src/agents/chapo.ts`
-- Prompt: `apps/api/src/prompts/chapo.ts`
-- Tools: `apps/api/src/tools/registry.ts`
-- Router: `apps/api/src/agents/router.ts`
-- Types: `apps/api/src/agents/types.ts`
+| Area | Path |
+|------|------|
+| Agent loop | `apps/api/src/agents/chapo-loop.ts` |
+| Loop sub-modules | `apps/api/src/agents/chapo-loop/` (contextManager, gateManager, toolExecutor) |
+| Agent definition | `apps/api/src/agents/chapo.ts` |
+| Prompt | `apps/api/src/prompts/chapo.ts` |
+| Tool registry | `apps/api/src/tools/registry.ts` |
+| Router | `apps/api/src/agents/router.ts` |
+| Types | `apps/api/src/agents/types.ts` |
+| Config | `apps/api/src/config.ts` |
+
+### Tool Categories (76+ native tools)
+
+| Category | Examples |
+|----------|---------|
+| **Filesystem** (9) | fs_listFiles, fs_readFile, fs_writeFile, fs_edit, fs_glob, fs_grep |
+| **Git** (6) | git_status, git_diff, git_commit, git_push, git_pull, git_add |
+| **GitHub** (3) | github_triggerWorkflow, github_createPR, github_getWorkflowRunStatus |
+| **DevOps** (15) | bash_execute, ssh_execute, exec_session_*, pm2_*, npm_* |
+| **Web Research** (8) | web_search, web_fetch, search_quick, search_deep, search_research |
+| **Memory** (3) | memory_remember, memory_search, memory_readToday |
+| **Scheduler** (6) | scheduler_create, scheduler_list, reminder_create, notify_user |
+| **TaskForge** (6) | taskforge_list_tasks, taskforge_get_task, taskforge_create_task |
+| **Communication** (3) | send_email, telegram_send_document, deliver_document |
+| **Skills** (5) | skill_create, skill_update, skill_delete, skill_reload, skill_list |
+| **Meta-Tools** (7) | chapo_plan_set, todoWrite, askUser, respondToUser, show_in_preview |
+
+### Skills System
+
+Dynamic skills in `skills/` with `skill.json` manifests:
+- `capture-visual-proof` — Screenshot/visual capture
+- `firecrawl-browser` — Browser automation
+- `firecrawl-scrape` — Web scraping
+- `generate-image` — Image generation
+- `rss-sentiment-tracker` — RSS feed sentiment analysis
+- `yahoo-finance` — Stock data fetching
+
+### Workspace Context
+
+Every session loads context from `workspace/`:
+1. **SOUL.md** — CHAPO's personality & identity
+2. **USER.md** — User preferences & info
+3. **AGENTS.md** — Agent context rules
+4. **memory/YYYY-MM-DD.md** — Today's daily memory notes
+5. **memory.md** — Structured long-term facts
 
 ## Memory System
 
