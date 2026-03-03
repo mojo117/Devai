@@ -424,6 +424,20 @@ export class ChapoToolExecutor {
       stateManager.addGatheredFile(this.deps.sessionId, path);
     }
 
+    // AUTO-DELIVER: When image generation succeeds, persist and show inline in chat
+    if (toolCall.name === 'skill_generate_image' && success) {
+      const imgResult = toolResult.result as Record<string, unknown> | undefined;
+      const image = imgResult?.image as Record<string, unknown> | undefined;
+      const imageUrl = image?.url as string | undefined;
+      if (imageUrl) {
+        try {
+          await this.autoDeliverImage(imageUrl, image);
+        } catch (err) {
+          console.warn('[toolExecutor] auto-deliver image failed:', err);
+        }
+      }
+    }
+
     // --- HOOK: after:tool (fire-and-forget) ---
     runHooks(content.isError ? 'after:tool:error' : 'after:tool', {
       toolName: toolCall.name,
@@ -439,5 +453,49 @@ export class ChapoToolExecutor {
         isError: content.isError,
       },
     };
+  }
+
+  /**
+   * Download a generated image from its temporary URL, persist to Supabase Storage,
+   * and emit a deliver_document event so the frontend renders an inline image card.
+   */
+  private async autoDeliverImage(
+    imageUrl: string,
+    imageMeta: Record<string, unknown> | undefined,
+  ): Promise<void> {
+    const response = await fetch(imageUrl, { signal: AbortSignal.timeout(30_000) });
+    if (!response.ok) {
+      console.warn(`[autoDeliverImage] Download failed: HTTP ${response.status}`);
+      return;
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+
+    const prompt = (imageMeta?.revisedPrompt as string) || 'generated-image';
+    const sanitized = prompt.slice(0, 40).replace(/[^a-zA-Z0-9-_ ]/g, '').trim().replace(/\s+/g, '-') || 'image';
+    const filename = `${sanitized}.png`;
+
+    const uploadResult = await uploadUserfileFromBuffer(buffer, filename, 'image/png');
+    if (!uploadResult.success) {
+      console.warn('[autoDeliverImage] Upload to Supabase failed');
+      return;
+    }
+
+    console.log(`[autoDeliverImage] Persisted ${filename} as ${uploadResult.file.id} (${buffer.length} bytes)`);
+
+    this.deps.sendEvent({
+      type: 'tool_result',
+      agent: 'chapo',
+      toolName: 'deliver_document',
+      result: {
+        fileId: uploadResult.file.id,
+        filename: uploadResult.file.originalName,
+        mimeType: uploadResult.file.mimeType,
+        sizeBytes: uploadResult.file.sizeBytes,
+        downloadUrl: `/api/userfiles/${uploadResult.file.id}/download`,
+        source: 'url',
+        description: (imageMeta?.revisedPrompt as string) || undefined,
+      },
+      success: true,
+    });
   }
 }
