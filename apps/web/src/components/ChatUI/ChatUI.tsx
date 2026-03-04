@@ -192,20 +192,20 @@ export function ChatUI({
   useEffect(() => {
     if (!onArtifactDetected) return;
 
-    // Check frozen tool events first (completed messages)
-    const artifact = getLatestArtifact(messages, messageToolEvents);
-    if (artifact) {
-      onArtifactDetected(artifact);
-      return;
-    }
-
-    // Also check live tool events (still streaming)
+    // Priority 1: Live tool events from the current streaming turn (most recent)
     if (toolEvents.length > 0) {
       const liveArtifacts = parseToolEventArtifacts(toolEvents);
       if (liveArtifacts.length > 0) {
         onArtifactDetected(liveArtifacts[liveArtifacts.length - 1]);
         return;
       }
+    }
+
+    // Priority 2: Frozen tool events from completed messages
+    const artifact = getLatestArtifact(messages, messageToolEvents);
+    if (artifact) {
+      onArtifactDetected(artifact);
+      return;
     }
 
     onArtifactDetected(null);
