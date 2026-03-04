@@ -44,6 +44,7 @@ function App() {
   const [currentArtifact, setCurrentArtifact] = useState<Artifact | null>(null);
   const [mobilePreviewOpen, setMobilePreviewOpen] = useState(false);
   const lastSubmittedArtifactKeyRef = useRef<string | null>(null);
+  const prevArtifactFingerprintRef = useRef<string | null>(null);
 
   // Swipe gesture detection for mobile preview panel
   const touchStartRef = useRef<{ x: number; y: number; t: number } | null>(null);
@@ -78,8 +79,26 @@ function App() {
     if (!detectedArtifact) {
       setCurrentArtifact(null);
       lastSubmittedArtifactKeyRef.current = null;
+      prevArtifactFingerprintRef.current = null;
       return;
     }
+
+    // Deduplicate: skip if same logical artifact re-detected without new content.
+    // This prevents a stale show_in_preview re-detection from overwriting
+    // fresh content that handleFileModified just fetched.
+    const fingerprint = [
+      detectedArtifact.type,
+      detectedArtifact.title || '',
+      detectedArtifact.filePath || '',
+      detectedArtifact.remote?.signedUrl || '',
+    ].join('|');
+    if (
+      prevArtifactFingerprintRef.current === fingerprint &&
+      !detectedArtifact.content
+    ) {
+      return;
+    }
+    prevArtifactFingerprintRef.current = fingerprint;
 
     setCurrentArtifact(detectedArtifact);
 
