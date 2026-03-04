@@ -66,6 +66,8 @@ export interface GenerateResponse {
   content: string;
   toolCalls?: ToolCall[];
   finishReason: 'stop' | 'tool_use' | 'max_tokens' | 'error';
+  /** Model reasoning/thinking content (e.g. Gemini 3.x thought parts) */
+  reasoning?: string;
   usage?: {
     inputTokens: number;
     outputTokens: number;

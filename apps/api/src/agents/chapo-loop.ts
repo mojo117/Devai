@@ -48,25 +48,6 @@ interface ChapoLoopConfig {
   maxIterations: number;
 }
 
-/**
- * Heuristic: enable extended thinking for complex first-turn queries.
- * Thinking mode adds latency but improves reasoning on complex tasks.
- * Only fires on the first iteration (planning phase).
- */
-function shouldEnableThinking(userMessage: string, iteration: number): boolean {
-  if (iteration > 0) return false;
-
-  const complexPattern = /\b(debug|fix|refactor|plan|architect|design|why|how|analy[sz]|investigat|review|explain|compar|evaluat|warum|wieso|erkl[aä]r|vergleich|untersu|fehler|problem|research|search|find|implement|create|build|write|develop)\b/i;
-  if (complexPattern.test(userMessage)) return true;
-
-  const multiStepPattern = /\b(and|then|after|before|also|plus|additionally|und|dann|danach|außerdem|anschließend)\b.*\b(create|implement|fix|update|add|remove|change|write|build)\b/i;
-  if (multiStepPattern.test(userMessage)) return true;
-
-  if (userMessage.length > 300) return true;
-
-  return false;
-}
-
 // Module-level map for /stop to reach running loop instances
 const activeLoopInstances = new Map<string, Map<string, ChapoLoop>>();
 
@@ -308,14 +289,11 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
 
       const tools = allTools;
 
-      const thinkingEnabled = shouldEnableThinking(userText, this.iteration);
-
-      const isResearchQuery = /\b(search|research|find|look\s*up|documentation|latest|aktuell|suche|recherche|finde|investigate|explore)\b/i.test(userText);
-      const kimiSearchEnabled = provider === 'moonshot' && isResearchQuery;
-      const webSearchEnabled = provider === 'zai' && isResearchQuery;
+      const kimiSearchEnabled = provider === 'moonshot';
+      const webSearchEnabled = provider === 'zai';
 
       const t0 = Date.now();
-      console.log(`${trace}[chapo-loop] LLM call #${this.iteration} starting (${provider}/${model}, ${tools.length}/${allTools.length} tools, thinking=${thinkingEnabled}${kimiSearchEnabled ? ', kimi-search' : ''}${webSearchEnabled ? ', glm-web-search' : ''})`);
+      console.log(`${trace}[chapo-loop] LLM call #${this.iteration} starting (${provider}/${model}, ${tools.length}/${allTools.length} tools)`);
       // On the first iteration, force the model to use at least one tool
       // instead of narrating what it would do.
       const toolChoice = this.iteration === 0 ? 'required' as const : 'auto' as const;
@@ -329,7 +307,7 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
           toolsEnabled: true,
           toolChoice,
           sameProviderFallbacks,
-          thinkingEnabled,
+          thinkingEnabled: true,
           kimiSearchEnabled,
           webSearchEnabled,
         })

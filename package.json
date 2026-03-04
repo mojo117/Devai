@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@fastify/multipart": "^9.4.0",
-    "@google/generative-ai": "^0.24.1",
+    "@google/genai": "^1.43.0",
     "croner": "^10.0.1",
     "mammoth": "^1.11.0",
     "minimatch": "^10.2.1",
