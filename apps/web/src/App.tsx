@@ -302,23 +302,27 @@ function App() {
 
   // Auto-refresh preview when a displayed file is modified by fs_edit/fs_writeFile
   const handleFileModified = useCallback((filePath: string) => {
+    const fileName = filePath.split('/').pop() || '';
+
+    // Check synchronously if current artifact matches; if not, bail early.
+    let shouldFetch = false;
     setCurrentArtifact((prev) => {
-      if (!prev) return prev;
-      const fileName = filePath.split('/').pop() || '';
-      if (prev.title !== fileName) return prev;
-      // Trigger content re-fetch by clearing content (effect in detectedArtifact will handle it)
-      // For inline-content artifacts (show_in_preview), we fetch directly
-      readProjectFile(filePath)
-        .then((res) => {
-          setCurrentArtifact((cur) =>
-            cur && cur.title === fileName
-              ? { ...cur, content: res.content, id: cur.id + '_' + Date.now() }
-              : cur,
-          );
-        })
-        .catch((err) => console.warn('[App] Failed to refresh preview after file edit:', err));
-      return prev;
+      if (prev && prev.title === fileName) shouldFetch = true;
+      return prev; // No state change — just a read
     });
+
+    if (!shouldFetch) return;
+
+    // Fetch updated content outside the state updater (avoids React anti-pattern)
+    readProjectFile(filePath)
+      .then((res) => {
+        setCurrentArtifact((cur) =>
+          cur && cur.title === fileName
+            ? { ...cur, content: res.content, id: cur.id + '_' + Date.now() }
+            : cur,
+        );
+      })
+      .catch((err) => console.warn('[App] Failed to refresh preview after file edit:', err));
   }, []);
 
   // Fetch health when authenticated (retry silently on failure — the ●/○ indicator shows status)
