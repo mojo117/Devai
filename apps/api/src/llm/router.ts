@@ -163,7 +163,7 @@ export class LLMRouter {
     preferredProvider: LLMProvider,
     request: GenerateRequest,
     fallbackProviders?: LLMProvider[]
-  ): Promise<GenerateResponse & { usedProvider: LLMProvider }> {
+  ): Promise<GenerateResponse & { usedProvider: LLMProvider; usedModel: string }> {
     const providers = [preferredProvider, ...(fallbackProviders || DEFAULT_FALLBACK_CHAIN)];
     // Remove duplicates while preserving order
     const uniqueProviders = [...new Set(providers)];
@@ -193,7 +193,7 @@ export class LLMRouter {
       try {
         const response = await this.generateWithRetry(providerName, adjustedRequest);
         errorTracker.recordSuccess(providerName);
-        return { ...response, usedProvider: providerName };
+        return { ...response, usedProvider: providerName, usedModel: adjustedRequest.model || originalModel || 'unknown' };
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         errors.push({ provider: providerName, error: errorMsg });
@@ -210,7 +210,7 @@ export class LLMRouter {
             const response = await this.generateWithRetry(providerName, { ...request, model: altModel });
             errorTracker.recordSuccess(providerName);
             recovered = true;
-            return { ...response, usedProvider: providerName };
+            return { ...response, usedProvider: providerName, usedModel: altModel };
           } catch (fallbackErr) {
             const fbMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
             console.warn(`[llm] Same-provider fallback ${altModel} on ${providerName} also failed:`, fbMsg);
