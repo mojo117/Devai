@@ -2,13 +2,11 @@ import { Fragment, useState, type RefObject } from 'react';
 import type { ChatMessage, SessionSummary } from '../../types';
 import type { ToolEvent } from './types';
 import { VisualProofCard } from './VisualProofCard';
-import { mergeConsecutiveThinking } from './mergeEvents';
+import { ActivityStepper } from './ActivityStepper';
+import { groupToolEvents } from './mergeEvents';
 import { renderMessageContent } from './utils';
 import { getUserfileDownloadUrl } from '../../api';
 
-const AGENT_DOT_COLORS: Record<string, string> = {
-  chapo: 'bg-cyan-400',
-};
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -30,29 +28,6 @@ interface MessageListProps {
   debugMode?: boolean;
 }
 
-interface DecisionPathPayload {
-  path?: string;
-  reason?: string;
-  confidence?: number;
-  unresolvedAssumptions?: string[];
-}
-
-function readDecisionPayload(event: ToolEvent): DecisionPathPayload | null {
-  if (event.type !== 'tool_result' || event.name !== 'decision_path') return null;
-  if (!event.result || typeof event.result !== 'object' || Array.isArray(event.result)) return null;
-  return event.result as DecisionPathPayload;
-}
-
-function formatDecisionPath(path?: string): string {
-  switch (path) {
-    case 'answer':
-      return 'Direct Answer';
-    case 'tool':
-      return 'Direct Tool Use';
-    default:
-      return 'Decision';
-  }
-}
 
 export function MessageList({
   messages,
@@ -74,45 +49,46 @@ export function MessageList({
   debugMode,
 }: MessageListProps) {
   const renderToolEventsBlock = (events: ToolEvent[], live: boolean) => {
-    const merged = mergeConsecutiveThinking(events);
+    // Extract visual proofs and document deliveries first
+    const specialCards: JSX.Element[] = [];
+    const regularEvents: ToolEvent[] = [];
+
+    for (const event of events) {
+      const visualProof = getVisualProofPayload(event);
+      if (visualProof) {
+        specialCards.push(
+          <VisualProofCard
+            key={event.id}
+            imageUrl={visualProof.imageUrl}
+            caption={visualProof.caption}
+            sourceUrl={visualProof.sourceUrl}
+          />
+        );
+        continue;
+      }
+      const doc = getDocumentDelivery(event);
+      if (doc) {
+        specialCards.push(
+          <DocumentDownloadCard
+            key={event.id}
+            fileId={doc.fileId}
+            filename={doc.filename}
+            sizeBytes={doc.sizeBytes}
+            mimeType={doc.mimeType}
+            description={doc.description}
+          />
+        );
+        continue;
+      }
+      regularEvents.push(event);
+    }
+
+    const steps = groupToolEvents(regularEvents, live);
+
     return (
       <div className="space-y-1.5">
-        {merged.map((event) => {
-          const visualProof = getVisualProofPayload(event);
-          if (visualProof) {
-            return (
-              <VisualProofCard
-                key={event.id}
-                imageUrl={visualProof.imageUrl}
-                caption={visualProof.caption}
-                sourceUrl={visualProof.sourceUrl}
-              />
-            );
-          }
-          const doc = getDocumentDelivery(event);
-          if (doc) {
-            return (
-              <DocumentDownloadCard
-                key={event.id}
-                fileId={doc.fileId}
-                filename={doc.filename}
-                sizeBytes={doc.sizeBytes}
-                mimeType={doc.mimeType}
-                description={doc.description}
-              />
-            );
-          }
-          return (
-            <InlineSystemEvent
-              key={event.id}
-              event={event}
-              mergedCount={event.mergedCount}
-              isExpanded={expandedEvents.has(event.id)}
-              onToggle={() => toggleEventExpanded(event.id)}
-              isLoading={live}
-            />
-          );
-        })}
+        {specialCards}
+        {steps.length > 0 && <ActivityStepper steps={steps} live={live} />}
       </div>
     );
   };
@@ -398,83 +374,3 @@ function DocumentDownloadCard({ fileId, filename, sizeBytes, mimeType, descripti
   );
 }
 
-/** Inline System Event — compact left-aligned badge with inline detail */
-function InlineSystemEvent({
-  event,
-  mergedCount,
-  isExpanded,
-  onToggle,
-  isLoading,
-}: {
-  event: ToolEvent;
-  mergedCount?: number;
-  isExpanded: boolean;
-  onToggle: () => void;
-  isLoading: boolean;
-}) {
-  const decision = readDecisionPayload(event);
-
-  const getEventLabel = () => {
-    const agentPrefix = event.agent ? `${event.agent.toUpperCase()}: ` : '';
-    if (decision) {
-      return `${agentPrefix}${formatDecisionPath(decision.path)}`;
-    }
-    if (event.type === 'thinking') {
-      const countSuffix = mergedCount && mergedCount > 1 ? ` (${mergedCount}x)` : '';
-      return `${agentPrefix}Thinking${countSuffix}`;
-    }
-    if (event.type === 'status') return `${agentPrefix}${String(event.result || 'Status')}`;
-    if (event.type === 'tool_call') return `${agentPrefix}Using: ${event.name || 'tool'}`;
-    if (event.type === 'tool_result') return `${agentPrefix}Result: ${event.name || 'tool'}`;
-    return `${agentPrefix}${event.type}`;
-  };
-
-  const getEventColor = () => {
-    if (decision) return 'border-amber-500/30 bg-amber-500/5 text-amber-300';
-    if (event.type === 'thinking') return 'border-cyan-500/30 bg-cyan-500/5 text-cyan-400';
-    if (event.type === 'tool_call') return 'border-devai-accent/30 bg-devai-accent/5 text-devai-accent';
-    if (event.type === 'tool_result') return 'border-emerald-500/30 bg-emerald-500/5 text-emerald-400';
-    return 'border-devai-border bg-devai-surface/50 text-devai-text-secondary';
-  };
-
-  const getInlineDetail = (): string => {
-    if (decision) {
-      const reason = decision.reason || 'no explicit reason';
-      return reason.length > 220 ? `${reason.slice(0, 220)}...` : reason;
-    }
-    const payload = event.type === 'tool_call' ? event.arguments : event.result;
-    if (!payload) return '';
-    const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
-    return text.length > 150 ? text.slice(0, 150) + '\u2026' : text;
-  };
-
-  const hasContent = Boolean(event.arguments || event.result);
-  const detail = isExpanded ? getInlineDetail() : '';
-
-  return (
-    <div className="flex justify-start">
-      <button
-        onClick={hasContent ? onToggle : undefined}
-        className={`inline-flex items-center gap-2 rounded-lg border text-xs px-3 py-1.5 max-w-[80%] ${getEventColor()} ${hasContent ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
-      >
-        {event.agent && (
-          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${AGENT_DOT_COLORS[event.agent] || 'bg-gray-400'}`} />
-        )}
-        {event.type === 'thinking' && (
-          <span className={`w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 ${isLoading ? 'animate-pulse' : ''}`} />
-        )}
-        {event.type === 'tool_call' && <span className="text-[10px] shrink-0">&#9654;</span>}
-        {event.type === 'tool_result' && <span className="text-[10px] shrink-0">&#9664;</span>}
-        <span className="font-mono text-[11px] whitespace-nowrap select-text">{getEventLabel()}</span>
-        {detail && (
-          <span className="text-[10px] text-devai-text-secondary font-mono truncate min-w-0 select-text">
-            _ {detail}
-          </span>
-        )}
-        {hasContent && (
-          <span className="text-[10px] opacity-60 shrink-0">{isExpanded ? '\u25B2' : '\u25BC'}</span>
-        )}
-      </button>
-    </div>
-  );
-}
