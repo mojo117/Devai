@@ -155,3 +155,17 @@ body {
 .animate-slide-in-right {
   animation: slide-in-right 200ms ease-out;
 }
+
+/* Activity Stepper animations */
+@keyframes stepper-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.animate-stepper-pulse {
+  animation: stepper-pulse 1.5s ease-in-out infinite;
+}
+
+.thinking-fade {
+  mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+}
