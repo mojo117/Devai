@@ -1,4 +1,4 @@
-import { getMessages } from '../../db/queries.js';
+import { getMessages, getSessionSummary } from '../../db/queries.js';
 import * as stateManager from '../stateManager.js';
 import { buildConversationHistoryContext } from '../conversationHistory.js';
 import { buildToolResultContent } from '../utils.js';
@@ -53,8 +53,14 @@ export function extractExplicitRememberNote(text: string): { note: string } | nu
 }
 
 export async function loadRecentConversationHistory(sessionId: string): Promise<Array<{ role: string; content: string }>> {
-  const messages = await getMessages(sessionId);
-  return buildConversationHistoryContext(messages);
+  const [messages, summaryData] = await Promise.all([
+    getMessages(sessionId),
+    getSessionSummary(sessionId),
+  ]);
+  return buildConversationHistoryContext(messages, {
+    persistedSummary: summaryData.summary,
+    messageCountAtSummary: summaryData.messageCountAtSummary,
+  });
 }
 
 export function formatConversationHistoryForScout(

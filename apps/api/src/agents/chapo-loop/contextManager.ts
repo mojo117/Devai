@@ -1,4 +1,5 @@
 import { compactMessages } from '../../memory/compaction.js';
+import { saveSessionSummary } from '../../db/sessionQueries.js';
 import type { ConversationManager } from '../conversation-manager.js';
 import type { AgentStreamEvent } from '../types.js';
 import { getOtherLoopContexts } from '../stateManager.js';
@@ -72,6 +73,15 @@ export class ChapoLoopContextManager {
       agent: 'chapo',
       status: `Context kompaktiert: ${result.droppedTokens} → ${result.summaryTokens} Tokens`,
     });
+
+    // Persist summary to DB so resumed sessions can use it
+    saveSessionSummary(
+      this.sessionId,
+      result.summary,
+      compactCount,
+    ).catch((err) =>
+      console.error('[context-manager] Failed to persist compaction summary:', err),
+    );
   }
 
   /**

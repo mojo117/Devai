@@ -16,6 +16,8 @@ export interface ConversationContextOptions {
   recentLimit?: number;
   summaryMaxItems?: number;
   summaryItemMaxChars?: number;
+  persistedSummary?: string | null;
+  messageCountAtSummary?: number | null;
 }
 
 const DEFAULT_RECENT_LIMIT = 30;
@@ -93,6 +95,15 @@ export function buildConversationHistoryContext(
 
   if (cleaned.length <= recentLimit) {
     return cleaned.map((m) => ({ role: m.role, content: m.content }));
+  }
+
+  // Prefer LLM-generated persisted summary over crude sampling
+  if (options?.persistedSummary) {
+    const recent = cleaned.slice(-recentLimit).map((m) => ({ role: m.role, content: m.content }));
+    return [
+      { role: 'system', content: `[Kompaktierte Session-Zusammenfassung]\n${options.persistedSummary}` },
+      ...recent,
+    ];
   }
 
   const older = cleaned.slice(0, -recentLimit);
