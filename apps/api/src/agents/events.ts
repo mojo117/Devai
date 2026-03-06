@@ -68,6 +68,7 @@ export const AgentEvents = {
     type: 'agent_thinking' as const,
     agent,
     status,
+    createdAt: Date.now(),
   }),
 
   /** Agent response (streaming or final) */
@@ -123,6 +124,7 @@ export const ToolEvents = {
     toolName,
     args,
     toolId: toolId ?? nanoid(8),
+    createdAt: Date.now(),
   }),
 
   /** Tool call completed */
@@ -141,6 +143,8 @@ export const ToolEvents = {
     result,
     success,
     toolId,
+    createdAt: Date.now(),
+    completedAt: Date.now(),
   }),
 
   /** Tool requires user approval */

@@ -10,6 +10,8 @@ export interface ToolEvent {
   result?: unknown;
   completed?: boolean;
   agent?: AgentName | string;
+  createdAt?: number;
+  completedAt?: number;
 }
 
 export interface ChatSessionState {
@@ -38,6 +40,20 @@ export interface ToolEventUpdate {
   completed?: boolean;
   chunk?: string;
   agent?: AgentName | string;
+}
+
+export interface StepperStep {
+  id: string;
+  type: 'thinking' | 'tool_group' | 'status';
+  label: string;
+  activeLabel?: string;
+  toolName?: string;
+  status: 'pending' | 'active' | 'completed';
+  duration?: number;
+  thinkingText?: string;
+  detail?: string;
+  count?: number;
+  events: ToolEvent[];
 }
 
 export interface ChatUIProps {
