@@ -166,3 +166,46 @@ export async function getRecentFailedSessions(
     updated_at: row.updated_at as string,
   }))
 }
+
+export interface SessionSummaryData {
+  summary: string | null;
+  summaryUpdatedAt: string | null;
+  messageCountAtSummary: number | null;
+}
+
+export async function saveSessionSummary(
+  sessionId: string,
+  summary: string,
+  messageCountAtSummary: number,
+): Promise<void> {
+  const { error } = await getSupabase()
+    .from('sessions')
+    .update({
+      summary,
+      summary_updated_at: new Date().toISOString(),
+      message_count_at_summary: messageCountAtSummary,
+    })
+    .eq('id', sessionId);
+
+  if (error) {
+    console.error('[db] Failed to save session summary:', error);
+  }
+}
+
+export async function getSessionSummary(sessionId: string): Promise<SessionSummaryData> {
+  const { data, error } = await getSupabase()
+    .from('sessions')
+    .select('summary, summary_updated_at, message_count_at_summary')
+    .eq('id', sessionId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return { summary: null, summaryUpdatedAt: null, messageCountAtSummary: null };
+  }
+
+  return {
+    summary: data.summary ?? null,
+    summaryUpdatedAt: data.summary_updated_at ?? null,
+    messageCountAtSummary: data.message_count_at_summary ?? null,
+  };
+}
