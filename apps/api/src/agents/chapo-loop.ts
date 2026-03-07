@@ -316,6 +316,15 @@ You are Chapo in the decision loop. Execute ALL tasks directly using available t
       const llmDuration = Date.now() - t0;
       console.log(`${trace}[chapo-loop] LLM call #${this.iteration} completed in ${llmDuration}ms, err=${err?.message || 'none'}, content=${response?.content?.slice(0, 100) || 'null'}, toolCalls=${response?.toolCalls?.length || 0}`);
 
+      // Stream actual LLM reasoning to frontend (if model returned it)
+      if (response?.reasoning) {
+        this.sendEvent({
+          type: 'agent_thinking',
+          agent: 'chapo',
+          status: response.reasoning,
+        });
+      }
+
       if (response?.usage) {
         this.totalTokensUsed += response.usage.inputTokens + response.usage.outputTokens;
       }

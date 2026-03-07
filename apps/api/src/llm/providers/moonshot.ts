@@ -109,6 +109,7 @@ export class MoonshotProvider implements LLMProviderAdapter {
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       finishReason: choice.finish_reason === 'tool_calls' ? 'tool_use' :
                     choice.finish_reason === 'length' ? 'max_tokens' : 'stop',
+      reasoning: reasoningContent || undefined,
       usage: response.usage ? {
         inputTokens: response.usage.prompt_tokens,
         outputTokens: response.usage.completion_tokens,
