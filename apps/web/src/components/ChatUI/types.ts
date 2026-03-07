@@ -25,7 +25,8 @@ export type ChatSessionCommand =
   | { type: 'select'; sessionId: string }
   | { type: 'new' }
   | { type: 'restart' }
-  | { type: 'delete' };
+  | { type: 'delete' }
+  | { type: 'rename'; sessionId: string; title: string };
 
 export interface ChatSessionCommandEnvelope {
   nonce: number;

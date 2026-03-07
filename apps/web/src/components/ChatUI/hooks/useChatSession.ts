@@ -144,9 +144,9 @@ export function useChatSession({
     try {
       if (sessionId) {
         const currentSession = sessions.find((s) => s.id === sessionId);
-        const currentTitle = currentSession?.title || 'Untitled';
-        const timestamp = new Date().toLocaleString();
-        await updateSessionTitle(sessionId, `[Restarted ${timestamp}] ${currentTitle}`);
+        const baseTitle = (currentSession?.title || 'Untitled').replace(/^\[Restarted[^\]]*\]\s*/g, '');
+        const timestamp = new Date().toLocaleTimeString();
+        await updateSessionTitle(sessionId, `${baseTitle} [${timestamp}]`);
       }
       // Reset to blank — session will be created when first message is sent
       setSessionId(null);
@@ -183,6 +183,11 @@ export function useChatSession({
     }
   }, [sessionId, refreshSessions, setSessionId, setMessages, setToolEvents, onClearPinnedUserfiles]);
 
+  const refreshSessionList = useCallback(async () => {
+    const sessionList = await fetchSessions();
+    setSessions(sessionList.sessions);
+  }, []);
+
   // Accept session commands from the global header
   const lastSessionCommandNonceRef = useRef<number>(0);
   useEffect(() => {
@@ -199,13 +204,17 @@ export function useChatSession({
       void handleRestartChat();
     } else if (cmd.type === 'delete') {
       void handleDeleteSession();
+    } else if (cmd.type === 'rename') {
+      void (async () => {
+        try {
+          await updateSessionTitle(cmd.sessionId, cmd.title);
+          await refreshSessionList();
+        } catch {
+          // Ignore rename errors
+        }
+      })();
     }
-  }, [sessionCommand, handleSelectSession, handleNewChat, handleRestartChat, handleDeleteSession]);
-
-  const refreshSessionList = useCallback(async () => {
-    const sessionList = await fetchSessions();
-    setSessions(sessionList.sessions);
-  }, []);
+  }, [sessionCommand, handleSelectSession, handleNewChat, handleRestartChat, handleDeleteSession, refreshSessionList]);
 
   return {
     sessionId,
