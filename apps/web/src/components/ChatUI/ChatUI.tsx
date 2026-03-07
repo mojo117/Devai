@@ -407,6 +407,11 @@ export function ChatUI({
         setCurrentTodos(event.todos || []);
         break;
       }
+      case 'session_title_updated': {
+        // AI-generated title arrived — refresh the session list so the UI updates live
+        session.refreshSessionList().catch(() => {});
+        break;
+      }
     }
   };
 

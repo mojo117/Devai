@@ -175,7 +175,7 @@ export function MessageList({
               )}
               {sessions.map((session) => (
                 <option key={session.id} value={session.id}>
-                  {session.title ? session.title : session.id.slice(0, 8)}
+                  {session.title || 'New session'}
                 </option>
               ))}
             </select>

@@ -26,7 +26,6 @@ import {
   ensureSessionExists,
   getMessages,
   saveMessage,
-  updateSessionTitleIfEmpty,
 } from '../../db/queries.js';
 import {
   ensureStateLoaded,
@@ -42,6 +41,7 @@ import {
 import { config } from '../../config.js';
 import type { ChatMessage } from '@devai/shared';
 import { buildUserfileContext } from '../../services/userfileContext.js';
+import { generateSessionTitle } from '../../services/titleService.js';
 import type { ContentBlock, TextContentBlock } from '../../llm/types.js';
 import { buildConversationHistoryContext } from '../../agents/conversationHistory.js';
 import { createCollectingBridge, persistAndEmitTerminalResponse, type CollectedToolEvent } from './eventBridge.js';
@@ -120,8 +120,7 @@ export class CommandHandlers {
     }
 
     const activeSessionId = command.sessionId || (await createSession()).id;
-    const initialTitle = buildSessionTitle(message) || undefined;
-    await ensureSessionExists(activeSessionId, initialTitle);
+    await ensureSessionExists(activeSessionId);
     opts.joinSession(activeSessionId);
     await ensureStateLoaded(activeSessionId);
     const stateSnapshot = getState(activeSessionId);
@@ -376,10 +375,8 @@ export class CommandHandlers {
         skipUserMessage: true,
       });
 
-      const title = buildSessionTitle(message);
-      if (title) {
-        await updateSessionTitleIfEmpty(activeSessionId, title);
-      }
+      // Fire-and-forget AI title generation (rate-limited, only if title is still empty)
+      generateSessionTitle(activeSessionId).catch(() => {});
       sessionLogger.finalize('completed');
 
       // Process queued messages sequentially (simple queue model)
@@ -442,10 +439,8 @@ export class CommandHandlers {
         isError: true,
       });
 
-      const title = buildSessionTitle(message);
-      if (title) {
-        await updateSessionTitleIfEmpty(activeSessionId, title);
-      }
+      // Fire-and-forget AI title generation even on error (rate-limited)
+      generateSessionTitle(activeSessionId).catch(() => {});
       sessionLogger.finalize('error');
 
       return { type: 'error', sessionId: activeSessionId, responseMessage };

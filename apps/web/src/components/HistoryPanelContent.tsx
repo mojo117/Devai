@@ -2,6 +2,21 @@ import { useEffect, useState } from 'react';
 import { fetchSessions, fetchSessionMessages } from '../api';
 import type { ChatMessage, SessionSummary } from '../types';
 
+function formatRelativeDate(dateStr: string): string {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffDays = Math.floor(diffMs / 86_400_000);
+
+  if (diffDays === 0 && d.getDate() === now.getDate()) return 'Today';
+  if (diffDays <= 1 && d.getDate() === now.getDate() - 1) return 'Yesterday';
+
+  const day = d.getDate().toString().padStart(2, '0');
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  if (d.getFullYear() !== now.getFullYear()) return `${day} ${months[d.getMonth()]} ${d.getFullYear()}`;
+  return `${day} ${months[d.getMonth()]}`;
+}
+
 export function HistoryPanelContent() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -86,10 +101,10 @@ export function HistoryPanelContent() {
             }`}
           >
             <div className="font-semibold">
-              {session.title ? session.title : session.id.slice(0, 8)}
+              {session.title || 'New session'}
             </div>
             <div className="text-[10px] text-devai-text-muted">
-              {new Date(session.lastUsedAt).toLocaleString()}
+              {formatRelativeDate(session.lastUsedAt)}
             </div>
           </button>
         ))}
